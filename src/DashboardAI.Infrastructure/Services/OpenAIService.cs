@@ -126,11 +126,17 @@ namespace DashboardAI.Infrastructure.Services
                 throw new HttpRequestException($"OpenAI Responses API error {(int)response.StatusCode}: {json}");
 
             var parsed  = JObject.Parse(json);
-            // Responses API shape: output[0].content[0].text
-            var content = parsed["output"]?[0]?["content"]?[0]?["text"]?.ToString();
+
+            // output[] may contain a reasoning block before the message block.
+            // Find the first item with type == "message".
+            var outputArray = parsed["output"] as JArray;
+            var messageItem = outputArray?
+                .FirstOrDefault(o => o["type"]?.ToString() == "message");
+            var content = messageItem?["content"]?[0]?["text"]?.ToString();
 
             if (string.IsNullOrWhiteSpace(content))
-                throw new InvalidOperationException("OpenAI Responses API returned empty content.");
+                throw new InvalidOperationException(
+                    $"OpenAI Responses API returned empty content. Raw response: {json}");
 
             content = content.Trim();
             if (content.StartsWith("```json")) content = content.Substring(7);
