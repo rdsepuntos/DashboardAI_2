@@ -19,17 +19,23 @@ namespace DashboardAI.Infrastructure.Services
 
         private readonly HttpClient _http;
         private readonly string _apiKey;
+        private readonly string _generatePromptId;
+        private readonly string _chatPromptId;
         private readonly string _generateAssistantId;
         private readonly string _chatAssistantId;
 
         public OpenAIService(
             HttpClient http,
             string apiKey,
+            string generatePromptId    = null,
+            string chatPromptId        = null,
             string generateAssistantId = null,
             string chatAssistantId     = null)
         {
             _http                = http   ?? throw new ArgumentNullException(nameof(http));
             _apiKey              = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
+            _generatePromptId    = generatePromptId;
+            _chatPromptId        = chatPromptId;
             _generateAssistantId = generateAssistantId;
             _chatAssistantId     = chatAssistantId;
         }
@@ -45,7 +51,24 @@ namespace DashboardAI.Infrastructure.Services
             string currentDateIso)
         {
             string raw;
-            if (!string.IsNullOrEmpty(_generateAssistantId))
+            if (!string.IsNullOrEmpty(_generatePromptId))
+            {
+                var dsList = availableDataSources.ToList();
+                var variables = new Dictionary<string, string>
+                {
+                    ["iso_date"]         = currentDateIso,
+                    ["store_id"]         = storeId.ToString(),
+                    ["user_id"]          = userId,
+                    ["data_sources_json"]= JsonConvert.SerializeObject(dsList, Formatting.Indented),
+                    ["user_request"]     = userPrompt,
+                    ["guid"]             = Guid.NewGuid().ToString(),
+                    ["dashboard_title"]  = "",
+                    ["datasource_name"]  = dsList.FirstOrDefault()?.Name ?? "",
+                    ["column_name"]      = dsList.FirstOrDefault()?.Columns?.FirstOrDefault()?.Name ?? ""
+                };
+                raw = await CallOpenAIResponsesAsync(_generatePromptId, variables);
+            }
+            else if (!string.IsNullOrEmpty(_generateAssistantId))
             {
                 var userMsg = BuildGenerateUserMessage(availableDataSources, currentDateIso, storeId, userId, userPrompt);
                 raw = await CallOpenAIAssistantAsync(_generateAssistantId, userMsg);
@@ -83,7 +106,18 @@ namespace DashboardAI.Infrastructure.Services
             string currentDateIso)
         {
             string raw;
-            if (!string.IsNullOrEmpty(_chatAssistantId))
+            if (!string.IsNullOrEmpty(_chatPromptId))
+            {
+                var variables = new Dictionary<string, string>
+                {
+                    ["iso_date"]               = currentDateIso,
+                    ["current_dashboard_json"] = JsonConvert.SerializeObject(currentDashboard, Formatting.Indented),
+                    ["data_sources_json"]      = JsonConvert.SerializeObject(availableDataSources, Formatting.Indented),
+                    ["user_message"]           = userMessage
+                };
+                raw = await CallOpenAIResponsesAsync(_chatPromptId, variables);
+            }
+            else if (!string.IsNullOrEmpty(_chatAssistantId))
             {
                 string context = BuildChatUserMessage(userMessage, currentDashboard, availableDataSources, currentDateIso);
                 raw = await CallOpenAIAssistantAsync(_chatAssistantId, context);
@@ -148,6 +182,52 @@ namespace DashboardAI.Infrastructure.Services
         // ─────────────────────────────────────────────────────────────────────
         //  OpenAI Assistants API  (used when AssistantId is configured)
         // ─────────────────────────────────────────────────────────────────────
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  OpenAI Responses API  (stored prompt with variables)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private async Task<string> CallOpenAIResponsesAsync(
+            string promptId,
+            Dictionary<string, string> variables)
+        {
+            var body = new
+            {
+                prompt = new
+                {
+                    id        = promptId,
+                    version   = "1",
+                    variables = variables
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/responses")
+            {
+                Content = new StringContent(
+                    JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+            var response = await _http.SendAsync(request);
+            var json     = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"OpenAI Responses API error {(int)response.StatusCode}: {json}");
+
+            var parsed  = JObject.Parse(json);
+            // Responses API shape: output[0].content[0].text
+            var content = parsed["output"]?[0]?["content"]?[0]?["text"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                throw new InvalidOperationException("OpenAI Responses API returned empty content.");
+
+            content = content.Trim();
+            if (content.StartsWith("```json")) content = content.Substring(7);
+            if (content.StartsWith("```"))     content = content.Substring(3);
+            if (content.EndsWith("```"))       content = content.Substring(0, content.Length - 3);
+
+            return content.Trim();
+        }
 
         private HttpRequestMessage AssistantRequest(HttpMethod method, string endpoint, object body = null)
         {

@@ -21,6 +21,8 @@ namespace DashboardAI.Infrastructure
         {
             var connString           = configuration.GetConnectionString("DefaultConnection");
             var openAiKey            = configuration["OpenAI:ApiKey"];
+            var generatePromptId     = configuration["OpenAI:GeneratePromptId"];
+            var chatPromptId         = configuration["OpenAI:ChatPromptId"];
             var generateAssistantId  = configuration["OpenAI:GenerateAssistantId"];
             var chatAssistantId      = configuration["OpenAI:ChatAssistantId"];
 
@@ -47,6 +49,8 @@ namespace DashboardAI.Infrastructure
             services.AddSingleton<IOpenAIService>(_ => new OpenAIService(
                 new HttpClient(),
                 openAiKey,
+                generatePromptId,
+                chatPromptId,
                 generateAssistantId,
                 chatAssistantId));
 
