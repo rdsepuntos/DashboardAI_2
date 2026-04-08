@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using DashboardAI.Application.UseCases.QueryWidgetData;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace DashboardAI.API.Controllers
 {
@@ -11,6 +13,14 @@ namespace DashboardAI.API.Controllers
     public class WidgetDataController : ControllerBase
     {
         private readonly QueryWidgetDataHandler _handler;
+
+        // Preserve original SQL column name casing — the global camelCase resolver
+        // would turn "HazardType" into "hazardType", breaking widget config key lookups.
+        private static readonly JsonSerializerSettings _rawCasingSettings = new JsonSerializerSettings
+        {
+            ContractResolver  = new DefaultContractResolver(),
+            NullValueHandling = NullValueHandling.Ignore
+        };
 
         public WidgetDataController(QueryWidgetDataHandler handler)
             => _handler = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -34,7 +44,7 @@ namespace DashboardAI.API.Controllers
                     StoreId    = request.StoreId
                 });
 
-                return Ok(data);
+                return new JsonResult(data, _rawCasingSettings);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
             catch (Exception ex)                 { return StatusCode(500, new { error = ex.Message }); }
@@ -63,7 +73,17 @@ namespace DashboardAI.API.Controllers
                     PageSize   = request.PageSize > 0 ? request.PageSize : 50
                 });
 
-                return Ok(result);
+                // Wrap with explicit lowercase property names so DefaultContractResolver
+                // preserves them AND preserves original SQL column casing in the row data.
+                var payload = new
+                {
+                    data       = result.Data,
+                    totalCount = result.TotalCount,
+                    page       = result.Page,
+                    pageSize   = result.PageSize,
+                    totalPages = result.TotalPages
+                };
+                return new JsonResult(payload, _rawCasingSettings);
             }
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
             catch (Exception ex)                 { return StatusCode(500, new { error = ex.Message }); }

@@ -12,7 +12,7 @@ Use the data sources and request to generate a complete dashboard JSON.
 === OUTPUT SCHEMA ===
 {
   "id": "{{guid}}",
-  "title": "{{dashboard_title}}",
+  "title": "<short descriptive title generated from the user request — do NOT copy {{dashboard_title}} literally>",
   "storeId": {{store_id}},
   "userId": "{{user_id}}",
   "originalPrompt": "{{user_request}}",
@@ -44,8 +44,10 @@ Look at the title to pick xKey. Match the "by [X]" phrase to the column name fro
 
 For aggregation:
   - Default to aggregation="count" (count records per group, no yKey needed)
-  - Use aggregation="avg" + yKey="Score" only when title mentions "score" or "risk"
+  - Use aggregation="avg" + yKey="Score" ONLY when title mentions "score" or "risk"
+    AND "Score" exists in the dataSource columns list
   - Use aggregation="sum" + yKey when title mentions "total [numeric column]"
+    AND that column exists in the dataSource columns list
 
 WRONG:  "config": {}
 RIGHT:  "config": { "xKey": "HazardType", "aggregation": "count" }
@@ -55,8 +57,11 @@ RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
 
 --- KPI: config MUST contain valueKey ---
   "Total [records]"    => valueKey = "count", format = "number"
-  "Average/Avg Score"  => valueKey = "Score",  format = "number"
+  "Average/Avg Score"  => valueKey = "Score",  format = "number"  (ONLY if Score exists in columns)
   "Open [records]"     => valueKey = "count",  format = "number"
+
+  For any KPI that counts records use valueKey = "count".
+  For any KPI that needs a real column ensure that column is in the dataSource columns list.
 
 WRONG:  "config": {}
 RIGHT:  "config": { "valueKey": "count", "format": "number" }
@@ -75,9 +80,14 @@ RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }
 
 FILTER SCHEMA:
 { "id": "f1", "type": "dropdown|daterange|datepicker|text",
-  "label": "...", "param": "...", "optionsSource": "{{datasource_name}}",
-  "valueKey": "{{column_name}}", "labelKey": "{{column_name}}",
+  "label": "...", "param": "<must match a SupportedParam or column name>",
+  "optionsSource": "<dataSource name>",
+  "valueKey": "<column name from that dataSource>",
+  "labelKey": "<column name from that dataSource>",
   "isLocked": false, "defaultValue": "" }
+
+For dropdown filters: optionsSource, valueKey, and labelKey MUST reference a real column
+that exists in the chosen dataSource columns list.
 
 appliesFilters: list the filter IDs that apply to this widget (all non-locked filters by default).
 
@@ -92,7 +102,13 @@ POSITION RULES (12-column grid, no overlaps):
 1. Always include a locked StoreId filter:
    { "id": "f_store", "type": "dropdown", "label": "Store", "param": "StoreId", "isLocked": true, "defaultValue": "" }
 2. config is NEVER an empty object {} for chart, kpi, or table widgets.
-3. xKey must ALWAYS be a column that exists in the AVAILABLE DATA SOURCES columns list.
-4. Never use ID columns (InternalNo, RegOthID, HazardTemplateId) as xKey or valueKey.
-5. appliesFilters for every widget must list ALL non-locked filter IDs.
-6. Return ONLY valid JSON. No markdown code fences, no explanation.
+3. STRICT COLUMN RULE — every column name you use in config (xKey, yKey, valueKey,
+   columns list, valueKey/labelKey in filters) MUST appear in the "columns" array
+   of the dataSource you selected from AVAILABLE DATA SOURCES.
+   If a column does not exist in that list, do NOT use it.
+   The only exception is the magic valueKey "count" (counts rows, not a real column).
+4. dataSource MUST be the exact Name of a data source from AVAILABLE DATA SOURCES.
+   Never invent a dataSource name.
+5. Never use ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID) as xKey or valueKey.
+6. appliesFilters for every widget must list ALL non-locked filter IDs.
+7. Return ONLY valid JSON. No markdown code fences, no explanation.

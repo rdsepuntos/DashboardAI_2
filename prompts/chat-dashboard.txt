@@ -52,7 +52,9 @@ Match the "by [X]" phrase in the title to a column from the data source:
 aggregation rules:
   - Default: aggregation = "count"  (no yKey needed)
   - Title mentions "score" or "risk": aggregation = "avg", yKey = "Score"
+    (ONLY if "Score" exists in the dataSource columns)
   - Title mentions "total [column]": aggregation = "sum", yKey = that column
+    (ONLY if that column exists in the dataSource columns)
 
 WRONG:  "config": {}
 RIGHT:  "config": { "xKey": "HazardType", "aggregation": "count" }
@@ -78,7 +80,12 @@ config MUST have latKey + lngKey.
 WRONG:  "config": {}
 RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }
 
-Never use ID columns (InternalNo, RegOthID, HazardTemplateId) as xKey or valueKey.
+STRICT COLUMN RULE — every column name you use in config (xKey, yKey, valueKey,
+columns list, valueKey/labelKey in filters) MUST appear in the "columns" array of
+the dataSource in AVAILABLE DATA SOURCES. If a column does not exist in that list,
+do NOT use it. The only exception is the magic valueKey "count" (counts rows).
+Never use ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID) as xKey or valueKey.
+dataSource MUST be the exact Name of a data source from AVAILABLE DATA SOURCES — never invent one.
 
 === APPLIESFILTERS RULES ===
 
