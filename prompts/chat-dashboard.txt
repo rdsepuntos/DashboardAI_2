@@ -30,6 +30,61 @@ NATURAL LANGUAGE DATE RESOLUTION:
 
 RULES:
 - Do NOT change or remove the locked StoreId filter (isLocked: true, param: "StoreId").
-- When adding/updating chart widgets, always populate config with xKey + aggregation (never empty {}).
 - Return ONLY a valid JSON array. No markdown, no extra text.
 - Always include a human-readable "explanation" in each command.
+
+=== WIDGET CONFIG RULES (for add_widget and update_widget) ===
+
+config is NEVER an empty object {}. Always populate it based on the widget type:
+
+--- CHART ---
+config MUST have xKey + aggregation.
+Match the "by [X]" phrase in the title to a column from the data source:
+  "by Type"       => xKey = HazardType
+  "by Department" => xKey = Department
+  "by Status"     => xKey = Status
+  "by Location"   => xKey = Location
+  "by Programme"  => xKey = Programme
+  "by Sub-Type"   => xKey = SubType
+  "over Time"     => xKey = StartDt
+  "by Person"     => xKey = PersonResponsible
+
+aggregation rules:
+  - Default: aggregation = "count"  (no yKey needed)
+  - Title mentions "score" or "risk": aggregation = "avg", yKey = "Score"
+  - Title mentions "total [column]": aggregation = "sum", yKey = that column
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "HazardType", "aggregation": "count" }
+
+WRONG:  "config": { "xKey": "InternalNo" }
+RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
+
+--- KPI ---
+config MUST have valueKey + format.
+
+WRONG:  "config": {}
+RIGHT:  "config": { "valueKey": "count", "format": "number" }
+
+--- TABLE ---
+config MUST have columns (5-8 comma-separated column names, no ID columns).
+
+WRONG:  "config": {}
+RIGHT:  "config": { "columns": "StartDt,Status,HazardType,Department,Location,PersonResponsible,Score" }
+
+--- MAP ---
+config MUST have latKey + lngKey.
+
+WRONG:  "config": {}
+RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }
+
+Never use ID columns (InternalNo, RegOthID, HazardTemplateId) as xKey or valueKey.
+
+=== APPLIESFILTERS RULES ===
+
+appliesFilters is NEVER an empty array [].
+Every widget must list ALL non-locked filter IDs from the dashboard.
+If a new filter is being added in the same command batch, include its ID too.
+
+WRONG:  "appliesFilters": []
+RIGHT:  "appliesFilters": ["f1", "f2", "f3"]
