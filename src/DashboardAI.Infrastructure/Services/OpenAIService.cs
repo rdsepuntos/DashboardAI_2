@@ -146,7 +146,7 @@ WIDGET SCHEMA:
    ""chartType"": ""bar|line|pie|area"", ""title"": ""..."",
    ""dataSource"": ""..."", ""appliesFilters"": [""f1""],
    ""position"": {{ ""x"": 0, ""y"": 0, ""w"": 6, ""h"": 4 }},
-   ""config"": {{ ""xKey"": ""..."", ""yKey"": ""..."" }} }}
+   ""config"": {{ ""xKey"": ""..."", ""yKey"": ""..."", ""aggregation"": ""..."" }} }}
 
 POSITION RULES:
 - Grid is 12 columns wide.
@@ -154,21 +154,22 @@ POSITION RULES:
 - Arrange widgets so they don't overlap. Use y values to stack rows.
 
 KPI CONFIG KEYS: valueKey, format (currency|number|percent), prefix, suffix
+
 CHART CONFIG KEYS:
-  xKey        — MUST be a column that represents the CATEGORY or GROUPING dimension.
-                Examples: HazardType, Department, Status, SubType, Location, Programme.
-                NEVER use ID columns (InternalNo, RegOthID, StoreID, HazardTemplateId) as xKey.
-  yKey        — the numeric column to aggregate (Score, Count, etc.).
-                Omit yKey when you want to COUNT records per group (see aggregation below).
-  aggregation — how to roll-up rows that share the same xKey value:
-                  "count" → count records per xKey group (use when yKey is omitted)
-                  "sum"   → sum yKey values per group (default when yKey is set)
-                  "avg"   → average yKey values per group
-  For "Hazards By Type"       → xKey="HazardType",  aggregation="count"
-  For "Hazards By Department" → xKey="Department",  aggregation="count"
-  For "Reports By Status"     → xKey="Status",      aggregation="count"
-  For "Reports Over Time"     → xKey="StartDt",     yKey=<omit>, aggregation="count", chartType="line"
-  For score-based charts      → xKey=<category>,   yKey="Score", aggregation="avg"
+  xKey        - MUST be a categorical/grouping column name from the data source.
+                Good choices: HazardType, Department, Status, SubType, Location, Programme.
+                BAD choices (never use as xKey): InternalNo, RegOthID, StoreID, HazardTemplateId.
+  yKey        - numeric column to aggregate. Omit when using aggregation=""count"".
+  aggregation - ""count"" = count rows per group (omit yKey)
+                ""sum""   = sum yKey per group
+                ""avg""   = average yKey per group
+
+  EXAMPLES:
+    Hazards By Type       : xKey=""HazardType"",  aggregation=""count""
+    Hazards By Department : xKey=""Department"",  aggregation=""count""
+    Reports By Status     : xKey=""Status"",      aggregation=""count""
+    Reports Over Time     : xKey=""StartDt"",     aggregation=""count"", chartType=""line""
+    Avg Score By Type     : xKey=""HazardType"",  yKey=""Score"", aggregation=""avg""
 
 TABLE CONFIG KEYS: columns (comma-separated list)
 MAP CONFIG KEYS: latKey, lngKey, labelKey
@@ -179,7 +180,7 @@ AVAILABLE DATA SOURCES:
 IMPORTANT RULES:
 - Only use data sources from the list above.
 - Always add a locked StoreId filter: {{ ""id"": ""f_store"", ""type"": ""dropdown"", ""label"": ""Store"", ""param"": ""StoreId"", ""isLocked"": true }}.
-- For every chart widget, always set xKey to a MEANINGFUL CATEGORY column — never an ID or reference number.
+- For every chart widget, set xKey to a MEANINGFUL CATEGORY column - not an ID column.
 - Return ONLY valid JSON. No markdown, no explanation text.";
         }
 
