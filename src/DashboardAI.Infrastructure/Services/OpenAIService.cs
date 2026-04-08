@@ -13,31 +13,23 @@ namespace DashboardAI.Infrastructure.Services
 {
     public class OpenAIService : IOpenAIService
     {
-        private const string Model   = "gpt-5.4";
-        private const string ApiUrl  = "https://api.openai.com/v1/chat/completions";
         private const string BaseUrl = "https://api.openai.com/v1";
 
         private readonly HttpClient _http;
         private readonly string _apiKey;
         private readonly string _generatePromptId;
         private readonly string _chatPromptId;
-        private readonly string _generateAssistantId;
-        private readonly string _chatAssistantId;
 
         public OpenAIService(
             HttpClient http,
             string apiKey,
-            string generatePromptId    = null,
-            string chatPromptId        = null,
-            string generateAssistantId = null,
-            string chatAssistantId     = null)
+            string generatePromptId,
+            string chatPromptId)
         {
-            _http                = http   ?? throw new ArgumentNullException(nameof(http));
-            _apiKey              = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
-            _generatePromptId    = generatePromptId;
-            _chatPromptId        = chatPromptId;
-            _generateAssistantId = generateAssistantId;
-            _chatAssistantId     = chatAssistantId;
+            _http             = http            ?? throw new ArgumentNullException(nameof(http));
+            _apiKey           = apiKey          ?? throw new ArgumentNullException(nameof(apiKey));
+            _generatePromptId = generatePromptId ?? throw new ArgumentNullException(nameof(generatePromptId));
+            _chatPromptId     = chatPromptId     ?? throw new ArgumentNullException(nameof(chatPromptId));
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -50,35 +42,20 @@ namespace DashboardAI.Infrastructure.Services
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso)
         {
-            string raw;
-            if (!string.IsNullOrEmpty(_generatePromptId))
+            var dsList = availableDataSources.ToList();
+            var variables = new Dictionary<string, string>
             {
-                var dsList = availableDataSources.ToList();
-                var variables = new Dictionary<string, string>
-                {
-                    ["iso_date"]         = currentDateIso,
-                    ["store_id"]         = storeId.ToString(),
-                    ["user_id"]          = userId,
-                    ["data_sources_json"]= JsonConvert.SerializeObject(dsList, Formatting.Indented),
-                    ["user_request"]     = userPrompt,
-                    ["guid"]             = Guid.NewGuid().ToString(),
-                    ["dashboard_title"]  = "",
-                    ["datasource_name"]  = dsList.FirstOrDefault()?.Name ?? "",
-                    ["column_name"]      = dsList.FirstOrDefault()?.Columns?.FirstOrDefault()?.Name ?? ""
-                };
-                raw = await CallOpenAIResponsesAsync(_generatePromptId, variables);
-            }
-            else if (!string.IsNullOrEmpty(_generateAssistantId))
-            {
-                var userMsg = BuildGenerateUserMessage(availableDataSources, currentDateIso, storeId, userId, userPrompt);
-                raw = await CallOpenAIAssistantAsync(_generateAssistantId, userMsg);
-            }
-            else
-            {
-                string systemPrompt = BuildGenerateSystemPrompt(availableDataSources, currentDateIso);
-                string userMsg      = $"StoreId: {storeId}\nUserId: {userId}\n\n{userPrompt}";
-                raw = await CallOpenAIAsync(systemPrompt, userMsg);
-            }
+                ["iso_date"]         = currentDateIso,
+                ["store_id"]         = storeId.ToString(),
+                ["user_id"]          = userId,
+                ["data_sources_json"]= JsonConvert.SerializeObject(dsList, Formatting.Indented),
+                ["user_request"]     = userPrompt,
+                ["guid"]             = Guid.NewGuid().ToString(),
+                ["dashboard_title"]  = "",
+                ["datasource_name"]  = dsList.FirstOrDefault()?.Name ?? "",
+                ["column_name"]      = dsList.FirstOrDefault()?.Columns?.FirstOrDefault()?.Name ?? ""
+            };
+            var raw = await CallOpenAIResponsesAsync(_generatePromptId, variables);
 
             var dto = JsonConvert.DeserializeObject<DashboardDto>(raw);
 
@@ -105,29 +82,14 @@ namespace DashboardAI.Infrastructure.Services
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso)
         {
-            string raw;
-            if (!string.IsNullOrEmpty(_chatPromptId))
+            var variables = new Dictionary<string, string>
             {
-                var variables = new Dictionary<string, string>
-                {
-                    ["iso_date"]               = currentDateIso,
-                    ["current_dashboard_json"] = JsonConvert.SerializeObject(currentDashboard, Formatting.Indented),
-                    ["data_sources_json"]      = JsonConvert.SerializeObject(availableDataSources, Formatting.Indented),
-                    ["user_message"]           = userMessage
-                };
-                raw = await CallOpenAIResponsesAsync(_chatPromptId, variables);
-            }
-            else if (!string.IsNullOrEmpty(_chatAssistantId))
-            {
-                string context = BuildChatUserMessage(userMessage, currentDashboard, availableDataSources, currentDateIso);
-                raw = await CallOpenAIAssistantAsync(_chatAssistantId, context);
-            }
-            else
-            {
-                string systemPrompt = BuildChatSystemPrompt(availableDataSources, currentDateIso);
-                string context      = $"CURRENT DASHBOARD STATE:\n{JsonConvert.SerializeObject(currentDashboard, Formatting.Indented)}\n\nUSER: {userMessage}";
-                raw = await CallOpenAIAsync(systemPrompt, context);
-            }
+                ["iso_date"]               = currentDateIso,
+                ["current_dashboard_json"] = JsonConvert.SerializeObject(currentDashboard, Formatting.Indented),
+                ["data_sources_json"]      = JsonConvert.SerializeObject(availableDataSources, Formatting.Indented),
+                ["user_message"]           = userMessage
+            };
+            var raw = await CallOpenAIResponsesAsync(_chatPromptId, variables);
 
             var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
             return commands ?? new List<ChatCommandDto>();

@@ -19,12 +19,10 @@ namespace DashboardAI.Infrastructure
             this IServiceCollection services,
             IConfiguration configuration)
         {
-            var connString           = configuration.GetConnectionString("DefaultConnection");
-            var openAiKey            = configuration["OpenAI:ApiKey"];
-            var generatePromptId     = configuration["OpenAI:GeneratePromptId"];
-            var chatPromptId         = configuration["OpenAI:ChatPromptId"];
-            var generateAssistantId  = configuration["OpenAI:GenerateAssistantId"];
-            var chatAssistantId      = configuration["OpenAI:ChatAssistantId"];
+            var connString        = configuration.GetConnectionString("DefaultConnection");
+            var openAiKey         = configuration["OpenAI:ApiKey"];
+            var generatePromptId  = configuration["OpenAI:GeneratePromptId"];
+            var chatPromptId      = configuration["OpenAI:ChatPromptId"];
 
             // ── Repositories ──────────────────────────────────────────────────
             services.AddScoped<IDashboardRepository>(_ => new DashboardRepository(connString));
@@ -50,9 +48,7 @@ namespace DashboardAI.Infrastructure
                 new HttpClient(),
                 openAiKey,
                 generatePromptId,
-                chatPromptId,
-                generateAssistantId,
-                chatAssistantId));
+                chatPromptId));
 
             // ── Application Use Cases ─────────────────────────────────────────
             services.AddScoped<GenerateDashboardHandler>();
