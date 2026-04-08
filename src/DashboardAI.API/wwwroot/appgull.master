@@ -4004,7 +4004,7 @@ cursor: pointer;
 
         function loadDashboardAI(url) {
             manualRightModal('#generate-dashboard-ai');
-            $('#genrate-dashboard-ai').attr('src', url)
+            $('#genrate-dashboard-ai iframe').attr('src', url)
         }
 
         // === Dynamic Checklist Dashboard (Master Page drop-in; jQuery-only) ===
