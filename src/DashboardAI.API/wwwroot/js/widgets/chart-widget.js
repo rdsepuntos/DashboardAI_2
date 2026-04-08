@@ -1,8 +1,14 @@
 /**
  * ChartWidget
  * Renders bar, line, pie, or area charts using Chart.js.
- * config keys: xKey, yKey, colorKey
+ * config keys: xKey, yKey, colorKey, aggregation (count|sum|avg|max|min)
  * widget.chartType: bar | line | pie | area
+ *
+ * Aggregation behaviour:
+ *  - If aggregation=="count" (or yKey is absent/non-numeric): group rows by xKey and COUNT them.
+ *  - If aggregation=="sum" (default when yKey is present): group rows by xKey and SUM yKey.
+ *  - If aggregation=="avg|max|min": group and compute accordingly.
+ *  - Raw row-per-row rendering only when aggregation=="none".
  */
 const ChartWidget = (() => {
 
@@ -17,15 +23,50 @@ const ChartWidget = (() => {
   function render(el, data, widget) {
     const config    = widget.config || {};
     const chartType = (widget.chartType || 'bar').toLowerCase();
-    const xKey      = config.xKey || _firstStringKey(data[0]);
-    const yKey      = config.yKey || _firstNumericKey(data[0]);
 
     if (!data || data.length === 0) {
       el.innerHTML = '<div class="widget-empty">No data</div>';
       return;
     }
 
-    // Destroy previous instance if any
+    const xKey        = config.xKey || _firstStringKey(data[0]);
+    const yKey        = config.yKey || null;
+    const aggregation = (config.aggregation || (yKey ? 'sum' : 'count')).toLowerCase();
+
+    // ── Aggregate data ───────────────────────────────────────────────────────
+    let labels, values;
+
+    if (aggregation === 'none') {
+      // Raw: one entry per row — only sensible for line/area over a date axis
+      labels = data.map(r => String(r[xKey] ?? ''));
+      values = data.map(r => parseFloat(r[yKey]) || 0);
+    } else {
+      // Group by xKey
+      const groups = {};
+      const counts = {};
+      data.forEach(row => {
+        const key = String(row[xKey] ?? '(blank)');
+        const num = yKey ? (parseFloat(row[yKey]) || 0) : 1;
+        if (!(key in groups)) { groups[key] = 0; counts[key] = 0; }
+        counts[key]++;
+        if      (aggregation === 'count')  groups[key]++;
+        else if (aggregation === 'sum')    groups[key] += num;
+        else if (aggregation === 'avg')    groups[key] += num;   // divide after
+        else if (aggregation === 'max')    groups[key] = counts[key] === 1 ? num : Math.max(groups[key], num);
+        else if (aggregation === 'min')    groups[key] = counts[key] === 1 ? num : Math.min(groups[key], num);
+        else                               groups[key] += num;   // fallback = sum
+      });
+
+      // Sort descending by value for readability
+      const sorted = Object.entries(groups)
+        .map(([k, v]) => [k, aggregation === 'avg' ? v / counts[k] : v])
+        .sort((a, b) => b[1] - a[1]);
+
+      labels = sorted.map(([k]) => k);
+      values = sorted.map(([, v]) => Math.round(v * 100) / 100);
+    }
+
+    // ── Destroy previous Chart.js instance ──────────────────────────────────
     if (_instances[widget.id]) {
       _instances[widget.id].destroy();
       delete _instances[widget.id];
@@ -34,9 +75,6 @@ const ChartWidget = (() => {
     el.innerHTML = '<canvas style="width:100%;height:100%;"></canvas>';
     const canvas = el.querySelector('canvas');
     const ctx    = canvas.getContext('2d');
-
-    const labels = data.map(r => r[xKey] ?? '');
-    const values = data.map(r => parseFloat(r[yKey]) || 0);
 
     const isPie  = chartType === 'pie' || chartType === 'doughnut';
     const isArea = chartType === 'area';

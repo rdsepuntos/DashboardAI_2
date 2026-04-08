@@ -154,7 +154,22 @@ POSITION RULES:
 - Arrange widgets so they don't overlap. Use y values to stack rows.
 
 KPI CONFIG KEYS: valueKey, format (currency|number|percent), prefix, suffix
-CHART CONFIG KEYS: xKey, yKey, colorKey
+CHART CONFIG KEYS:
+  xKey        — MUST be a column that represents the CATEGORY or GROUPING dimension.
+                Examples: HazardType, Department, Status, SubType, Location, Programme.
+                NEVER use ID columns (InternalNo, RegOthID, StoreID, HazardTemplateId) as xKey.
+  yKey        — the numeric column to aggregate (Score, Count, etc.).
+                Omit yKey when you want to COUNT records per group (see aggregation below).
+  aggregation — how to roll-up rows that share the same xKey value:
+                  "count" → count records per xKey group (use when yKey is omitted)
+                  "sum"   → sum yKey values per group (default when yKey is set)
+                  "avg"   → average yKey values per group
+  For "Hazards By Type"       → xKey="HazardType",  aggregation="count"
+  For "Hazards By Department" → xKey="Department",  aggregation="count"
+  For "Reports By Status"     → xKey="Status",      aggregation="count"
+  For "Reports Over Time"     → xKey="StartDt",     yKey=<omit>, aggregation="count", chartType="line"
+  For score-based charts      → xKey=<category>,   yKey="Score", aggregation="avg"
+
 TABLE CONFIG KEYS: columns (comma-separated list)
 MAP CONFIG KEYS: latKey, lngKey, labelKey
 
@@ -164,6 +179,7 @@ AVAILABLE DATA SOURCES:
 IMPORTANT RULES:
 - Only use data sources from the list above.
 - Always add a locked StoreId filter: {{ ""id"": ""f_store"", ""type"": ""dropdown"", ""label"": ""Store"", ""param"": ""StoreId"", ""isLocked"": true }}.
+- For every chart widget, always set xKey to a MEANINGFUL CATEGORY column — never an ID or reference number.
 - Return ONLY valid JSON. No markdown, no explanation text.";
         }
 
