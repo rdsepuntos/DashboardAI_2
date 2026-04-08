@@ -268,8 +268,8 @@ const DashboardEngine = (() => {
           break;
         }
         case 'update_widget': {
-          _grid.removeWidget(
-            document.querySelector(`.grid-stack-item[data-id="${cmd.widget.id}"]`), false);
+          const existing = document.querySelector(`.grid-stack-item[data-id="${cmd.widget.id}"]`);
+          if (existing) _grid.removeWidget(existing, true);
           const el = _createWidgetElement(cmd.widget);
           _grid.addWidget(el, {
             id: cmd.widget.id,
@@ -278,7 +278,7 @@ const DashboardEngine = (() => {
             w:  cmd.widget.position?.w || 6,
             h:  cmd.widget.position?.h || 4
           });
-          _loadWidgetData(cmd.widget);
+          setTimeout(() => _loadWidgetData(cmd.widget), 0);
           break;
         }
         case 'remove_widget': {

@@ -49,6 +49,13 @@ For aggregation:
   - Use aggregation="sum" + yKey when title mentions "total [numeric column]"
     AND that column exists in the dataSource columns list
 
+For time-series charts (xKey is a date column), add dateGroup to config:
+  "monthly"        => dateGroup = "monthly"        (groups by Mon YYYY, e.g. "Apr 2026")
+  "quarterly"      => dateGroup = "quarterly"      (groups by Q1 2026, Q2 2026, ...)
+  "yearly"         => dateGroup = "yearly"         (groups by 2024, 2025, 2026)
+  "financial year" => dateGroup = "financial_year" (groups by FY2025-26, FY2026-27)
+  If no grouping is specified for a date axis, omit dateGroup.
+
 WRONG:  "config": {}
 RIGHT:  "config": { "xKey": "HazardType", "aggregation": "count" }
 

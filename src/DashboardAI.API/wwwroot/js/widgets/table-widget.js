@@ -145,9 +145,20 @@ const TableWidget = (() => {
 
   function _formatCell(val) {
     if (val === null || val === undefined) return '—';
+    const s = String(val).trim();
+    // Detect date/datetime strings in any common ISO format
+    if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const dd   = String(d.getDate()).padStart(2, '0');
+        const mm   = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
+      }
+    }
     const num = parseFloat(val);
-    if (!isNaN(num) && String(val).trim() !== '') return num.toLocaleString();
-    return String(val);
+    if (!isNaN(num) && s !== '') return String(num);
+    return s;
   }
 
   return { render };

@@ -33,9 +33,9 @@ namespace DashboardAI.Infrastructure.Services
             _http                  = http                  ?? throw new ArgumentNullException(nameof(http));
             _apiKey                = apiKey                ?? throw new ArgumentNullException(nameof(apiKey));
             _generatePromptId      = generatePromptId      ?? throw new ArgumentNullException(nameof(generatePromptId));
-            _generatePromptVersion = generatePromptVersion ?? "3";
+            _generatePromptVersion = generatePromptVersion ?? "4";
             _chatPromptId          = chatPromptId          ?? throw new ArgumentNullException(nameof(chatPromptId));
-            _chatPromptVersion     = chatPromptVersion     ?? "2";
+            _chatPromptVersion     = chatPromptVersion     ?? "6";
         }
 
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -57,9 +57,7 @@ namespace DashboardAI.Infrastructure.Services
                 ["data_sources_json"]= JsonConvert.SerializeObject(dsList, Formatting.Indented),
                 ["user_request"]     = userPrompt,
                 ["guid"]             = Guid.NewGuid().ToString(),
-                ["dashboard_title"]  = "",
-                ["datasource_name"]  = dsList.FirstOrDefault()?.Name ?? "",
-                ["column_name"]      = dsList.FirstOrDefault()?.Columns?.FirstOrDefault()?.Name ?? ""
+                ["dashboard_title"]  = ""
             };
             var raw = await CallOpenAIResponsesAsync(_generatePromptId, _generatePromptVersion, variables);
 
@@ -95,6 +93,7 @@ namespace DashboardAI.Infrastructure.Services
                 ["data_sources_json"]      = JsonConvert.SerializeObject(availableDataSources, Formatting.Indented),
                 ["user_message"]           = userMessage
             };
+
             var raw = await CallOpenAIResponsesAsync(_chatPromptId, _chatPromptVersion, variables);
 
             var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
@@ -107,17 +106,35 @@ namespace DashboardAI.Infrastructure.Services
         private async Task<string> CallOpenAIResponsesAsync(
             string promptId,
             string promptVersion,
-            Dictionary<string, string> variables)
+            Dictionary<string, string> variables,
+            string input = null)
         {
-            var body = new
+            object body;
+            if (input != null)
             {
-                prompt = new
+                body = new
                 {
-                    id        = promptId,
-                    version   = promptVersion,
-                    variables = variables
-                }
-            };
+                    prompt = new
+                    {
+                        id        = promptId,
+                        version   = promptVersion,
+                        variables = variables
+                    },
+                    input
+                };
+            }
+            else
+            {
+                body = new
+                {
+                    prompt = new
+                    {
+                        id        = promptId,
+                        version   = promptVersion,
+                        variables = variables
+                    }
+                };
+            }
 
             var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/responses")
             {

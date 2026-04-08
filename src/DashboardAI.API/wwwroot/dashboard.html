@@ -10,24 +10,23 @@
   <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@7/dist/gridstack-extra.min.css" />
 
   <!-- Leaflet -->
-  <link  rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link  rel="stylesheet" hrefDF="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <!-- App styles -->
   <link  rel="stylesheet" href="/css/dashboard.css" />
+
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
 </head>
 <body class="dashboard-page">
 
   <!-- ── Top Bar ─────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <a href="/" class="topbar-logo">
-      <svg width="24" height="24" viewBox="0 0 36 36" fill="none">
-        <rect width="36" height="36" rx="8" fill="#6366f1"/>
-        <path d="M8 26 L14 16 L20 22 L26 10" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
       <span class="topbar-title" id="dashboardTitle">Loading…</span>
     </a>
     <div class="topbar-actions">
-      <button id="toggleChatBtn" class="btn-icon" title="Toggle chat">💬</button>
+      <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
     </div>
   </header>
 
@@ -46,14 +45,14 @@
     <aside class="chat-sidebar" id="chatSidebar">
       <div class="chat-header">
         <span>AI Assistant</span>
-        <button class="btn-icon" id="closeChatBtn" title="Close">✕</button>
+        <button class="btn-icon" id="closeChatBtn" title="Close"><i class="ph ph-x"></i></button>
       </div>
       <div class="chat-messages" id="chatMessages">
         <div class="chat-bubble assistant">
           Hi! I can modify this dashboard for you. Try:
           <ul>
-            <li>"Add a pie chart for sales by region"</li>
-            <li>"Show data for last quarter"</li>
+            <li>"Add a hazard report for sales by location"</li>
+            <li>"Show hazard report for last quarter"</li>
             <li>"Remove the table widget"</li>
             <li>"Add a date range filter"</li>
           </ul>

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHS Chat Assistant</title>
+    <script src="https://unpkg.com/@phosphor-icons/web@2.0.3"></script>
+    <!-- VAD + Whisper STT (loaded lazily — only used when VAD engine is selected) -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
+    <link rel="stylesheet" href="css/chat.css">
+    <link href="https://cdn.quilljs.com/1.3.7/quill.bubble.css" rel="stylesheet">
+</head>
+<body>
+    <div class="P-5" style="padding: 1rem; padding-left: 3rem;">
+        <img class="mb-5" style="position:relative; top: 20px;"
+             src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png">
+    </div>
+
+    <!-- Progress Indicator -->
+    <div class="progress-indicator">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <!-- Voice Status -->
+    <div class="voice-status" id="voiceStatus">
+        <div class="voice-status-icon"></div>
+        <span id="voiceStatusText">Listening...</span>
+    </div>
+
+    <div class="chat-container">
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState">
+            <div class="greeting" id="greeting">Good morning</div>
+            <div class="main-question">What can I help you with today?</div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <div
+                        id="messageInput"
+                        class="quill-input-container">
+                    </div>
+                    <button class="mic-btn" onclick="handleMic()" title="Toggle Voice Conversation">
+                        <i class="ph-thin ph-microphone"></i>
+                    </button>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                        <i class="ph-thin ph-arrow-up"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Messages Area -->
+        <div class="messages-area" id="messagesArea"></div>
+
+        <!-- Input Area (for chat) -->
+        <div class="input-area" id="chatInputArea" style="position: sticky; bottom: 0; background: #f8f9fa; display: none;">
+            <div class="input-wrapper">
+                <div
+                    id="chatMessageInput"
+                    class="quill-input-container">
+                </div>
+                <button class="mic-btn" onclick="handleMic()" title="Toggle Voice Conversation">
+                    <i class="ph-thin ph-microphone"></i>
+                </button>
+                <button class="send-btn" onclick="sendMessage()">
+                    <i class="ph-thin ph-arrow-up"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Panel -->
+    <div class="progress-panel" id="progressPanel">
+        <div class="panel-header">
+            <div class="panel-title">Settings</div>
+            <button class="panel-close" onclick="toggleProgressPanel()">
+                <i class="ph-thin ph-x"></i>
+            </button>
+        </div>
+
+        <!-- Panel Tab Bar -->
+        <div class="panel-tabs">
+            <button class="panel-tab active" id="tabProgress" onclick="switchPanelTab('progress')">Configuration</button>
+            <button class="panel-tab" id="tabMemory" onclick="switchPanelTab('memory')">Memory</button>
+        </div>
+        <div id="panelProgressContent" style="display:block">
+
+        <div class="panel-section">
+            <div class="panel-section-title">Progress</div>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="panelProgressBar"></div>
+            </div>
+            <div class="progress-text" id="panelProgressText">0% complete</div>
+        </div>
+
+        <div class="panel-section">
+            <div class="panel-section-title">Session Info</div>
+            <div class="session-info-item">
+                <span class="session-info-label">Template:</span>
+                <span class="session-info-value" id="panelTemplateName">-</span>
+            </div>
+            <div class="session-info-item">
+                <span class="session-info-label">Session ID:</span>
+                <span class="session-info-value" id="panelSessionId">-</span>
+            </div>
+            <div class="session-info-item">
+                <span class="session-info-label">Internal No:</span>
+                <span class="session-info-value" id="panelInternalNo">-</span>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <div class="panel-section-title">Session Cost (AI)</div>
+            <div class="session-info-item">
+                <span class="session-info-label">Total AI:</span>
+                <span class="session-info-value" id="panelCost">$0.0000</span>
+            </div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:4px;">gpt-4o + gpt-4o-mini + Whisper (all calls)</div>
+        </div>
+
+        <div class="panel-section">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div class="panel-section-title" style="margin-bottom:2px;">Smart Fill</div>
+                    <div style="font-size:11px;color:#9ca3af;">Extract all fields from conversation</div>
+                </div>
+                <label style="position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;">
+                    <input type="checkbox" id="smartFillToggle" onchange="saveSmartFill(this.checked)"
+                        style="opacity:0;width:0;height:0;position:absolute;">
+                    <span id="smartFillSlider" style="
+                        position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
+                        background:#d1d5db;border-radius:22px;transition:.25s;
+                    "></span>
+                    <span id="smartFillKnob" style="
+                        position:absolute;content:'';height:16px;width:16px;left:3px;bottom:3px;
+                        background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.2);
+                    "></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <div class="panel-section-title">Extracted Fields</div>
+            <div class="extracted-fields-list" id="panelFieldsList">
+                <div style="color: #9ca3af; font-size: 13px; text-align: center; padding: 20px;">
+                    No fields extracted yet
+                </div>
+            </div>
+        </div>
+
+        <button class="complete-btn" id="completeBtnPanel" onclick="completeSession()" disabled>
+            Complete Session
+        </button>
+
+        </div><!-- /panelProgressContent -->
+
+        <!-- Memory Content -->
+        <div id="panelMemoryContent" style="display:none">
+
+            <div class="panel-section">
+                <div class="panel-section-title">Memory Confidence</div>
+                <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">How the AI applies remembered facts</div>
+                <select id="memoryConfidence" onchange="saveMemoryConfidence(this.value)"
+                    style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:12px;cursor:pointer;">
+                    <option value="high">High — auto-apply known facts</option>
+                    <option value="medium" selected>Medium — confirm before using</option>
+                    <option value="always">Always — try even loose matches</option>
+                </select>
+            </div>
+
+            <!-- This Session -->
+            <div class="panel-section">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div>
+                        <div class="panel-section-title" style="margin-bottom:0">This Session</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Facts extracted from this conversation</div>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <button onclick="loadSessionContextPanel()" title="Refresh"
+                            style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:14px;padding:0;">
+                            <i class="ph-thin ph-arrows-clockwise"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="sessionContextList">
+                    <div style="color:#9ca3af;font-size:13px;text-align:center;padding:14px 0;">No facts yet. Start chatting!</div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div>
+                        <div class="panel-section-title" style="margin-bottom:0">Remembered Facts</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Persistent facts across all sessions</div>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <button onclick="seedSampleMemory(this)" title="Load sample data"
+                            style="background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;cursor:pointer;font-size:11px;padding:3px 8px;border-radius:4px;">
+                            Sample
+                        </button>
+                        <button onclick="loadMemoryPanel()" title="Refresh"
+                            style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:14px;padding:0;">
+                            <i class="ph-thin ph-arrows-clockwise"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="memoryFactsList">
+                    <div style="color:#9ca3af;font-size:13px;text-align:center;padding:20px;">Loading...</div>
+                </div>
+            </div>
+
+        </div><!-- /panelMemoryContent -->
+
+        <!-- History Content (hidden — load via ?sessionId=) -->
+        <div id="panelHistoryContent" style="display:none">
+            <div class="history-loading" id="historyLoading" style="display:none">
+                <div class="loading-spinner-sm"></div>
+                <span>Loading history…</span>
+            </div>
+            <div id="historyList"></div>
+            <div class="history-empty" id="historyEmpty" style="display:none">
+                No past sessions found.
+            </div>
+        </div><!-- /panelHistoryContent -->
+
+    </div>
+
+    <!-- Toggle Button -->
+    <button class="progress-toggle" id="progressToggle" onclick="toggleProgressPanel()" title="Show Progress">
+        <i class="ph-thin ph-chart-bar"></i>
+    </button>
+
+    <!-- Voice Controls Panel (STT + TTS) -->
+    <div class="voice-controls-container" id="voiceControlsContainer">
+        <div class="voice-controls-row">
+            <span class="tts-toggle-label">STT:</span>
+            <select class="tts-select" id="sttSelect" onchange="onSTTChange(this.value)">
+                <option value="webspeech">Web Speech API</option>
+                <option value="vad" selected>Whisper (openai)</option>
+            </select>
+        </div>
+        <hr class="voice-controls-divider">
+        <div class="voice-controls-row">
+            <span class="tts-toggle-label">Voice:</span>
+            <select class="tts-select" id="ttsSelect" onchange="onTTSChange(this.value)">
+                <option value="browser">Browser</option>
+                <optgroup label="ElevenLabs — Australian 🇦🇺">
+                    <option value="el:XrExE9yKIg1WjnnlVkGX">Matilda (Female)</option>
+                    <option value="el:IKne3meq5aSn9XLyUdCD">Charlie (Male)</option>
+                    <option value="el:onwK4e9ZLuTAKqWW03F9">Daniel (Male)</option>
+                    <option value="el:pqHfZKP75CvOlQylNhV4">Bill (Male)</option>
+                </optgroup>
+                <optgroup label="ElevenLabs">
+                    <option value="el:EXAVITQu4vr4xnSDxMaL">Sarah</option>
+                    <option value="el:21m00Tcm4TlvDq8ikWAM">Rachel</option>
+                    <option value="el:AZnzlk1XvdvUeBnXmlld">Domi</option>
+                    <option value="el:pNInz6obpgDQGcFmaJgB">Adam</option>
+                    <option value="el:yoZ06aMxZJJ28mfd3POQ">Sam</option>
+                    <option value="el:TxGEqnHWrfWFTfGW9XjX">Josh</option>
+                    <option value="el:VR6AewLTigWG4xSOukaG">Arnold</option>
+                    <option value="el:ErXwobaYiN019PkySvjV">Antoni</option>
+                </optgroup>
+            </select>
+        </div>
+    </div>
+
+    <!-- Debug Info -->
+    <div class="debug-info" style="display: none;" id="debugInfo">
+        <div>Session: <span id="debugSession">-</span></div>
+        <div>Progress: <span id="debugProgress">0%</span></div>
+    </div>
+
+    <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+    <script src="js/chat.js"></script>
+</body>
+</html>

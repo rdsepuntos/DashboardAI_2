@@ -2,6 +2,7 @@
  * ChartWidget
  * Renders bar, line, pie, or area charts using Chart.js.
  * config keys: xKey, yKey, colorKey, aggregation (count|sum|avg|max|min)
+ *              dateGroup (monthly|quarterly|yearly|financial_year) — groups date xKey into periods
  * widget.chartType: bar | line | pie | area
  *
  * Aggregation behaviour:
@@ -20,6 +21,60 @@ const ChartWidget = (() => {
     '#a855f7','#ec4899','#14b8a6','#f97316','#84cc16'
   ];
 
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function _formatDateLabel(val) {
+    const s = String(val ?? '').trim();
+    if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const dd   = String(d.getDate()).padStart(2, '0');
+        const mm   = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
+      }
+    }
+    return s;
+  }
+
+  // Returns { label, sortKey } for a date value given a dateGroup mode.
+  // sortKey is a string that sorts correctly lexicographically.
+  function _toDateGroupKey(val, dateGroup) {
+    const s = String(val ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) return { label: s || '(blank)', sortKey: s };
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return { label: s, sortKey: s };
+
+    const yr  = d.getFullYear();
+    const mon = d.getMonth(); // 0-based
+
+    switch ((dateGroup || '').toLowerCase()) {
+      case 'monthly': {
+        const label   = `${MONTH_NAMES[mon]} ${yr}`;
+        const sortKey = `${yr}-${String(mon + 1).padStart(2, '0')}`;
+        return { label, sortKey };
+      }
+      case 'quarterly': {
+        const q       = Math.floor(mon / 3) + 1;
+        const label   = `Q${q} ${yr}`;
+        const sortKey = `${yr}-Q${q}`;
+        return { label, sortKey };
+      }
+      case 'yearly': {
+        return { label: String(yr), sortKey: String(yr) };
+      }
+      case 'financial_year': {
+        // Australian FY: Jul–Jun. Jul 2025–Jun 2026 = FY2025-26
+        const fyStart = mon >= 6 ? yr : yr - 1;
+        const label   = `FY${fyStart}-${String(fyStart + 1).slice(-2)}`;
+        const sortKey = String(fyStart);
+        return { label, sortKey };
+      }
+      default:
+        return { label: _formatDateLabel(val), sortKey: s };
+    }
+  }
+
   function render(el, data, widget) {
     const config    = widget.config || {};
     const chartType = (widget.chartType || 'bar').toLowerCase();
@@ -32,22 +87,25 @@ const ChartWidget = (() => {
     const xKey        = config.xKey || _firstStringKey(data[0]);
     const yKey        = config.yKey || null;
     const aggregation = (config.aggregation || (yKey ? 'sum' : 'count')).toLowerCase();
+    const dateGroup   = config.dateGroup || null;
 
     // ── Aggregate data ───────────────────────────────────────────────────────
     let labels, values;
 
     if (aggregation === 'none') {
       // Raw: one entry per row — only sensible for line/area over a date axis
-      labels = data.map(r => String(r[xKey] ?? ''));
+      labels = data.map(r => _formatDateLabel(r[xKey]));
       values = data.map(r => parseFloat(r[yKey]) || 0);
     } else {
-      // Group by xKey
-      const groups = {};
-      const counts = {};
+      // Group by xKey (with optional date bucketing)
+      const groups   = {};
+      const counts   = {};
+      const sortKeys = {};
       data.forEach(row => {
-        const key = String(row[xKey] ?? '(blank)');
+        const { label, sortKey } = _toDateGroupKey(row[xKey], dateGroup);
+        const key = label;
         const num = yKey ? (parseFloat(row[yKey]) || 0) : 1;
-        if (!(key in groups)) { groups[key] = 0; counts[key] = 0; }
+        if (!(key in groups)) { groups[key] = 0; counts[key] = 0; sortKeys[key] = sortKey; }
         counts[key]++;
         if      (aggregation === 'count')  groups[key]++;
         else if (aggregation === 'sum')    groups[key] += num;
@@ -57,13 +115,18 @@ const ChartWidget = (() => {
         else                               groups[key] += num;   // fallback = sum
       });
 
-      // Sort descending by value for readability
-      const sorted = Object.entries(groups)
-        .map(([k, v]) => [k, aggregation === 'avg' ? v / counts[k] : v])
-        .sort((a, b) => b[1] - a[1]);
+      const entries = Object.entries(groups)
+        .map(([k, v]) => [k, aggregation === 'avg' ? v / counts[k] : v, sortKeys[k]]);
 
-      labels = sorted.map(([k]) => k);
-      values = sorted.map(([, v]) => Math.round(v * 100) / 100);
+      // Sort chronologically when date grouping, else by value descending
+      if (dateGroup) {
+        entries.sort((a, b) => a[2].localeCompare(b[2]));
+      } else {
+        entries.sort((a, b) => b[1] - a[1]);
+      }
+
+      labels = entries.map(([k]) => k);
+      values = entries.map(([, v]) => Math.round(v * 100) / 100);
     }
 
     // ── Destroy previous Chart.js instance ──────────────────────────────────
@@ -99,18 +162,18 @@ const ChartWidget = (() => {
         plugins: {
           legend: {
             display: isPie,
-            labels:  { color: '#e2e4f0', font: { size: 12 } }
+            labels:  { color: '#374151', font: { size: 12 } }
           },
           tooltip: { mode: 'index', intersect: false }
         },
         scales: isPie ? {} : {
           x: {
-            ticks: { color: '#7c7f99', font: { size: 11 } },
-            grid:  { color: '#2a2d3e' }
+            ticks: { color: '#6b7280', font: { size: 11 } },
+            grid:  { color: '#ced4da' }
           },
           y: {
-            ticks: { color: '#7c7f99', font: { size: 11 } },
-            grid:  { color: '#2a2d3e' }
+            ticks: { color: '#6b7280', font: { size: 11 } },
+            grid:  { color: '#ced4da' }
           }
         }
       }
