@@ -5,17 +5,17 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --color-bg:       #0f1117;
-  --color-surface:  #1a1d27;
-  --color-border:   #2a2d3e;
-  --color-primary:  #6366f1;
+  --color-bg:       #f5f6fa;
+  --color-surface:  #ffffff;
+  --color-border:   #ced4da;
+  --color-primary:  #3B98F1;
   --color-primary-h:#818cf8;
-  --color-text:     #e2e4f0;
-  --color-muted:    #7c7f99;
+  --color-text:     #1a1d27;
+  --color-muted:    #6b7280;
   --color-success:  #22c55e;
   --color-danger:   #ef4444;
   --radius:         10px;
-  --shadow:         0 4px 24px rgba(0,0,0,0.4);
+  --shadow:         0 4px 24px rgba(0,0,0,0.08);
   --topbar-h:       56px;
   --filterbar-h:    52px;
   --chat-w:         360px;
@@ -131,7 +131,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: -appl
 /* Table Widget */
 .widget-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .widget-table th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--color-border); color: var(--color-muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
-.widget-table td { padding: 7px 10px; border-bottom: 1px solid rgba(42,45,62,.5); }
+.widget-table td { padding: 7px 10px; border-bottom: 1px solid var(--color-border); }
 .widget-table tr:last-child td { border-bottom: none; }
 .widget-table tr:hover td { background: rgba(99,102,241,.05); }
 

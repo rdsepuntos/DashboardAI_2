@@ -56,6 +56,13 @@ aggregation rules:
   - Title mentions "total [column]": aggregation = "sum", yKey = that column
     (ONLY if that column exists in the dataSource columns)
 
+dateGroup (add to config when xKey is a date column and time grouping is requested):
+  "monthly"        => dateGroup = "monthly"
+  "quarterly"      => dateGroup = "quarterly"
+  "yearly"         => dateGroup = "yearly"
+  "financial year" => dateGroup = "financial_year"
+  Omit dateGroup if no time-period grouping is requested.
+
 WRONG:  "config": {}
 RIGHT:  "config": { "xKey": "HazardType", "aggregation": "count" }
 
