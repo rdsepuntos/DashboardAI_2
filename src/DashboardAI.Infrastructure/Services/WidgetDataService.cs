@@ -1,0 +1,189 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.SqlClient;
+using System.Linq;
+using System.Threading.Tasks;
+using Dapper;
+using DashboardAI.Domain.Entities;
+using DashboardAI.Domain.Interfaces;
+
+namespace DashboardAI.Infrastructure.Services
+{
+    public class WidgetDataService : IWidgetDataService
+    {
+        private readonly string _connectionString;
+        private readonly IDataSourceRegistry _registry;
+
+        public WidgetDataService(string connectionString, IDataSourceRegistry registry)
+        {
+            _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
+            _registry         = registry         ?? throw new ArgumentNullException(nameof(registry));
+        }
+
+        // ── Full result ───────────────────────────────────────────────────────────
+
+        public async Task<IEnumerable<IDictionary<string, object>>> QueryAsync(
+            string dataSourceName,
+            IDictionary<string, object> parameters)
+        {
+            var definition = _registry.GetByName(dataSourceName)
+                ?? throw new InvalidOperationException($"Data source '{dataSourceName}' not found in registry.");
+
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                if (definition.Kind == DataSourceKind.StoredProcedure)
+                {
+                    var dynParams = BuildDynamicParameters(definition, parameters);
+                    var rows = await conn.QueryAsync(
+                        dataSourceName, dynParams,
+                        commandType: CommandType.StoredProcedure);
+                    return rows.Select(r => (IDictionary<string, object>)r).ToList();
+                }
+                else
+                {
+                    var (whereSql, dynParams) = BuildWhereClause(definition, parameters);
+                    var sql = $"SELECT * FROM {dataSourceName}{whereSql}";
+                    var rows = await conn.QueryAsync(sql, dynParams);
+                    return rows.Select(r => (IDictionary<string, object>)r).ToList();
+                }
+            }
+        }
+
+        // ── Paged result ──────────────────────────────────────────────────────────
+
+        public async Task<PagedResult<IDictionary<string, object>>> QueryPagedAsync(
+            string dataSourceName,
+            IDictionary<string, object> parameters,
+            int page,
+            int pageSize)
+        {
+            var definition = _registry.GetByName(dataSourceName)
+                ?? throw new InvalidOperationException($"Data source '{dataSourceName}' not found in registry.");
+
+            page     = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 500);
+            int offset = (page - 1) * pageSize;
+
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                if (definition.Kind == DataSourceKind.StoredProcedure)
+                {
+                    // SPs manage their own paging — pass page/pageSize as params if supported
+                    var dynParams = BuildDynamicParameters(definition, parameters);
+                    if (definition.SupportedParams?.Contains("Page",     StringComparer.OrdinalIgnoreCase) == true) dynParams.Add("Page",     page);
+                    if (definition.SupportedParams?.Contains("PageSize", StringComparer.OrdinalIgnoreCase) == true) dynParams.Add("PageSize", pageSize);
+
+                    var rows = await conn.QueryAsync(dataSourceName, dynParams,
+                        commandType: CommandType.StoredProcedure);
+                    var list = rows.Select(r => (IDictionary<string, object>)r).ToList();
+
+                    return new PagedResult<IDictionary<string, object>>
+                    {
+                        Data       = list,
+                        TotalCount = list.Count,   // SP doesn't return count — best effort
+                        Page       = page,
+                        PageSize   = pageSize
+                    };
+                }
+                else
+                {
+                    var (whereSql, whereParams) = BuildWhereClause(definition, parameters);
+
+                    var countSql = $"SELECT COUNT(*) FROM {dataSourceName}{whereSql}";
+                    var dataSql  = $@"SELECT * FROM {dataSourceName}{whereSql}
+ORDER BY (SELECT NULL)
+OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
+
+                    // Clone params for paged query and add paging params
+                    var pagedParams = new DynamicParameters(whereParams);
+                    pagedParams.Add("_Offset",   offset);
+                    pagedParams.Add("_PageSize", pageSize);
+
+                    var totalCount = await conn.ExecuteScalarAsync<int>(countSql, whereParams);
+                    var rows       = await conn.QueryAsync(dataSql, pagedParams);
+
+                    return new PagedResult<IDictionary<string, object>>
+                    {
+                        Data       = rows.Select(r => (IDictionary<string, object>)r).ToList(),
+                        TotalCount = totalCount,
+                        Page       = page,
+                        PageSize   = pageSize
+                    };
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+
+        private DynamicParameters BuildDynamicParameters(
+            DataSourceDefinition def,
+            IDictionary<string, object> parameters)
+        {
+            var dynParams = new DynamicParameters();
+
+            if (def.SupportedParams != null)
+            {
+                foreach (var param in def.SupportedParams)
+                {
+                    if (parameters.TryGetValue(param, out var value))
+                        dynParams.Add(param, value);
+                }
+            }
+
+            return dynParams;
+        }
+
+        /// <summary>
+        /// Builds a " WHERE col = @param AND ..." SQL fragment + DynamicParameters for a view query.
+        /// Returns an empty string + empty params when no conditions apply.
+        /// </summary>
+        private (string whereSql, DynamicParameters parameters) BuildWhereClause(
+            DataSourceDefinition def,
+            IDictionary<string, object> parameters)
+        {
+            var dynParams  = new DynamicParameters();
+            var conditions = new List<string>();
+
+            // Find the first date-typed column for date range mapping (falls back to "OrderDate")
+            var dateColumn = def.Columns?.FirstOrDefault(c =>
+                string.Equals(c.DataType, "date", StringComparison.OrdinalIgnoreCase))?.Name
+                ?? "OrderDate";
+
+            if (def.SupportedParams != null)
+            {
+                foreach (var param in def.SupportedParams)
+                {
+                    if (!parameters.TryGetValue(param, out var value) || value == null) continue;
+
+                    // Skip falsy defaults (e.g. storeId=0 means "not set")
+                    if (value is int intVal && intVal == 0) continue;
+                    if (value is string strVal && string.IsNullOrWhiteSpace(strVal)) continue;
+
+                    if (param.Equals("StartDate", StringComparison.OrdinalIgnoreCase))
+                    {
+                        conditions.Add($"{dateColumn} >= @StartDate");
+                        dynParams.Add("StartDate", value);
+                    }
+                    else if (param.Equals("EndDate", StringComparison.OrdinalIgnoreCase))
+                    {
+                        conditions.Add($"{dateColumn} <= @EndDate");
+                        dynParams.Add("EndDate", value);
+                    }
+                    else
+                    {
+                        // Direct column = param match (e.g. StoreID = @StoreID)
+                        conditions.Add($"{param} = @{param}");
+                        dynParams.Add(param, value);
+                    }
+                }
+            }
+
+            var whereSql = conditions.Any()
+                ? " WHERE " + string.Join(" AND ", conditions)
+                : string.Empty;
+
+            return (whereSql, dynParams);
+        }
+    }
+}

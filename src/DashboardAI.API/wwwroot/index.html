@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DashboardAI — Create Dashboard</title>
+  <link rel="stylesheet" href="/css/dashboard.css" />
+</head>
+<body class="generator-page">
+
+  <div class="gen-container">
+    <div class="gen-logo">
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+        <rect width="36" height="36" rx="8" fill="#6366f1"/>
+        <path d="M8 26 L14 16 L20 22 L26 10" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="28" cy="10" r="2" fill="white"/>
+      </svg>
+      <span>DashboardAI</span>
+    </div>
+
+    <h1>What dashboard do you need?</h1>
+    <p class="gen-subtitle">Describe it in plain English — AI will build it instantly.</p>
+
+    <form id="genForm" autocomplete="off">
+      <textarea
+        id="promptInput"
+        placeholder="e.g. Sales dashboard for store 5 with revenue KPIs, a monthly trend line chart, top 10 products table, and a sales-by-category pie chart for this quarter"
+        rows="4"
+      ></textarea>
+
+      <div class="gen-meta">
+        <div class="gen-field">
+          <label for="storeId">Store ID</label>
+          <input type="number" id="storeId" value="1" min="1" required />
+        </div>
+        <div class="gen-field">
+          <label for="userId">User ID</label>
+          <input type="text" id="userId" value="user_001" required />
+        </div>
+      </div>
+
+      <button type="submit" id="genBtn">
+        <span id="genBtnText">✦ Generate Dashboard</span>
+        <span id="genBtnLoader" class="hidden">Generating…</span>
+      </button>
+    </form>
+
+    <div id="genError" class="error-msg hidden"></div>
+
+    <div class="gen-examples">
+      <p>Try these:</p>
+      <button class="example-chip" onclick="fillPrompt(this)">Revenue & orders KPIs + sales trend for this month</button>
+      <button class="example-chip" onclick="fillPrompt(this)">Top products table + sales by category pie chart for Q1</button>
+      <button class="example-chip" onclick="fillPrompt(this)">Full store overview: KPIs, charts, and a product table for YTD</button>
+    </div>
+  </div>
+
+  <script>
+    // Works whether opened via http://localhost or file://
+    const API_BASE = location.protocol === 'file:' ? 'http://localhost:56231' : location.origin;
+
+    function fillPrompt(btn) {
+      document.getElementById('promptInput').value = btn.textContent.trim();
+    }
+
+    document.getElementById('genForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const prompt  = document.getElementById('promptInput').value.trim();
+      const storeId = parseInt(document.getElementById('storeId').value, 10);
+      const userId  = document.getElementById('userId').value.trim();
+
+      if (!prompt) return;
+
+      const btn    = document.getElementById('genBtn');
+      const text   = document.getElementById('genBtnText');
+      const loader = document.getElementById('genBtnLoader');
+      const errEl  = document.getElementById('genError');
+
+      btn.disabled = true;
+      text.classList.add('hidden');
+      loader.classList.remove('hidden');
+      errEl.classList.add('hidden');
+
+      try {
+        const res = await fetch(API_BASE + '/api/dashboard/generate', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ prompt, storeId, userId })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Generation failed.');
+
+        // Redirect to the new dashboard page
+        window.location.href = data.redirectUrl;
+
+      } catch (err) {
+        errEl.textContent = '⚠ ' + err.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        text.classList.remove('hidden');
+        loader.classList.add('hidden');
+      }
+    });
+  </script>
+</body>
+</html>

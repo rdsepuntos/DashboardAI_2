@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DashboardAI — API Tester</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <style>
+        body { background: #0f1117; color: #e0e0e0; }
+        .navbar { background: #161b22 !important; border-bottom: 1px solid #30363d; }
+        .nav-tabs .nav-link { color: #8b949e; border-color: transparent; }
+        .nav-tabs .nav-link.active { background: #161b22; color: #58a6ff; border-color: #30363d #30363d #161b22; }
+        .nav-tabs { border-color: #30363d; }
+        .card { background: #161b22; border: 1px solid #30363d; color: #e0e0e0; }
+        .card-header { background: #1f2937; border-color: #30363d; font-weight: 600; }
+        label { color: #8b949e; font-size: 0.85rem; letter-spacing: .03em; text-transform: uppercase; }
+        .form-control, .form-select { background: #0d1117; border: 1px solid #30363d; color: #e0e0e0; }
+        .form-control:focus, .form-select:focus { background: #0d1117; border-color: #58a6ff; color: #e0e0e0; box-shadow: 0 0 0 .2rem rgba(88,166,255,.15); }
+        textarea.form-control { font-family: monospace; font-size: 0.85rem; }
+        .btn-primary { background: #238636; border-color: #2ea043; }
+        .btn-primary:hover { background: #2ea043; }
+        .response-box { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.8rem; max-height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+        .badge-method { font-size: .7rem; padding: .25em .5em; border-radius: 4px; font-weight: 700; vertical-align: middle; }
+        .badge-post { background: #1f6feb; }
+        .badge-get  { background: #238636; }
+        .status-ok   { color: #3fb950; }
+        .status-err  { color: #f85149; }
+        .spinner-border { width: 1rem; height: 1rem; border-width: .15rem; }
+        .copy-btn { cursor: pointer; font-size: .75rem; }
+        #toast-container { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; }
+        .section-title { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: #6e7681; margin-bottom: .5rem; }
+        .shortcut-chip { cursor: pointer; font-size: .75rem; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: .15rem .5rem; margin: .15rem; display: inline-block; transition: background .15s; }
+        .shortcut-chip:hover { background: #30363d; }
+        .divider { border-color: #30363d; }
+        code { color: #58a6ff; background: #161b22; padding: .1rem .3rem; border-radius: 3px; font-size: .8rem; }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark px-3 py-2">
+    <span class="navbar-brand fw-bold"><i class="bi bi-grid-3x3-gap-fill me-2 text-primary"></i>DashboardAI <span class="badge bg-secondary fw-normal ms-1" style="font-size:.65rem">API Tester</span></span>
+    <span class="text-muted" style="font-size:.8rem"><i class="bi bi-circle-fill me-1" id="server-dot" style="color:#f85149"></i><span id="server-label">Checking server…</span></span>
+</nav>
+
+<div class="container-fluid py-3 px-4">
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-3" id="mainTabs">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-generate"><i class="bi bi-magic me-1"></i>Generate Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-get">    <i class="bi bi-search me-1"></i>Get Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-chat">   <i class="bi bi-chat-dots me-1"></i>Chat</a></li>
+        <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-widget"> <i class="bi bi-table me-1"></i>Widget Data</a></li>
+    </ul>
+
+    <div class="tab-content">
+
+        <!-- ══════════════════════════════════════════════════════════════
+             TAB 1 — Generate Dashboard
+        ══════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade show active" id="tab-generate">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <span class="badge-method badge-post me-2">POST</span>
+                            <code>/api/dashboard/generate</code>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Prompt</label>
+                                <textarea id="gen-prompt" class="form-control" rows="4" placeholder="e.g. Show me hazard reports for this quarter with a KPI for total count and a bar chart by type"></textarea>
+                                <div class="mt-2">
+                                    <div class="section-title">Quick prompts</div>
+                                    <span class="shortcut-chip" onclick="setPrompt('Show me a summary of hazard reports this quarter — KPI for total count, bar chart by hazard type, and a table of the latest records')">Hazard summary</span>
+                                    <span class="shortcut-chip" onclick="setPrompt('Give me an audit and inspection dashboard with KPIs for total audits and average score, plus a line chart of audits over time and a table by location')">Audit overview</span>
+                                    <span class="shortcut-chip" onclick="setPrompt('I need a risk dashboard with a pie chart of hazard types, KPI for open hazards, and a table sorted by score descending')">Risk overview</span>
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col">
+                                    <label class="form-label">Store ID</label>
+                                    <input id="gen-storeid" type="number" class="form-control" value="5657" />
+                                </div>
+                                <div class="col">
+                                    <label class="form-label">User ID</label>
+                                    <input id="gen-userid" type="text" class="form-control" value="user_001" />
+                                </div>
+                            </div>
+                            <button class="btn btn-primary w-100" onclick="generateDashboard()">
+                                <i class="bi bi-magic me-2"></i>Generate Dashboard
+                                <span class="spinner-border ms-2 d-none" id="gen-spinner"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="card h-100">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>Response <span id="gen-status"></span></span>
+                            <span class="copy-btn badge bg-secondary" onclick="copyResponse('gen-response')"><i class="bi bi-clipboard me-1"></i>Copy</span>
+                        </div>
+                        <div class="card-body p-2">
+                            <div class="response-box" id="gen-response">— response will appear here —</div>
+                        </div>
+                        <div class="card-footer border-0 bg-transparent pt-0">
+                            <small class="text-muted">Tip: copy the <code>dashboardId</code> and paste it into the <em>Get Dashboard</em> or <em>Chat</em> tabs.</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             TAB 2 — Get Dashboard
+        ══════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade" id="tab-get">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <span class="badge-method badge-get me-2">GET</span>
+                            <code>/api/dashboard/{id}</code>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Dashboard ID (GUID)</label>
+                                <input id="get-id" type="text" class="form-control font-monospace" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col">
+                                    <label class="form-label">Store ID</label>
+                                    <input id="get-storeid" type="number" class="form-control" value="5657" />
+                                </div>
+                                <div class="col">
+                                    <label class="form-label">User ID</label>
+                                    <input id="get-userid" type="text" class="form-control" value="user_001" />
+                                </div>
+                            </div>
+                            <button class="btn btn-success w-100" onclick="getDashboard()">
+                                <i class="bi bi-search me-2"></i>Fetch Dashboard
+                                <span class="spinner-border ms-2 d-none" id="get-spinner"></span>
+                            </button>
+                            <hr class="divider my-3"/>
+                            <small class="text-muted d-block mb-2">Paste from Generate response:</small>
+                            <button class="btn btn-outline-secondary btn-sm w-100" onclick="pasteLastDashboardId('get-id')">
+                                <i class="bi bi-clipboard-check me-1"></i>Paste Last Generated ID
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="card h-100">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>Response <span id="get-status"></span></span>
+                            <span class="copy-btn badge bg-secondary" onclick="copyResponse('get-response')"><i class="bi bi-clipboard me-1"></i>Copy</span>
+                        </div>
+                        <div class="card-body p-2">
+                            <div class="response-box" id="get-response">— response will appear here —</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             TAB 3 — Chat
+        ══════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade" id="tab-chat">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <span class="badge-method badge-post me-2">POST</span>
+                            <code>/api/chat/message</code>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Dashboard ID</label>
+                                <div class="input-group">
+                                    <input id="chat-dashid" type="text" class="form-control font-monospace" placeholder="paste GUID here" />
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="pasteLastDashboardId('chat-dashid')" title="Paste last generated ID"><i class="bi bi-clipboard-check"></i></button>
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col">
+                                    <label class="form-label">Store ID</label>
+                                    <input id="chat-storeid" type="number" class="form-control" value="5657" />
+                                </div>
+                                <div class="col">
+                                    <label class="form-label">User ID</label>
+                                    <input id="chat-userid" type="text" class="form-control" value="user_001" />
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Message</label>
+                                <textarea id="chat-message" class="form-control" rows="3" placeholder="e.g. Add a pie chart showing hazards by type"></textarea>
+                                <div class="mt-2">
+                                    <span class="shortcut-chip" onclick="$('#chat-message').val('Add a pie chart showing hazards by type')">Pie chart by type</span>
+                                    <span class="shortcut-chip" onclick="$('#chat-message').val('Change the bar chart title to Hazard Breakdown')">Rename chart</span>
+                                    <span class="shortcut-chip" onclick="$('#chat-message').val('Remove the table widget')">Remove table</span>
+                                    <span class="shortcut-chip" onclick="$('#chat-message').val('Add a KPI showing the total number of open hazards')">Add KPI</span>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label d-flex justify-content-between">
+                                    Current Dashboard JSON
+                                    <button class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="pasteLastDashboard()" style="font-size:.7rem"><i class="bi bi-clipboard-check me-1"></i>Paste Last Response</button>
+                                </label>
+                                <textarea id="chat-dashboard-json" class="form-control" rows="5" placeholder='{ "filters": [], "widgets": [] }'></textarea>
+                            </div>
+                            <button class="btn btn-primary w-100" onclick="sendChat()">
+                                <i class="bi bi-send me-2"></i>Send Message
+                                <span class="spinner-border ms-2 d-none" id="chat-spinner"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="card h-100">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>Response <span id="chat-status"></span></span>
+                            <span class="copy-btn badge bg-secondary" onclick="copyResponse('chat-response')"><i class="bi bi-clipboard me-1"></i>Copy</span>
+                        </div>
+                        <div class="card-body p-2">
+                            <div class="response-box" id="chat-response">— response will appear here —</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             TAB 4 — Widget Data
+        ══════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade" id="tab-widget">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <span class="badge-method badge-post me-2">POST</span>
+                            <code>/api/widget-data/query</code>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Data Source</label>
+                                <select id="widget-datasource" class="form-select">
+                                    <option value="AID_HazardReport">AID_HazardReport</option>
+                                    <option value="AID_AuditAndInspection">AID_AuditAndInspection</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Store ID</label>
+                                <input id="widget-storeid" type="number" class="form-control" value="5657" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label d-flex justify-content-between">
+                                    Parameters (JSON)
+                                    <div>
+                                        <span class="shortcut-chip" onclick="setWidgetParams('this_quarter')">This quarter</span>
+                                        <span class="shortcut-chip" onclick="setWidgetParams('this_year')">This year</span>
+                                        <span class="shortcut-chip" onclick="setWidgetParams('none')">No dates</span>
+                                    </div>
+                                </label>
+                                <textarea id="widget-params" class="form-control" rows="5">{"StartDate": "2026-01-01", "EndDate": "2026-03-31"}</textarea>
+                            </div>
+                            <button class="btn btn-primary w-100" onclick="queryWidget()">
+                                <i class="bi bi-play-circle me-2"></i>Run Query
+                                <span class="spinner-border ms-2 d-none" id="widget-spinner"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>Response <span id="widget-status"></span> <span id="widget-count" class="text-muted ms-2" style="font-size:.8rem"></span></span>
+                            <div>
+                                <span class="copy-btn badge bg-secondary me-1" onclick="copyResponse('widget-response')"><i class="bi bi-clipboard me-1"></i>Copy JSON</span>
+                                <span class="copy-btn badge bg-info text-dark" id="widget-table-toggle" onclick="toggleWidgetView()" style="display:none"><i class="bi bi-table me-1"></i>Table View</span>
+                            </div>
+                        </div>
+                        <div class="card-body p-2">
+                            <div class="response-box" id="widget-response">— response will appear here —</div>
+                            <div id="widget-table-view" class="d-none mt-2" style="max-height:360px;overflow:auto;">
+                                <table class="table table-sm table-dark table-bordered table-hover mb-0" id="widget-table" style="font-size:.78rem"></table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /tab-content -->
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const API_BASE = 'http://localhost:56231';
+
+    // last generated state (for quick paste)
+    let _lastDashboardId   = null;
+    let _lastDashboardJson = null;
+    let _widgetShowTable   = false;
+    let _widgetData        = null;
+
+    // ── Server health check ──────────────────────────────────────────────────
+    function checkServer() {
+        $.ajax({ url: API_BASE + '/swagger/index.html', timeout: 3000 })
+            .done(() => {
+                $('#server-dot').css('color', '#3fb950');
+                $('#server-label').text('Server online — ' + API_BASE);
+            })
+            .fail(() => {
+                $('#server-dot').css('color', '#f85149');
+                $('#server-label').text('Server offline at ' + API_BASE);
+            });
+    }
+    checkServer();
+    setInterval(checkServer, 15000);
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function pretty(obj) { return JSON.stringify(obj, null, 2); }
+
+    function showStatus(el, code) {
+        const ok = code >= 200 && code < 300;
+        $(el).html(`<span class="${ok ? 'status-ok' : 'status-err'}">${code} ${ok ? '✓' : '✗'}</span>`);
+    }
+
+    function spinner(id, show) {
+        const el = $('#' + id);
+        show ? el.removeClass('d-none') : el.addClass('d-none');
+    }
+
+    function showToast(msg, type = 'success') {
+        const id = 'toast_' + Date.now();
+        const html = `<div id="${id}" class="toast align-items-center text-bg-${type} border-0 mb-2 show" role="alert">
+            <div class="d-flex"><div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`;
+        $('#toast-container').append(html);
+        setTimeout(() => $('#' + id).remove(), 3000);
+    }
+
+    function copyResponse(id) {
+        const text = $('#' + id).text();
+        navigator.clipboard.writeText(text).then(() => showToast('Copied!'));
+    }
+
+    function setPrompt(text) { $('#gen-prompt').val(text); }
+
+    function pasteLastDashboardId(targetId) {
+        if (!_lastDashboardId) { showToast('No dashboard generated yet.', 'warning'); return; }
+        $('#' + targetId).val(_lastDashboardId);
+        showToast('Dashboard ID pasted.');
+    }
+
+    function pasteLastDashboard() {
+        if (!_lastDashboardJson) { showToast('No dashboard response yet.', 'warning'); return; }
+        $('#chat-dashboard-json').val(pretty(_lastDashboardJson));
+        showToast('Dashboard JSON pasted.');
+    }
+
+    function setWidgetParams(preset) {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = now.getMonth(); // 0-indexed
+        if (preset === 'this_quarter') {
+            const qStart = new Date(y, Math.floor(m / 3) * 3, 1);
+            const qEnd   = new Date(y, Math.floor(m / 3) * 3 + 3, 0);
+            $('#widget-params').val(JSON.stringify({
+                StartDate: fmt(qStart),
+                EndDate:   fmt(qEnd)
+            }, null, 2));
+        } else if (preset === 'this_year') {
+            $('#widget-params').val(JSON.stringify({ StartDate: y + '-01-01', EndDate: y + '-12-31' }, null, 2));
+        } else {
+            $('#widget-params').val('{}');
+        }
+    }
+
+    function fmt(d) {
+        return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+
+    // ── Toggle widget view (JSON ↔ table) ─────────────────────────────────────
+    function toggleWidgetView() {
+        _widgetShowTable = !_widgetShowTable;
+        if (_widgetShowTable) {
+            $('#widget-response').addClass('d-none');
+            $('#widget-table-view').removeClass('d-none');
+            $('#widget-table-toggle').html('<i class="bi bi-code me-1"></i>JSON View');
+        } else {
+            $('#widget-response').removeClass('d-none');
+            $('#widget-table-view').addClass('d-none');
+            $('#widget-table-toggle').html('<i class="bi bi-table me-1"></i>Table View');
+        }
+    }
+
+    function buildTable(data) {
+        if (!Array.isArray(data) || !data.length) return;
+        const cols = Object.keys(data[0]);
+        let html = '<thead class="table-secondary"><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+        data.forEach(row => {
+            html += '<tr>' + cols.map(c => `<td>${row[c] ?? ''}</td>`).join('') + '</tr>';
+        });
+        html += '</tbody>';
+        $('#widget-table').html(html);
+    }
+
+    // ── 1. Generate Dashboard ─────────────────────────────────────────────────
+    function generateDashboard() {
+        const prompt  = $('#gen-prompt').val().trim();
+        const storeId = parseInt($('#gen-storeid').val());
+        const userId  = $('#gen-userid').val().trim();
+
+        if (!prompt) { showToast('Enter a prompt first.', 'warning'); return; }
+
+        spinner('gen-spinner', true);
+        $('#gen-response').text('Generating… this may take 10–20 seconds.');
+
+        $.ajax({
+            url:         API_BASE + '/api/dashboard/generate',
+            type:        'POST',
+            contentType: 'application/json',
+            data:        JSON.stringify({ prompt, storeId, userId }),
+            timeout:     60000
+        })
+        .done(function (res, _, xhr) {
+            showStatus('#gen-status', xhr.status);
+            $('#gen-response').text(pretty(res));
+            _lastDashboardId   = res.dashboardId;
+            _lastDashboardJson = res.dashboard || res;
+            showToast('Dashboard generated! ID saved for quick paste.');
+        })
+        .fail(function (xhr) {
+            showStatus('#gen-status', xhr.status || 0);
+            const err = xhr.responseJSON || { error: xhr.responseText || 'Request failed' };
+            $('#gen-response').text(pretty(err));
+            showToast('Request failed.', 'danger');
+        })
+        .always(() => spinner('gen-spinner', false));
+    }
+
+    // ── 2. Get Dashboard ──────────────────────────────────────────────────────
+    function getDashboard() {
+        const id      = $('#get-id').val().trim();
+        const storeId = parseInt($('#get-storeid').val());
+        const userId  = $('#get-userid').val().trim();
+
+        if (!id) { showToast('Enter a Dashboard ID.', 'warning'); return; }
+
+        spinner('get-spinner', true);
+        $('#get-response').text('Loading…');
+
+        $.ajax({
+            url:     `${API_BASE}/api/dashboard/${id}?userId=${encodeURIComponent(userId)}&storeId=${storeId}`,
+            type:    'GET',
+            timeout: 15000
+        })
+        .done(function (res, _, xhr) {
+            showStatus('#get-status', xhr.status);
+            $('#get-response').text(pretty(res));
+        })
+        .fail(function (xhr) {
+            showStatus('#get-status', xhr.status || 0);
+            $('#get-response').text(pretty(xhr.responseJSON || { error: xhr.responseText }));
+        })
+        .always(() => spinner('get-spinner', false));
+    }
+
+    // ── 3. Chat ───────────────────────────────────────────────────────────────
+    function sendChat() {
+        const dashboardId = $('#chat-dashid').val().trim();
+        const message     = $('#chat-message').val().trim();
+        const storeId     = parseInt($('#chat-storeid').val());
+        const userId      = $('#chat-userid').val().trim();
+        const jsonRaw     = $('#chat-dashboard-json').val().trim();
+
+        if (!message)     { showToast('Enter a message.', 'warning'); return; }
+        if (!jsonRaw)     { showToast('Paste the current dashboard JSON first.', 'warning'); return; }
+
+        let currentDashboard;
+        try { currentDashboard = JSON.parse(jsonRaw); }
+        catch (e) { showToast('Dashboard JSON is invalid.', 'danger'); return; }
+
+        spinner('chat-spinner', true);
+        $('#chat-response').text('Sending to AI… this may take 5–15 seconds.');
+
+        $.ajax({
+            url:         API_BASE + '/api/chat/message',
+            type:        'POST',
+            contentType: 'application/json',
+            data:        JSON.stringify({ dashboardId, message, userId, storeId, currentDashboard }),
+            timeout:     60000
+        })
+        .done(function (res, _, xhr) {
+            showStatus('#chat-status', xhr.status);
+            $('#chat-response').text(pretty(res));
+            if (res.updatedDashboard) {
+                _lastDashboardJson = res.updatedDashboard;
+                showToast('Response saved — use "Paste Last Response" to chain commands.');
+            }
+        })
+        .fail(function (xhr) {
+            showStatus('#chat-status', xhr.status || 0);
+            $('#chat-response').text(pretty(xhr.responseJSON || { error: xhr.responseText }));
+            showToast('Request failed.', 'danger');
+        })
+        .always(() => spinner('chat-spinner', false));
+    }
+
+    // ── 4. Widget Data ────────────────────────────────────────────────────────
+    function queryWidget() {
+        const dataSource = $('#widget-datasource').val();
+        const storeId    = parseInt($('#widget-storeid').val());
+        const paramsRaw  = $('#widget-params').val().trim();
+
+        let parameters = {};
+        if (paramsRaw) {
+            try { parameters = JSON.parse(paramsRaw); }
+            catch (e) { showToast('Parameters JSON is invalid.', 'danger'); return; }
+        }
+
+        spinner('widget-spinner', true);
+        $('#widget-response').text('Querying…');
+        $('#widget-table-toggle').hide();
+        $('#widget-count').text('');
+        _widgetShowTable = false;
+        $('#widget-response').removeClass('d-none');
+        $('#widget-table-view').addClass('d-none');
+
+        $.ajax({
+            url:         API_BASE + '/api/widget-data/query',
+            type:        'POST',
+            contentType: 'application/json',
+            data:        JSON.stringify({ dataSource, storeId, parameters }),
+            timeout:     30000
+        })
+        .done(function (res, _, xhr) {
+            showStatus('#widget-status', xhr.status);
+            _widgetData = res;
+            const count = Array.isArray(res) ? res.length : '?';
+            $('#widget-count').text(`${count} row${count !== 1 ? 's' : ''} returned`);
+            $('#widget-response').text(pretty(res));
+            if (Array.isArray(res) && res.length > 0) {
+                buildTable(res);
+                $('#widget-table-toggle').show();
+            }
+        })
+        .fail(function (xhr) {
+            showStatus('#widget-status', xhr.status || 0);
+            $('#widget-response').text(pretty(xhr.responseJSON || { error: xhr.responseText }));
+            showToast('Query failed.', 'danger');
+        })
+        .always(() => spinner('widget-spinner', false));
+    }
+</script>
+</body>
+</html>

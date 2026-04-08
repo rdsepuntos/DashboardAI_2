@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DashboardAI</title>
+
+  <!-- GridStack -->
+  <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@7/dist/gridstack.min.css" />
+  <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@7/dist/gridstack-extra.min.css" />
+
+  <!-- Leaflet -->
+  <link  rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- App styles -->
+  <link  rel="stylesheet" href="/css/dashboard.css" />
+</head>
+<body class="dashboard-page">
+
+  <!-- ── Top Bar ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <a href="/" class="topbar-logo">
+      <svg width="24" height="24" viewBox="0 0 36 36" fill="none">
+        <rect width="36" height="36" rx="8" fill="#6366f1"/>
+        <path d="M8 26 L14 16 L20 22 L26 10" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="topbar-title" id="dashboardTitle">Loading…</span>
+    </a>
+    <div class="topbar-actions">
+      <button id="toggleChatBtn" class="btn-icon" title="Toggle chat">💬</button>
+    </div>
+  </header>
+
+  <!-- ── Filter Bar ──────────────────────────────────────────────────────── -->
+  <div id="filterBar" class="filter-bar"></div>
+
+  <!-- ── Main Layout ────────────────────────────────────────────────────── -->
+  <div class="main-layout">
+
+    <!-- Dashboard canvas -->
+    <main class="canvas-area" id="canvasArea">
+      <div class="grid-stack" id="gridContainer"></div>
+    </main>
+
+    <!-- Chat sidebar -->
+    <aside class="chat-sidebar" id="chatSidebar">
+      <div class="chat-header">
+        <span>AI Assistant</span>
+        <button class="btn-icon" id="closeChatBtn" title="Close">✕</button>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-bubble assistant">
+          Hi! I can modify this dashboard for you. Try:
+          <ul>
+            <li>"Add a pie chart for sales by region"</li>
+            <li>"Show data for last quarter"</li>
+            <li>"Remove the table widget"</li>
+            <li>"Add a date range filter"</li>
+          </ul>
+        </div>
+      </div>
+      <form class="chat-input-area" id="chatForm">
+        <textarea id="chatInput" placeholder="Ask me to change the dashboard…" rows="2"></textarea>
+        <button type="submit" id="chatSendBtn">Send</button>
+      </form>
+    </aside>
+  </div>
+
+  <!-- ── Scripts ─────────────────────────────────────────────────────────── -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gridstack@7/dist/gridstack-all.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script src="/js/widgets/kpi-widget.js"></script>
+  <script src="/js/widgets/chart-widget.js"></script>
+  <script src="/js/widgets/table-widget.js"></script>
+  <script src="/js/widgets/map-widget.js"></script>
+  <script src="/js/widgets/markdown-widget.js"></script>
+  <script src="/js/dashboard-engine.js"></script>
+  <script src="/js/chat.js"></script>
+
+  <script>
+    // Bootstrap: extract dashboard ID from URL path /dashboard/{id}
+    const pathParts    = window.location.pathname.split('/');
+    const dashboardId  = pathParts[pathParts.length - 1];
+
+    // Read session from URL query string (set by the generate redirect)
+    const _qs      = new URLSearchParams(window.location.search);
+    const SESSION  = {
+      userId:  _qs.get('userId')  || 'user_001',
+      storeId: parseInt(_qs.get('storeId') || '1', 10)
+    };
+
+    DashboardEngine.init(dashboardId, SESSION);
+    ChatManager.init(SESSION);
+  </script>
+</body>
+</html>
