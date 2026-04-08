@@ -125,63 +125,96 @@ namespace DashboardAI.Infrastructure.Services
 
             return $@"You are a dashboard builder AI. Today's date is {currentDateIso}.
 
-Your job is to generate a complete dashboard layout as a JSON object matching this exact schema:
+Generate a complete dashboard JSON. Every widget MUST have a fully populated config object — never leave config empty.
+
+=== OUTPUT SCHEMA ===
 {{
   ""id"": ""<guid>"",
   ""title"": ""<dashboard title>"",
   ""storeId"": <number>,
   ""userId"": ""<string>"",
-  ""originalPrompt"": ""<the user's prompt>"",
-  ""filters"": [ ...FilterDto array... ],
-  ""widgets"":  [ ...WidgetDto array... ]
+  ""originalPrompt"": ""<the user prompt>"",
+  ""filters"": [ ...filter objects... ],
+  ""widgets"": [ ...widget objects... ]
 }}
 
+=== STEP 1: DECIDE WIDGET TYPE FROM THE TITLE ===
+Look at the widget title and pick type + chartType:
+- Title contains ""by [Category]"" or ""per [Category]""  => type=chart, chartType=bar
+- Title contains ""over time"" or ""trend""               => type=chart, chartType=line
+- Title contains ""distribution"" or ""breakdown""        => type=chart, chartType=pie
+- Title contains ""total"", ""count"", ""average"", ""avg"" (single number) => type=kpi
+- Title contains ""detail"", ""list"", ""report""           => type=table
+- Title contains ""map"" or ""location""                  => type=map
+
+=== STEP 2: POPULATE config BASED ON TYPE ===
+
+--- CHART: config MUST contain xKey + aggregation ---
+Look at the title to pick xKey. Match the ""by [X]"" phrase to the column name in the data source:
+  ""by Type""        => xKey = HazardType  (or the column whose name contains ""Type"")
+  ""by Department""  => xKey = Department
+  ""by Status""      => xKey = Status
+  ""by Location""    => xKey = Location
+  ""by Programme""   => xKey = Programme
+  ""by Sub-Type""    => xKey = SubType
+  ""over Time""      => xKey = StartDt   (or the date column)
+  ""by Person""      => xKey = PersonResponsible
+
+For aggregation:
+  - Default to aggregation=""count"" (count records per group, do NOT set yKey)
+  - Use aggregation=""avg"" + yKey=""Score"" only when title mentions ""score"" or ""risk""
+  - Use aggregation=""sum"" + yKey when title mentions ""total [numeric column]""
+
+WRONG:  ""config"": {{}}
+RIGHT:  ""config"": {{ ""xKey"": ""HazardType"", ""aggregation"": ""count"" }}
+
+WRONG:  ""config"": {{ ""xKey"": ""InternalNo"" }}
+RIGHT:  ""config"": {{ ""xKey"": ""Status"", ""aggregation"": ""count"" }}
+
+--- KPI: config MUST contain valueKey ---
+Choose the column that measures the KPI:
+  ""Total [records]""     => valueKey = first non-ID string or count column, format=""number""
+  ""Average/Avg Score""   => valueKey = Score, format=""number""
+  ""Open [records]""      => valueKey = Status (KPI widget will show count), format=""number""
+  ""Unique [something]""  => valueKey = that column, format=""number""
+
+WRONG:  ""config"": {{}}
+RIGHT:  ""config"": {{ ""valueKey"": ""Score"", ""format"": ""number"" }}
+
+--- TABLE: config MUST contain columns ---
+List 5-8 of the most useful columns from the data source, comma-separated. Exclude raw ID columns.
+
+WRONG:  ""config"": {{}}
+RIGHT:  ""config"": {{ ""columns"": ""StartDt,Status,HazardType,Department,Location,PersonResponsible,Score"" }}
+
+--- MAP: config MUST contain latKey + lngKey ---
+WRONG:  ""config"": {{}}
+RIGHT:  ""config"": {{ ""latKey"": ""Lat"", ""lngKey"": ""Lng"", ""labelKey"": ""Location"" }}
+
+=== STEP 3: OTHER WIDGET FIELDS ===
+
 FILTER SCHEMA:
-{{ ""id"": ""f1"", ""type"": ""dropdown|daterange|datepicker|text|multiselect"",
-   ""label"": ""..."", ""param"": ""..."", ""optionsSource"": ""..."",
-   ""valueKey"": ""..."", ""labelKey"": ""..."", ""isLocked"": false, ""defaultValue"": ""..."" }}
+{{ ""id"": ""f1"", ""type"": ""dropdown|daterange|datepicker|text"",
+   ""label"": ""..."", ""param"": ""..."", ""optionsSource"": ""<dataSourceName>"",
+   ""valueKey"": ""<columnName>"", ""labelKey"": ""<columnName>"",
+   ""isLocked"": false, ""defaultValue"": """" }}
 
-WIDGET SCHEMA:
-{{ ""id"": ""w1"", ""type"": ""chart|table|kpi|map|markdown"",
-   ""chartType"": ""bar|line|pie|area"", ""title"": ""..."",
-   ""dataSource"": ""..."", ""appliesFilters"": [""f1""],
-   ""position"": {{ ""x"": 0, ""y"": 0, ""w"": 6, ""h"": 4 }},
-   ""config"": {{ ""xKey"": ""..."", ""yKey"": ""..."", ""aggregation"": ""..."" }} }}
+POSITION RULES (12-column grid, no overlaps):
+- KPI:   w=3, h=2
+- Chart: w=6, h=4
+- Table: w=12, h=5
+- Map:   w=6, h=5
+- Place KPIs in row y=0, charts in y=2, tables at the bottom.
 
-POSITION RULES:
-- Grid is 12 columns wide.
-- KPI cards: w=3, h=2. Charts: w=6, h=4. Tables: w=12, h=5. Maps: w=6, h=5.
-- Arrange widgets so they don't overlap. Use y values to stack rows.
-
-KPI CONFIG KEYS: valueKey, format (currency|number|percent), prefix, suffix
-
-CHART CONFIG KEYS:
-  xKey        - MUST be a categorical/grouping column name from the data source.
-                Good choices: HazardType, Department, Status, SubType, Location, Programme.
-                BAD choices (never use as xKey): InternalNo, RegOthID, StoreID, HazardTemplateId.
-  yKey        - numeric column to aggregate. Omit when using aggregation=""count"".
-  aggregation - ""count"" = count rows per group (omit yKey)
-                ""sum""   = sum yKey per group
-                ""avg""   = average yKey per group
-
-  EXAMPLES:
-    Hazards By Type       : xKey=""HazardType"",  aggregation=""count""
-    Hazards By Department : xKey=""Department"",  aggregation=""count""
-    Reports By Status     : xKey=""Status"",      aggregation=""count""
-    Reports Over Time     : xKey=""StartDt"",     aggregation=""count"", chartType=""line""
-    Avg Score By Type     : xKey=""HazardType"",  yKey=""Score"", aggregation=""avg""
-
-TABLE CONFIG KEYS: columns (comma-separated list)
-MAP CONFIG KEYS: latKey, lngKey, labelKey
-
-AVAILABLE DATA SOURCES:
+AVAILABLE DATA SOURCES (use ONLY these, pick column names from their columns list):
 {dsJson}
 
-IMPORTANT RULES:
-- Only use data sources from the list above.
-- Always add a locked StoreId filter: {{ ""id"": ""f_store"", ""type"": ""dropdown"", ""label"": ""Store"", ""param"": ""StoreId"", ""isLocked"": true }}.
-- For every chart widget, set xKey to a MEANINGFUL CATEGORY column - not an ID column.
-- Return ONLY valid JSON. No markdown, no explanation text.";
+=== FINAL RULES ===
+1. Always include a locked StoreId filter: {{ ""id"": ""f_store"", ""type"": ""dropdown"", ""label"": ""Store"", ""param"": ""StoreId"", ""isLocked"": true, ""defaultValue"": """" }}
+2. config is NEVER an empty object {{}} for chart, kpi, or table widgets.
+3. xKey must ALWAYS be a column that exists in the data source columns list.
+4. Never use ID columns (InternalNo, RegOthID, HazardTemplateId) as xKey or valueKey.
+5. Return ONLY valid JSON, no markdown, no explanation.";
         }
 
         private string BuildChatSystemPrompt(
