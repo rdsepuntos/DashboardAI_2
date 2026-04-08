@@ -1,6 +1,6 @@
 {
-    "id": "c8e59496-27e7-4d6f-94ee-34b81e65d5dd",
-    "title": "Hazard Report",
+    "id": "d552854a-1b78-49b9-936a-529f63909a41",
+    "title": "Hazard Report Dashboard",
     "storeId": 5651,
     "userId": "user_001",
     "originalPrompt": "Hazard Report",
@@ -10,24 +10,27 @@
             "type": "dropdown",
             "label": "Store",
             "param": "StoreId",
+            "optionsSource": "AID_HazardReport",
+            "valueKey": "StoreID",
+            "labelKey": "StoreID",
             "isLocked": true,
-            "defaultValue": ""
+            "defaultValue": 5651
         },
         {
-            "id": "f_start",
+            "id": "f_start_date",
             "type": "datepicker",
             "label": "Start Date",
             "param": "StartDate",
             "isLocked": false,
-            "defaultValue": "2026-01-08"
+            "defaultValue": ""
         },
         {
-            "id": "f_end",
+            "id": "f_end_date",
             "type": "datepicker",
             "label": "End Date",
             "param": "EndDate",
             "isLocked": false,
-            "defaultValue": "2026-04-08"
+            "defaultValue": ""
         },
         {
             "id": "f_status",
@@ -50,147 +53,184 @@
             "labelKey": "Department",
             "isLocked": false,
             "defaultValue": ""
+        },
+        {
+            "id": "f_hazard_type",
+            "type": "dropdown",
+            "label": "Hazard Type",
+            "param": "HazardType",
+            "optionsSource": "AID_HazardReport",
+            "valueKey": "HazardType",
+            "labelKey": "HazardType",
+            "isLocked": false,
+            "defaultValue": ""
         }
     ],
     "widgets": [
         {
             "id": "w1",
+            "title": "Total Hazards",
             "type": "kpi",
-            "title": "Total Hazard Reports",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "valueKey": "count",
+                "format": "number"
+            },
             "position": {
                 "x": 0,
                 "y": 0,
                 "w": 3,
                 "h": 2
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         },
         {
             "id": "w2",
-            "type": "kpi",
             "title": "Average Risk Score",
+            "type": "kpi",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "valueKey": "Score",
+                "format": "number"
+            },
             "position": {
                 "x": 3,
                 "y": 0,
                 "w": 3,
                 "h": 2
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         },
         {
             "id": "w3",
+            "title": "Hazards by Status",
             "type": "chart",
             "chartType": "bar",
-            "title": "Hazard Reports by Status",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "xKey": "Status",
+                "aggregation": "count"
+            },
             "position": {
                 "x": 0,
                 "y": 2,
                 "w": 6,
                 "h": 4
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         },
         {
             "id": "w4",
+            "title": "Hazards by Department",
             "type": "chart",
             "chartType": "bar",
-            "title": "Hazard Reports by Department",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "xKey": "Department",
+                "aggregation": "count"
+            },
             "position": {
                 "x": 6,
                 "y": 2,
                 "w": 6,
                 "h": 4
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         },
         {
             "id": "w5",
+            "title": "Hazard Trend over Time",
             "type": "chart",
             "chartType": "line",
-            "title": "Hazard Reports over Time",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "xKey": "StartDt",
+                "aggregation": "count"
+            },
             "position": {
                 "x": 0,
                 "y": 6,
                 "w": 6,
                 "h": 4
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         },
         {
             "id": "w6",
+            "title": "Average Risk by Hazard Type",
             "type": "chart",
-            "chartType": "pie",
-            "title": "Hazard Type Distribution",
+            "chartType": "bar",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "xKey": "HazardType",
+                "yKey": "Score",
+                "aggregation": "avg"
+            },
             "position": {
                 "x": 6,
                 "y": 6,
                 "w": 6,
                 "h": 4
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         },
         {
             "id": "w7",
-            "type": "table",
             "title": "Hazard Report Detail",
+            "type": "table",
             "dataSource": "AID_HazardReport",
+            "config": {
+                "columns": "StartDt,Status,HazardType,Hazard,Department,Location,PersonResponsible,Score"
+            },
             "position": {
                 "x": 0,
                 "y": 10,
                 "w": 12,
                 "h": 5
             },
-            "config": {},
             "appliesFilters": [
-                "f_start",
-                "f_end",
+                "f_start_date",
+                "f_end_date",
                 "f_status",
-                "f_department"
+                "f_department",
+                "f_hazard_type"
             ]
         }
-    ],
-    "createdAt": "2026-04-08T05:59:08Z",
-    "updatedAt": "2026-04-08T05:59:08Z"
+    ]
 }

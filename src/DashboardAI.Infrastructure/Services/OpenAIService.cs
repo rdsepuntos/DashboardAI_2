@@ -18,18 +18,24 @@ namespace DashboardAI.Infrastructure.Services
         private readonly HttpClient _http;
         private readonly string _apiKey;
         private readonly string _generatePromptId;
+        private readonly string _generatePromptVersion;
         private readonly string _chatPromptId;
+        private readonly string _chatPromptVersion;
 
         public OpenAIService(
             HttpClient http,
             string apiKey,
             string generatePromptId,
-            string chatPromptId)
+            string generatePromptVersion,
+            string chatPromptId,
+            string chatPromptVersion)
         {
-            _http             = http            ?? throw new ArgumentNullException(nameof(http));
-            _apiKey           = apiKey          ?? throw new ArgumentNullException(nameof(apiKey));
-            _generatePromptId = generatePromptId ?? throw new ArgumentNullException(nameof(generatePromptId));
-            _chatPromptId     = chatPromptId     ?? throw new ArgumentNullException(nameof(chatPromptId));
+            _http                  = http                  ?? throw new ArgumentNullException(nameof(http));
+            _apiKey                = apiKey                ?? throw new ArgumentNullException(nameof(apiKey));
+            _generatePromptId      = generatePromptId      ?? throw new ArgumentNullException(nameof(generatePromptId));
+            _generatePromptVersion = generatePromptVersion ?? "3";
+            _chatPromptId          = chatPromptId          ?? throw new ArgumentNullException(nameof(chatPromptId));
+            _chatPromptVersion     = chatPromptVersion     ?? "2";
         }
 
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -55,7 +61,7 @@ namespace DashboardAI.Infrastructure.Services
                 ["datasource_name"]  = dsList.FirstOrDefault()?.Name ?? "",
                 ["column_name"]      = dsList.FirstOrDefault()?.Columns?.FirstOrDefault()?.Name ?? ""
             };
-            var raw = await CallOpenAIResponsesAsync(_generatePromptId, variables);
+            var raw = await CallOpenAIResponsesAsync(_generatePromptId, _generatePromptVersion, variables);
 
             var dto = JsonConvert.DeserializeObject<DashboardDto>(raw);
 
@@ -89,7 +95,7 @@ namespace DashboardAI.Infrastructure.Services
                 ["data_sources_json"]      = JsonConvert.SerializeObject(availableDataSources, Formatting.Indented),
                 ["user_message"]           = userMessage
             };
-            var raw = await CallOpenAIResponsesAsync(_chatPromptId, variables);
+            var raw = await CallOpenAIResponsesAsync(_chatPromptId, _chatPromptVersion, variables);
 
             var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
             return commands ?? new List<ChatCommandDto>();
@@ -100,6 +106,7 @@ namespace DashboardAI.Infrastructure.Services
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         private async Task<string> CallOpenAIResponsesAsync(
             string promptId,
+            string promptVersion,
             Dictionary<string, string> variables)
         {
             var body = new
@@ -107,7 +114,7 @@ namespace DashboardAI.Infrastructure.Services
                 prompt = new
                 {
                     id        = promptId,
-                    version   = "1",
+                    version   = promptVersion,
                     variables = variables
                 }
             };

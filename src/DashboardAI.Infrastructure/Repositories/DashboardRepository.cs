@@ -53,8 +53,8 @@ namespace DashboardAI.Infrastructure.Repositories
             {
                 var layout = new
                 {
-                    Widgets = dashboard.Widgets,
-                    Filters = dashboard.Filters
+                    Widgets = dashboard.Widgets.Select(Application.Mappers.WidgetMapper.ToDto).ToList(),
+                    Filters = dashboard.Filters.Select(Application.Mappers.FilterMapper.ToDto).ToList()
                 };
 
                 const string sql = @"
