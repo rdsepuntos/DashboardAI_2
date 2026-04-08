@@ -13,16 +13,25 @@ namespace DashboardAI.Infrastructure.Services
 {
     public class OpenAIService : IOpenAIService
     {
-        private const string Model = "gpt-5.4";
-        private const string ApiUrl = "https://api.openai.com/v1/chat/completions";
+        private const string Model   = "gpt-5.4";
+        private const string ApiUrl  = "https://api.openai.com/v1/chat/completions";
+        private const string BaseUrl = "https://api.openai.com/v1";
 
         private readonly HttpClient _http;
         private readonly string _apiKey;
+        private readonly string _generateAssistantId;
+        private readonly string _chatAssistantId;
 
-        public OpenAIService(HttpClient http, string apiKey)
+        public OpenAIService(
+            HttpClient http,
+            string apiKey,
+            string generateAssistantId = null,
+            string chatAssistantId     = null)
         {
-            _http   = http   ?? throw new ArgumentNullException(nameof(http));
-            _apiKey = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
+            _http                = http   ?? throw new ArgumentNullException(nameof(http));
+            _apiKey              = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
+            _generateAssistantId = generateAssistantId;
+            _chatAssistantId     = chatAssistantId;
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -35,10 +44,19 @@ namespace DashboardAI.Infrastructure.Services
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso)
         {
-            string systemPrompt = BuildGenerateSystemPrompt(availableDataSources, currentDateIso);
-            string userMessage  = $"StoreId: {storeId}\nUserId: {userId}\n\n{userPrompt}";
+            string raw;
+            if (!string.IsNullOrEmpty(_generateAssistantId))
+            {
+                var userMsg = BuildGenerateUserMessage(availableDataSources, currentDateIso, storeId, userId, userPrompt);
+                raw = await CallOpenAIAssistantAsync(_generateAssistantId, userMsg);
+            }
+            else
+            {
+                string systemPrompt = BuildGenerateSystemPrompt(availableDataSources, currentDateIso);
+                string userMsg      = $"StoreId: {storeId}\nUserId: {userId}\n\n{userPrompt}";
+                raw = await CallOpenAIAsync(systemPrompt, userMsg);
+            }
 
-            var raw = await CallOpenAIAsync(systemPrompt, userMessage);
             var dto = JsonConvert.DeserializeObject<DashboardDto>(raw);
 
             // Ensure server-controlled fields
@@ -47,6 +65,10 @@ namespace DashboardAI.Infrastructure.Services
 
             // Always inject locked StoreId filter
             EnsureLockedStoreFilter(dto, storeId);
+
+            // Server-side fallbacks — fill in whatever GPT left empty
+            InferMissingConfigs(dto, availableDataSources);
+            InferMissingAppliesFilters(dto);
 
             return dto;
         }
@@ -60,10 +82,19 @@ namespace DashboardAI.Infrastructure.Services
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso)
         {
-            string systemPrompt = BuildChatSystemPrompt(availableDataSources, currentDateIso);
-            string context      = $"CURRENT DASHBOARD STATE:\n{JsonConvert.SerializeObject(currentDashboard, Formatting.Indented)}\n\nUSER: {userMessage}";
+            string raw;
+            if (!string.IsNullOrEmpty(_chatAssistantId))
+            {
+                string context = BuildChatUserMessage(userMessage, currentDashboard, availableDataSources, currentDateIso);
+                raw = await CallOpenAIAssistantAsync(_chatAssistantId, context);
+            }
+            else
+            {
+                string systemPrompt = BuildChatSystemPrompt(availableDataSources, currentDateIso);
+                string context      = $"CURRENT DASHBOARD STATE:\n{JsonConvert.SerializeObject(currentDashboard, Formatting.Indented)}\n\nUSER: {userMessage}";
+                raw = await CallOpenAIAsync(systemPrompt, context);
+            }
 
-            var raw      = await CallOpenAIAsync(systemPrompt, context);
             var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
             return commands ?? new List<ChatCommandDto>();
         }
@@ -115,7 +146,105 @@ namespace DashboardAI.Infrastructure.Services
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        //  System prompts
+        //  OpenAI Assistants API  (used when AssistantId is configured)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private HttpRequestMessage AssistantRequest(HttpMethod method, string endpoint, object body = null)
+        {
+            var req = new HttpRequestMessage(method, $"{BaseUrl}{endpoint}");
+            req.Headers.Add("Authorization", $"Bearer {_apiKey}");
+            req.Headers.Add("OpenAI-Beta", "assistants=v2");
+            if (body != null)
+                req.Content = new StringContent(
+                    JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json");
+            return req;
+        }
+
+        private async Task<string> CallOpenAIAssistantAsync(string assistantId, string userMessage)
+        {
+            // 1. Create thread
+            var threadResp = await _http.SendAsync(
+                AssistantRequest(HttpMethod.Post, "/threads", new { }));
+            var threadId = JObject.Parse(await threadResp.Content.ReadAsStringAsync())["id"].ToString();
+
+            // 2. Add user message
+            await _http.SendAsync(
+                AssistantRequest(HttpMethod.Post, $"/threads/{threadId}/messages",
+                    new { role = "user", content = userMessage }));
+
+            // 3. Create run
+            var runResp = await _http.SendAsync(
+                AssistantRequest(HttpMethod.Post, $"/threads/{threadId}/runs",
+                    new { assistant_id = assistantId, temperature = 0.2 }));
+            var runId = JObject.Parse(await runResp.Content.ReadAsStringAsync())["id"].ToString();
+
+            // 4. Poll until terminal state
+            string status;
+            const int maxPollAttempts = 60;
+            int attempts = 0;
+            do
+            {
+                await Task.Delay(1500);
+                var poll     = await _http.SendAsync(AssistantRequest(HttpMethod.Get, $"/threads/{threadId}/runs/{runId}"));
+                var pollJson = JObject.Parse(await poll.Content.ReadAsStringAsync());
+                status = pollJson["status"]?.ToString();
+
+                if (++attempts >= maxPollAttempts)
+                    throw new TimeoutException("OpenAI Assistant run timed out after 90 seconds.");
+            }
+            while (status == "queued" || status == "in_progress");
+
+            if (status != "completed")
+                throw new InvalidOperationException($"Assistant run ended with status: {status}");
+
+            // 5. Retrieve the assistant reply (latest message)
+            var msgsResp = await _http.SendAsync(
+                AssistantRequest(HttpMethod.Get, $"/threads/{threadId}/messages?limit=1&order=desc"));
+            var msgsJson = JObject.Parse(await msgsResp.Content.ReadAsStringAsync());
+            var content  = msgsJson["data"]?[0]?["content"]?[0]?["text"]?["value"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                throw new InvalidOperationException("Assistant returned an empty response.");
+
+            // Strip optional markdown fences
+            content = content.Trim();
+            if (content.StartsWith("```json")) content = content.Substring(7);
+            if (content.StartsWith("```"))     content = content.Substring(3);
+            if (content.EndsWith("```"))       content = content.Substring(0, content.Length - 3);
+
+            return content.Trim();
+        }
+
+        // User messages bundling dynamic context for Assistants API calls
+        private static string BuildGenerateUserMessage(
+            IEnumerable<DataSourceMetaDto> dataSources,
+            string currentDateIso,
+            int storeId,
+            string userId,
+            string userPrompt)
+        {
+            var dsJson = JsonConvert.SerializeObject(dataSources, Formatting.Indented);
+            return $"Today: {currentDateIso}\nStoreId: {storeId}\nUserId: {userId}\n\n" +
+                   $"AVAILABLE DATA SOURCES:\n{dsJson}\n\n" +
+                   $"USER REQUEST:\n{userPrompt}";
+        }
+
+        private static string BuildChatUserMessage(
+            string userMessage,
+            DashboardDto currentDashboard,
+            IEnumerable<DataSourceMetaDto> dataSources,
+            string currentDateIso)
+        {
+            var dsJson   = JsonConvert.SerializeObject(dataSources,       Formatting.Indented);
+            var dashJson = JsonConvert.SerializeObject(currentDashboard,  Formatting.Indented);
+            return $"Today: {currentDateIso}\n\n" +
+                   $"CURRENT DASHBOARD:\n{dashJson}\n\n" +
+                   $"AVAILABLE DATA SOURCES:\n{dsJson}\n\n" +
+                   $"USER: {userMessage}";
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  System prompts  (fallback — used when no AssistantId is configured)
         // ─────────────────────────────────────────────────────────────────────
         private string BuildGenerateSystemPrompt(
             IEnumerable<DataSourceMetaDto> dataSources,
@@ -254,6 +383,139 @@ RULES:
 - Do NOT change the StoreId locked filter.
 - Return ONLY a valid JSON array. No markdown, no extra text.
 - Always include a human-readable ""explanation"" in each command.";
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  Server-side fallbacks
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static readonly HashSet<string> _idColumns = new HashSet<string>(
+            new[] { "InternalNo", "RegOthID", "StoreID", "StoreId", "HazardTemplateId" },
+            StringComparer.OrdinalIgnoreCase);
+
+        private void InferMissingConfigs(
+            DashboardDto dto,
+            IEnumerable<DataSourceMetaDto> dataSources)
+        {
+            var dsMap = dataSources.ToDictionary(
+                d => d.Name, d => d, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var w in dto.Widgets ?? new List<WidgetDto>())
+            {
+                if (w.Config != null && w.Config.Count > 0) continue;
+                if (w.Config == null) w.Config = new Dictionary<string, string>();
+
+                if (!dsMap.TryGetValue(w.DataSource ?? "", out var ds)) continue;
+
+                var title = (w.Title ?? "").ToLower();
+                var cols  = ds.Columns ?? new List<ColumnMetaDto>();
+
+                switch ((w.Type ?? "").ToLower())
+                {
+                    case "chart":
+                        w.Config["xKey"] = InferXKey(title, cols);
+                        if (title.Contains("avg") || title.Contains("average") || title.Contains("score"))
+                        {
+                            w.Config["aggregation"] = "avg";
+                            var num = cols.FirstOrDefault(c =>
+                                string.Equals(c.DataType, "number", StringComparison.OrdinalIgnoreCase) &&
+                                !_idColumns.Contains(c.Name));
+                            if (num != null) w.Config["yKey"] = num.Name;
+                        }
+                        else
+                        {
+                            w.Config["aggregation"] = "count";
+                        }
+                        break;
+
+                    case "kpi":
+                        if (title.Contains("score") || title.Contains("avg") || title.Contains("average"))
+                        {
+                            var sc = cols.FirstOrDefault(c =>
+                                string.Equals(c.Name, "Score", StringComparison.OrdinalIgnoreCase));
+                            w.Config["valueKey"]    = sc?.Name ?? "Score";
+                            w.Config["aggregation"] = "avg";
+                        }
+                        else
+                        {
+                            w.Config["valueKey"] = "count";
+                        }
+                        w.Config["format"] = "number";
+                        break;
+
+                    case "table":
+                        var tcols = cols
+                            .Where(c => !_idColumns.Contains(c.Name))
+                            .Take(8)
+                            .Select(c => c.Name);
+                        w.Config["columns"] = string.Join(",", tcols);
+                        break;
+                }
+            }
+        }
+
+        private static string InferXKey(string title, List<ColumnMetaDto> cols)
+        {
+            // Ordered keyword → preferred column name
+            var hints = new[]
+            {
+                ("hazard type",    "HazardType"),
+                ("by type",        "HazardType"),
+                ("by status",      "Status"),
+                ("by department",  "Department"),
+                ("department",     "Department"),
+                ("by location",    "Location"),
+                ("location",       "Location"),
+                ("by programme",   "Programme"),
+                ("programme",      "Programme"),
+                ("by program",     "Programme"),
+                ("by person",      "PersonResponsible"),
+                ("responsible",    "PersonResponsible"),
+                ("over time",      "StartDt"),
+                ("by date",        "StartDt"),
+                ("trend",          "StartDt"),
+                ("by sub",         "SubType"),
+                ("sub-type",       "SubType"),
+                ("subtype",        "SubType"),
+                ("by division",    "Division"),
+                ("division",       "Division"),
+                ("by checklist",   "Checklist"),
+                ("checklist",      "Checklist"),
+                ("by hazard",      "Hazard"),
+                ("status",         "Status"),
+            };
+
+            foreach (var (keyword, colName) in hints)
+            {
+                if (title.Contains(keyword))
+                {
+                    var match = cols.FirstOrDefault(c =>
+                        string.Equals(c.Name, colName, StringComparison.OrdinalIgnoreCase));
+                    if (match != null) return match.Name;
+                }
+            }
+
+            // Fallback: first non-ID string column
+            var fallback = cols.FirstOrDefault(c =>
+                string.Equals(c.DataType, "string", StringComparison.OrdinalIgnoreCase) &&
+                !_idColumns.Contains(c.Name));
+            return fallback?.Name ?? cols.FirstOrDefault()?.Name ?? "Status";
+        }
+
+        private static void InferMissingAppliesFilters(DashboardDto dto)
+        {
+            var nonLocked = (dto.Filters ?? new List<FilterDto>())
+                .Where(f => !f.IsLocked)
+                .Select(f => f.Id)
+                .ToList();
+
+            if (!nonLocked.Any()) return;
+
+            foreach (var w in dto.Widgets ?? new List<WidgetDto>())
+            {
+                if (w.AppliesFilters == null || w.AppliesFilters.Count == 0)
+                    w.AppliesFilters = new List<string>(nonLocked);
+            }
         }
 
         private static void EnsureLockedStoreFilter(DashboardDto dto, int storeId)
