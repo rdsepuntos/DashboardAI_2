@@ -72,6 +72,30 @@ RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
 --- KPI ---
 config MUST have valueKey + format.
 
+  "Total [records]"    => valueKey = "count", format = "number"
+  "Average/Avg Score"  => valueKey = "Score",  format = "number"  (ONLY if Score exists in columns)
+  "Open [records]"     => valueKey = "count",  format = "number"
+
+  For any KPI that counts records use valueKey = "count".
+  For any KPI that needs a real column ensure that column is in the dataSource columns list.
+
+  KPI PRE-FILTERS — to count a subset of records, add a "*Filter" config key:
+  The key name is the column name with "Filter" appended (camelCase):
+    statusFilter     = "Open"     → counts only rows where Status = "Open"
+    statusFilter     = "Closed"   → counts only rows where Status = "Closed"
+    typeFilter       = "Hazard"   → counts only rows where Type = "Hazard"
+    departmentFilter = "Safety"   → counts only rows where Department = "Safety"
+  Use this instead of inventing a separate dataSource or filter for KPI subsets.
+  Example: { "valueKey": "count", "format": "number", "color": "#f59e0b", "statusFilter": "Open" }
+
+  COLOR — all KPI and chart widgets MUST include a "color" in config:
+    Total / neutral counts  => "#3B98F1"  (blue)
+    Open / active / warning => "#f59e0b"  (amber)
+    Closed / completed      => "#22c55e"  (green)
+    Overdue / critical      => "#ef4444"  (red)
+    In Progress / pending   => "#06b6d4"  (cyan)
+    Score / risk            => "#a855f7"  (purple)
+
 WRONG:  "config": {}
 RIGHT:  "config": { "valueKey": "count", "format": "number" }
 
