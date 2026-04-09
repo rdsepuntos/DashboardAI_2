@@ -388,9 +388,25 @@ OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
                     }
                     else
                     {
-                        // Direct column = param match (e.g. StoreID = @StoreID)
-                        conditions.Add($"{param} = @{param}");
-                        dynParams.Add(param, value);
+                        var strVal2 = value?.ToString() ?? string.Empty;
+                        if (strVal2.Contains(','))
+                        {
+                            // Multi-select: generate IN(...) clause
+                            var values = strVal2.Split(',')
+                                .Select(v => v.Trim())
+                                .Where(v => v.Length > 0)
+                                .ToList();
+                            var pNames = values.Select((_, i) => $"@{param}_{i}").ToList();
+                            conditions.Add($"[{param}] IN ({string.Join(", ", pNames)})");
+                            for (int i = 0; i < values.Count; i++)
+                                dynParams.Add($"{param}_{i}", values[i]);
+                        }
+                        else
+                        {
+                            // Direct column = param match (e.g. StoreID = @StoreID)
+                            conditions.Add($"{param} = @{param}");
+                            dynParams.Add(param, value);
+                        }
                     }
                 }
             }
