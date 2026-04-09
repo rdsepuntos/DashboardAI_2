@@ -71,6 +71,12 @@ const DashboardEngine = (() => {
           if (start) start.value = '';
           if (end)   end.value   = '';
           if (start || end) _filterState[f.id] = {};
+          // Clear checkbox lists
+          const list = document.getElementById(`f_${f.id}_list`);
+          if (list) {
+            list.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+            _filterState[f.id] = '';
+          }
           const el = document.getElementById(`f_${f.id}`);
           if (el) { el.value = ''; _filterState[f.id] = ''; }
           _refreshWidgetsForFilter(f.id);
@@ -127,17 +133,23 @@ const DashboardEngine = (() => {
         });
 
       } else if (f.type === 'dropdown' || f.type === 'multiselect') {
-        wrap.innerHTML = `<label>${f.label}</label><select id="f_${f.id}" data-filter="${f.id}"><option value="">All</option></select>`;
+        wrap.innerHTML = `
+          <label>${f.label}</label>
+          <input type="text" class="filter-checkbox-search" id="f_${f.id}_search" placeholder="Search ${f.label.toLowerCase()}..." />
+          <div class="filter-checkbox-list" id="f_${f.id}_list"></div>`;
         _filterState[f.id] = '';
+
+        // Search filtering
+        wrap.querySelector(`#f_${f.id}_search`).addEventListener('input', function() {
+          const q = this.value.toLowerCase();
+          wrap.querySelectorAll('.filter-checkbox-item').forEach(item => {
+            item.style.display = item.querySelector('span').textContent.toLowerCase().includes(q) ? '' : 'none';
+          });
+        });
 
         if (f.optionsSource) {
           _loadDropdownOptions(f.id, f.optionsSource, f.valueKey, f.labelKey, f.defaultValue);
         }
-
-        $(wrap).find('select').on('change', function() {
-          _filterState[f.id] = this.value;
-          _refreshWidgetsForFilter(f.id);
-        });
 
       } else if (f.type === 'datepicker') {
         wrap.innerHTML = `<label>${f.label}</label><input type="date" id="f_${f.id}" data-filter="${f.id}" />`;
@@ -164,21 +176,35 @@ const DashboardEngine = (() => {
 
   async function _loadDropdownOptions(filterId, source, valueKey, labelKey, defaultValue) {
     try {
-      // Use the /distinct endpoint — returns a flat string array, not full rows.
       const values = await _queryDataDistinct(source, valueKey);
-      const sel    = document.getElementById(`f_${filterId}`);
-      if (!sel) return;
+      const list   = document.getElementById(`f_${filterId}_list`);
+      if (!list) return;
+
+      const selected = new Set(defaultValue ? defaultValue.split(',').map(s => s.trim()) : []);
+
+      const _updateState = () => {
+        const checked = [...list.querySelectorAll('input[type=checkbox]:checked')].map(c => c.value);
+        _filterState[filterId] = checked.length ? checked.join(',') : '';
+        _refreshWidgetsForFilter(filterId);
+      };
 
       values.forEach(v => {
-        const opt       = document.createElement('option');
-        opt.value       = v;
-        opt.textContent = v;
-        sel.appendChild(opt);
+        const item = document.createElement('label');
+        item.className = 'filter-checkbox-item';
+        const cb = document.createElement('input');
+        cb.type    = 'checkbox';
+        cb.value   = v;
+        cb.checked = selected.has(v);
+        cb.addEventListener('change', _updateState);
+        const txt = document.createElement('span');
+        txt.textContent = v;
+        item.appendChild(cb);
+        item.appendChild(txt);
+        list.appendChild(item);
       });
 
-      if (defaultValue) {
-        sel.value              = defaultValue;
-        _filterState[filterId] = defaultValue;
+      if (selected.size) {
+        _filterState[filterId] = [...selected].join(',');
       }
     } catch(err) {
       console.warn('[DashboardEngine] Failed to load filter options for', source, err);
