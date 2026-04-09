@@ -59,11 +59,37 @@ const DashboardEngine = (() => {
     bar.innerHTML = '';
     _filterState  = {};
 
+    // Clear All button handler
+    const clearAllBtn = document.getElementById('filterClearAll');
+    if (clearAllBtn) {
+      clearAllBtn.onclick = (e) => {
+        e.preventDefault();
+        filters.forEach(f => {
+          if (f.isLocked) return;
+          const start = document.getElementById(`f_${f.id}_start`);
+          const end   = document.getElementById(`f_${f.id}_end`);
+          if (start) start.value = '';
+          if (end)   end.value   = '';
+          if (start || end) _filterState[f.id] = {};
+          const el = document.getElementById(`f_${f.id}`);
+          if (el) { el.value = ''; _filterState[f.id] = ''; }
+          _refreshWidgetsForFilter(f.id);
+        });
+      };
+    }
+
     filters.forEach(f => {
       if (f.isLocked) {
         // Locked filters are invisible; their value comes from session
         _filterState[f.id] = _session.storeId;
         return;
+      }
+
+      // Divider between items
+      if (bar.children.length > 0) {
+        const hr = document.createElement('hr');
+        hr.className = 'filter-divider';
+        bar.appendChild(hr);
       }
 
       const wrap = document.createElement('div');
@@ -72,9 +98,16 @@ const DashboardEngine = (() => {
       if (f.type === 'daterange') {
         wrap.innerHTML = `
           <label>${f.label}</label>
-          <input type="date" id="f_${f.id}_start" data-filter="${f.id}" data-key="StartDate" />
-          <span style="color:var(--color-muted)">–</span>
-          <input type="date" id="f_${f.id}_end"   data-filter="${f.id}" data-key="EndDate"   />`;
+          <div class="filter-daterange">
+            <div class="filter-daterange-row">
+              <span>From</span>
+              <input type="date" id="f_${f.id}_start" data-filter="${f.id}" data-key="StartDate" />
+            </div>
+            <div class="filter-daterange-row">
+              <span>To</span>
+              <input type="date" id="f_${f.id}_end" data-filter="${f.id}" data-key="EndDate" />
+            </div>
+          </div>`;
 
         _filterState[f.id] = {};
         if (f.defaultValue) {
