@@ -84,10 +84,14 @@ const ChartWidget = (() => {
       return;
     }
 
-    // When the server already ran GROUP BY, data rows are { [xKey]: ..., __value: ... }.
+    // When the server already ran GROUP BY, data rows are { [xKey]: ..., __value: ... }
+    // or { __group: '<sortable-key>', __value: ... } when dateGroup was used.
     // Use xKey from config for labels and __value for the numeric series;
     // skip all client-side grouping by treating data as aggregation='none'.
-    const xKey        = config.xKey || _firstStringKey(data[0]);
+    const hasDateGroup = !!(config.dateGroup);
+    const xKey        = preAggregated
+      ? (hasDateGroup ? '__group' : (config.xKey || _firstStringKey(data[0])))
+      : (config.xKey || _firstStringKey(data[0]));
     const yKey        = preAggregated ? '__value' : (config.yKey || null);
     const aggregation = preAggregated ? 'none' : (config.aggregation || (yKey ? 'sum' : 'count')).toLowerCase();
     const dateGroup   = preAggregated ? null    : (config.dateGroup || null);
@@ -97,8 +101,11 @@ const ChartWidget = (() => {
     let labels, values;
 
     if (aggregation === 'none') {
-      // Raw: one entry per row — only sensible for line/area over a date axis
-      labels = data.map(r => _formatDateLabel(r[xKey]));
+      // Raw (or pre-aggregated): one entry per row.
+      // If server returned __group keys for a date group, format them for display.
+      labels = data.map(r => preAggregated && hasDateGroup
+        ? _formatDateGroupLabel(r[xKey], config.dateGroup)
+        : _formatDateLabel(r[xKey]));
       values = data.map(r => parseFloat(r[yKey]) || 0);
     } else {
       // Group by xKey (with optional date bucketing)
@@ -183,6 +190,36 @@ const ChartWidget = (() => {
         }
       }
     });
+  }
+
+  // Formats the sortable __group keys returned by the server into display labels.
+  //   monthly:        '2025-01'   → 'Jan 2025'
+  //   quarterly:      '2025-Q1'   → 'Q1 2025'
+  //   yearly:         '2025'      → '2025'
+  //   financial_year: 'FY2024'    → 'FY2024-25'
+  function _formatDateGroupLabel(key, dateGroup) {
+    const s = String(key ?? '').trim();
+    if (!s) return '(blank)';
+    switch ((dateGroup || '').toLowerCase()) {
+      case 'monthly': {
+        // '2025-01' → 'Jan 2025'
+        const [yr, mn] = s.split('-');
+        const idx = parseInt(mn, 10) - 1;
+        return (idx >= 0 && idx < 12) ? `${MONTH_NAMES[idx]} ${yr}` : s;
+      }
+      case 'quarterly': {
+        // '2025-Q1' → 'Q1 2025'
+        const [yr, q] = s.split('-');
+        return `${q} ${yr}`;
+      }
+      case 'financial_year': {
+        // 'FY2024' → 'FY2024-25'
+        const yr = parseInt(s.replace('FY', ''), 10);
+        return isNaN(yr) ? s : `FY${yr}-${String(yr + 1).slice(-2)}`;
+      }
+      default:
+        return s;
+    }
   }
 
   function _firstStringKey(row) {

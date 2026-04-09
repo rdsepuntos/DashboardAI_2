@@ -31,6 +31,9 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
 
         /// <summary>Column to aggregate (ignored for count).</summary>
         public string AggregateColumn { get; set; }
+
+        /// <summary>Optional date bucketing: monthly | quarterly | yearly | financial_year.</summary>
+        public string DateGroup { get; set; }
     }
 
     public class QueryPagedWidgetDataRequest
@@ -83,7 +86,8 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                     {
                         GroupBy           = request.GroupBy,
                         AggregateFunction = request.AggregateFunction,
-                        AggregateColumn   = request.AggregateColumn
+                        AggregateColumn   = request.AggregateColumn,
+                        DateGroup         = request.DateGroup
                     });
             }
 

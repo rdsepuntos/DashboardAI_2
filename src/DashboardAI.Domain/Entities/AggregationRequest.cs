@@ -27,5 +27,13 @@ namespace DashboardAI.Domain.Entities
         /// Must be in the data source's registered column list.
         /// </summary>
         public string AggregateColumn { get; set; }
+
+        /// <summary>
+        /// Optional date bucketing applied to the GroupBy column before grouping.
+        /// Allowed values: monthly | quarterly | yearly | financial_year.
+        /// When set, the GROUP BY expression becomes a computed key (e.g. 'yyyy-MM')
+        /// returned as __group, and the raw column is not exposed.
+        /// </summary>
+        public string DateGroup { get; set; }
     }
 }
