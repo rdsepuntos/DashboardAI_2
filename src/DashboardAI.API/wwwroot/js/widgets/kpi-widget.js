@@ -13,7 +13,7 @@
  */
 const KpiWidget = (() => {
 
-  function render(el, data, config) {
+  function render(el, data, config, title) {
     config = config || {};
 
     const rows        = Array.isArray(data) ? data : (data ? [data] : []);
@@ -52,11 +52,13 @@ const KpiWidget = (() => {
     }
 
     const formatted = _format(raw, config.format, config.prefix, config.suffix);
-    const label     = config.label || (valueKey !== 'count' ? valueKey : '') || '';
+    const label = config.label || title || (valueKey !== 'count' ? valueKey : '') || '';
 
     el.innerHTML = `
-      <div class="kpi-value">${formatted}</div>
-      <div class="kpi-label">${label}</div>`;
+      <div class="kpi-card">
+        <div class="kpi-value">${formatted}</div>
+        ${label ? `<div class="kpi-label">${label}</div>` : ''}
+      </div>`;
   }
 
   function _format(value, format, prefix, suffix) {

@@ -228,7 +228,7 @@ const DashboardEngine = (() => {
     bodyEl.innerHTML = '';
 
     switch ((widget.type || '').toLowerCase()) {
-      case 'kpi':      KpiWidget.render(bodyEl, data, widget.config);              break;
+      case 'kpi':      KpiWidget.render(bodyEl, data, widget.config, widget.title);  break;
       case 'chart':    ChartWidget.render(bodyEl, data, widget);                  break;
       case 'table':    TableWidget.render(bodyEl, data, widget.config, meta, fetchFn); break;
       case 'map':      MapWidget.render(bodyEl, data, widget.config);              break;

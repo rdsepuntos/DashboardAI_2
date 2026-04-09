@@ -111,7 +111,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: -appl
 
 /* GridStack widget wrapper */
 .grid-stack-item-content {
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-surface); border: none;
   border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column;
 }
 .widget-header {
@@ -122,8 +122,21 @@ body { background: var(--color-bg); color: var(--color-text); font-family: -appl
 .widget-body { flex: 1; padding: 12px 16px 16px; overflow: hidden; position: relative; }
 
 /* KPI Widget */
-.kpi-value { font-size: 36px; font-weight: 700; color: var(--color-text); }
-.kpi-label { font-size: 12px; color: var(--color-muted); margin-top: 4px; }
+.grid-stack-item[data-type='kpi'] .widget-header {
+  display: none;
+}
+.grid-stack-item[data-type='kpi'] .widget-body {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 8px 16px 16px;
+}
+.kpi-card {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+}
+.kpi-value { font-size: 42px; font-weight: 700; color: var(--color-primary); line-height: 1.1; }
+.kpi-label { font-size: 12px; color: var(--color-muted); margin-top: 6px; text-transform: uppercase; letter-spacing: .04em; }
 .kpi-trend { font-size: 12px; margin-top: 6px; }
 .kpi-trend.up { color: var(--color-success); }
 .kpi-trend.down { color: var(--color-danger); }
