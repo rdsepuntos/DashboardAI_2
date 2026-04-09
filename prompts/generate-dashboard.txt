@@ -103,10 +103,18 @@ For charts, this sets the bar/line color. For KPIs, this sets the number color.
 Always include "color" in the config for every KPI and chart widget.
 
 --- TABLE: config MUST contain columns ---
-List 5-8 of the most useful columns, comma-separated. Exclude raw ID columns like InternalNo, RegOthID, HazardTemplateId.
+List 5-8 of the most useful columns from the dataSource, comma-separated.
+Choose based on what a user would want to see in a detail list:
+  1. ALWAYS include: the primary date column (e.g. StartDt), Status, and the record name/title column.
+  2. INCLUDE the main categorical columns relevant to the dashboard topic
+     (e.g. HazardType, Department, Location, PersonResponsible).
+  3. INCLUDE a numeric/score column only if one exists in the dataSource columns.
+  4. EXCLUDE raw ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID, *ID).
+  5. EXCLUDE computed filter columns (DepartmentFilter, ProgrammeFilter, CreatedByID, etc.).
+  6. Pick columns that actually exist in the dataSource columns list — do NOT invent column names.
 
 WRONG:  "config": {}
-RIGHT:  "config": { "columns": "StartDt,Status,HazardType,Department,Location,PersonResponsible,Score" }
+RIGHT:  "config": { "columns": "<comma-separated column names chosen from the dataSource>" }
 
 --- MAP: config MUST contain latKey + lngKey ---
 WRONG:  "config": {}
