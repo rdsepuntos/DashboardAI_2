@@ -82,6 +82,17 @@ RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
 WRONG:  "config": {}
 RIGHT:  "config": { "valueKey": "count", "format": "number" }
 
+--- COLOR: all widgets may include a "color" in config ---
+Choose a hex color that makes the dashboard visually varied and meaningful:
+  Total / neutral counts  => "#3B98F1"  (blue)
+  Open / active / warning => "#f59e0b"  (amber)
+  Closed / completed      => "#22c55e"  (green)
+  Overdue / critical      => "#ef4444"  (red)
+  In Progress / pending   => "#06b6d4"  (cyan)
+  Score / risk            => "#a855f7"  (purple)
+For charts, this sets the bar/line color. For KPIs, this sets the number color.
+Always include "color" in the config for every KPI and chart widget.
+
 --- TABLE: config MUST contain columns ---
 List 5-8 of the most useful columns, comma-separated. Exclude raw ID columns like InternalNo, RegOthID, HazardTemplateId.
 
