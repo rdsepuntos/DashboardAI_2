@@ -32,5 +32,15 @@ namespace DashboardAI.Domain.Interfaces
             IDictionary<string, object> parameters,
             int page,
             int pageSize);
+
+        /// <summary>
+        /// Returns the distinct non-null values for a single column in a view,
+        /// scoped to the supplied parameters (e.g. StoreId).
+        /// Used to enrich OpenAI prompts with real known values.
+        /// </summary>
+        Task<IEnumerable<string>> GetDistinctValuesAsync(
+            string dataSourceName,
+            string columnName,
+            IDictionary<string, object> parameters);
     }
 }

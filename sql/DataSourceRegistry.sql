@@ -26,8 +26,11 @@ GO
 
 -- =============================================================================
 --  Seed: your registered views
+--  Safe to re-run at any time — truncates and re-inserts all rows.
 --  Add one INSERT per view / SP you want the AI to be able to use.
 -- =============================================================================
+
+TRUNCATE TABLE DataSourceRegistry;
 
 -- ── AID_HazardReport ─────────────────────────────────────────────────────────
 INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
@@ -63,7 +66,7 @@ VALUES (
         {"name":"ReportedBy",        "dataType":"string", "description":"Full name of the person who reported the hazard"},
         {"name":"HazardTemplateId",  "dataType":"number", "description":"Hazard template identifier"}
     ]',
-    'StoreID,StartDate,EndDate'
+    'StoreID,StartDate,EndDate,Status,HazardType,Department,Location'
 );
 
 -- ── AID_AuditAndInspection ───────────────────────────────────────────────────
@@ -100,15 +103,16 @@ VALUES (
         {"name":"ReportedBy",        "dataType":"string", "description":"Full name of the person who reported the record"},
         {"name":"HazardTemplateId",  "dataType":"number", "description":"Hazard template identifier"}
     ]',
-    'StoreID,StartDate,EndDate'
+    'StoreID,StartDate,EndDate,Status,HazardType,Department,Location'
 );
 
 -- ── AID_IncidentAssessor ─────────────────────────────────────────────────────
--- INSERT skipped — row already exists. Run the UPDATE below to sync columns.
-UPDATE DataSourceRegistry
-SET
-    Description    = 'Incident assessor records per store — includes incident type, sub-type, location, responsible person, org hierarchy, and hazard details (RegTypeID 46)',
-    ColumnsJson    = '[
+INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
+VALUES (
+    'AID_IncidentAssessor',
+    'Incident assessor records per store — includes incident type, sub-type, location, responsible person, org hierarchy, and hazard details (RegTypeID 46)',
+    'View',
+    '[
         {"name":"StoreID",           "dataType":"number", "description":"Store identifier"},
         {"name":"RegOthID",          "dataType":"number", "description":"Record identifier"},
         {"name":"InternalNo",        "dataType":"string", "description":"Internal reference number"},
@@ -135,9 +139,8 @@ SET
         {"name":"ReportedBy",        "dataType":"string", "description":"Full name of the person who reported the incident"},
         {"name":"HazardTemplateId",  "dataType":"number", "description":"Hazard template identifier"}
     ]',
-    SupportedParams = 'StoreID,StartDate,EndDate',
-    UpdatedAt       = GETUTCDATE()
-WHERE Name = 'AID_IncidentAssessor';
+    'StoreID,StartDate,EndDate,Status,HazardType,Department,Location'
+);
 
 -- ── AID_RapidRiskAssessor ────────────────────────────────────────────────────
 INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
@@ -172,7 +175,7 @@ VALUES (
         {"name":"ReportedBy",        "dataType":"string", "description":"Full name of the person who reported the record"},
         {"name":"HazardTemplateId",  "dataType":"number", "description":"Hazard template identifier"}
     ]',
-    'StoreID,StartDate,EndDate'
+    'StoreID,StartDate,EndDate,Status,HazardType,Department,Location'
 );
 
 -- ── ADD MORE VIEWS / SPs BELOW — no code changes needed ─────────────────────

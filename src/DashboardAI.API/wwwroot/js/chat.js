@@ -31,7 +31,7 @@ const ChatManager = (() => {
   async function sendMessage(message) {
     _addBubble(message, 'user');
 
-    const thinkingEl = _addBubble('Thinking…', 'assistant thinking');
+    const thinkingEl = _addBubble('<span class="dot-typing"><span></span><span></span><span></span></span>', 'assistant thinking', true);
     $('#chatSendBtn').prop('disabled', true);
 
     try {

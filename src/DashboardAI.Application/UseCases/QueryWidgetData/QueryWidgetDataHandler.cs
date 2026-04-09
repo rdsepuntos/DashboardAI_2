@@ -118,5 +118,25 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                 request.Page > 0 ? request.Page : 1,
                 request.PageSize > 0 ? request.PageSize : 50);
         }
+
+        public async Task<IEnumerable<string>> GetDistinctValuesAsync(
+            string dataSource,
+            string columnName,
+            int storeId,
+            IDictionary<string, object> parameters)
+        {
+            var definition = _registry.GetByName(dataSource);
+            if (definition == null)
+                throw new InvalidOperationException($"Data source '{dataSource}' is not registered.");
+
+            var safeParams = new Dictionary<string, object>(
+                parameters ?? new Dictionary<string, object>(),
+                StringComparer.OrdinalIgnoreCase)
+            {
+                ["StoreId"] = storeId
+            };
+
+            return await _dataService.GetDistinctValuesAsync(dataSource, columnName, safeParams);
+        }
     }
 }

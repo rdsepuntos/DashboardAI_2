@@ -131,19 +131,20 @@ const DashboardEngine = (() => {
 
   async function _loadDropdownOptions(filterId, source, valueKey, labelKey, defaultValue) {
     try {
-      const data = await _queryData(source, { StoreId: _session.storeId });
-      const sel  = document.getElementById(`f_${filterId}`);
+      // Use the /distinct endpoint — returns a flat string array, not full rows.
+      const values = await _queryDataDistinct(source, valueKey);
+      const sel    = document.getElementById(`f_${filterId}`);
       if (!sel) return;
 
-      data.forEach(row => {
-        const opt = document.createElement('option');
-        opt.value       = row[valueKey] || row[Object.keys(row)[0]];
-        opt.textContent = row[labelKey] || row[Object.keys(row)[1]] || opt.value;
+      values.forEach(v => {
+        const opt       = document.createElement('option');
+        opt.value       = v;
+        opt.textContent = v;
         sel.appendChild(opt);
       });
 
       if (defaultValue) {
-        sel.value            = defaultValue;
+        sel.value              = defaultValue;
         _filterState[filterId] = defaultValue;
       }
     } catch(err) {
@@ -214,17 +215,33 @@ const DashboardEngine = (() => {
         // the returned __group key is formatted client-side for labels only.
         const effectiveAgg = (!aggregation || aggregation === 'none') ? 'count' : aggregation;
         const groupBy = type === 'chart' ? (config.xKey || null) : null;
-        const aggCol  = effectiveAgg !== 'count' ? (config.yKey || config.valueKey || null) : null;
+        // count_distinct uses aggregateColumn = valueKey (for KPIs like "Total Unique Departments")
+        const isCountDistinct = effectiveAgg === 'count_distinct';
+        // "count" is a magic valueKey (not a real column) — don't pass it as aggregateColumn
+        const _rawAggCol = config.yKey || config.aggregateColumn
+          || (config.valueKey !== 'count' ? config.valueKey : null);
+        const aggCol = (isCountDistinct || effectiveAgg !== 'count') ? (_rawAggCol || null) : null;
 
-        // Collect *Filter config keys (e.g. statusFilter: "Open") and pass them
-        // to the server as exact-match WHERE conditions so KPI counts are scoped correctly.
+        // Collect *Filter config keys (e.g. statusFilter: "Open" or statusFilter: ["In Progress","Not Started"])
+        // and pass them to the server as WHERE conditions so KPI counts are scoped correctly.
+        // Array values are joined as comma-separated strings; the server generates IN (...) for them.
         const additionalFilters = {};
         Object.keys(config).forEach(key => {
           if (!key.endsWith('Filter')) return;
           const col     = key.slice(0, -6);  // strip 'Filter'
           const colName = col.charAt(0).toUpperCase() + col.slice(1);
-          if (config[key]) additionalFilters[colName] = config[key];
+          const val = config[key];
+          if (!val) return;
+          additionalFilters[colName] = Array.isArray(val) ? val.join(',') : val;
         });
+
+        if (type === 'kpi') {
+          console.log(`[KPI] ${widget.title}`, {
+            config,
+            additionalFilters,
+            params
+          });
+        }
 
         const data = await _queryDataAggregated(widget.dataSource, params, {
           groupBy,
@@ -248,6 +265,13 @@ const DashboardEngine = (() => {
   function _buildWidgetParams(widget) {
     const params = { StoreId: _session.storeId };
 
+    // Columns already pinned by a config *Filter key — dropdown must not override them
+    const preFilteredCols = new Set(
+      Object.keys(widget.config || {})
+        .filter(k => k.endsWith('Filter') && widget.config[k])
+        .map(k => { const col = k.slice(0, -6); return col.charAt(0).toUpperCase() + col.slice(1); })
+    );
+
     (widget.appliesFilters || []).forEach(fid => {
       const filter = (_dashboard.filters || []).find(f => f.id === fid);
       if (!filter) return;
@@ -257,6 +281,8 @@ const DashboardEngine = (() => {
         if (val.StartDate) params['StartDate'] = val.StartDate;
         if (val.EndDate)   params['EndDate']   = val.EndDate;
       } else if (val) {
+        // Skip: this column is already filtered by a config pre-filter
+        if (preFilteredCols.has(filter.param)) return;
         params[filter.param] = val;
       }
     });
@@ -394,6 +420,17 @@ const DashboardEngine = (() => {
     if (!res.ok) throw new Error(data.error || 'Aggregated query failed');
     return data;
   }
+  async function _queryDataDistinct(dataSource, columnName) {
+    const res = await fetch(API_BASE + '/api/widget-data/distinct', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ dataSource, columnName, storeId: _session.storeId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Distinct query failed');
+    return data; // string[]
+  }
+
   async function _queryDataPaged(dataSource, params, page, pageSize) {
     const res  = await fetch(API_BASE + '/api/widget-data/query-paged', {
       method:  'POST',

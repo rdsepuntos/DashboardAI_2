@@ -25,7 +25,7 @@ FROM            dbo.RegisterOthHdr AS A LEFT OUTER JOIN
                          dbo.StoreDivisionDept AS department ON A.DepartmentID = department.StoreDivDeptID LEFT OUTER JOIN
                          dbo.ref_RegisterRecTypes AS rt ON A.OthTypeID = rt.RegRecTypeID LEFT OUTER JOIN
                          dbo.ref_RegisterRecSubTypes AS rst ON A.OthSubTypeID = rst.RegRecSubTypeID LEFT OUTER JOIN
-                         dbo.ref_RegisterStatus AS sts ON A.StatusID = sts.RegStatusID AND sts.RegTypeID = 27 LEFT OUTER JOIN
+                         dbo.ref_RegisterStatus AS sts ON A.StatusID = sts.RegStatusID LEFT OUTER JOIN
                          dbo.ref_LocationTypes AS loctype ON A.LocationTypeID = loctype.LocationTypeID LEFT OUTER JOIN
                          dbo.StoreUsers AS reportedby ON A.ReportedByID = reportedby.StoreUserID LEFT OUTER JOIN
                          dbo.StoreUsers AS presp ON A.ResponsibleID = presp.StoreUserID LEFT OUTER JOIN

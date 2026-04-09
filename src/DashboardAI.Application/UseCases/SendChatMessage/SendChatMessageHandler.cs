@@ -6,6 +6,7 @@ using DashboardAI.Application.DTOs;
 using DashboardAI.Application.Interfaces;
 using DashboardAI.Application.Mappers;
 using DashboardAI.Domain.Interfaces;
+using DashboardAI.Domain.Entities;
 
 namespace DashboardAI.Application.UseCases.SendChatMessage
 {
@@ -30,15 +31,18 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
         private readonly IOpenAIService _aiService;
         private readonly IDashboardRepository _repository;
         private readonly IDataSourceRegistry _registry;
+        private readonly IWidgetDataService _widgetDataService;
 
         public SendChatMessageHandler(
             IOpenAIService aiService,
             IDashboardRepository repository,
-            IDataSourceRegistry registry)
+            IDataSourceRegistry registry,
+            IWidgetDataService widgetDataService)
         {
-            _aiService  = aiService  ?? throw new ArgumentNullException(nameof(aiService));
-            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-            _registry   = registry   ?? throw new ArgumentNullException(nameof(registry));
+            _aiService          = aiService          ?? throw new ArgumentNullException(nameof(aiService));
+            _repository         = repository         ?? throw new ArgumentNullException(nameof(repository));
+            _registry           = registry           ?? throw new ArgumentNullException(nameof(registry));
+            _widgetDataService  = widgetDataService  ?? throw new ArgumentNullException(nameof(widgetDataService));
         }
 
         public async Task<SendChatMessageResponse> HandleAsync(SendChatMessageRequest request)
@@ -47,9 +51,30 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
             if (string.IsNullOrWhiteSpace(request.Message)) throw new ArgumentException("Message is required.");
             if (request.CurrentDashboard == null)           throw new ArgumentException("CurrentDashboard is required.");
 
-            var dataSources = _registry.GetAll()
-                .Select(DataSourceMapper.ToMetaDto)
-                .ToList();
+            var storeParams = new Dictionary<string, object> { { "StoreId", request.StoreId } };
+            var rawSources  = _registry.GetAll().ToList();
+            var dataSources = new List<DataSourceMetaDto>();
+            foreach (var src in rawSources)
+            {
+                var dto = DataSourceMapper.ToMetaDto(src);
+                if (dto.Columns != null)
+                {
+                    foreach (var col in dto.Columns.Where(c =>
+                        string.Equals(c.DataType, "string", StringComparison.OrdinalIgnoreCase)
+                        && IsCategoricalColumn(c.Name)))
+                    {
+                        try
+                        {
+                            var vals = (await _widgetDataService.GetDistinctValuesAsync(
+                                src.Name, col.Name, storeParams)).ToList();
+                            if (vals.Count > 0 && vals.Count <= 50)
+                                col.KnownValues = vals;
+                        }
+                        catch { /* skip — column may not exist on live DB */ }
+                    }
+                }
+                dataSources.Add(dto);
+            }
 
             string currentDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
 
@@ -73,5 +98,16 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
                 UpdatedDashboard = updated
             };
         }
+
+        private static readonly HashSet<string> _categoricalColumnNames = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            "Status", "Type", "SubType", "HazardType", "Hazard",
+            "Department", "Division", "Location", "LocationType",
+            "Programme", "Checklist", "CreatedBy", "PersonResponsible", "ReportedBy"
+        };
+
+        private static bool IsCategoricalColumn(string name)
+            => _categoricalColumnNames.Contains(name);
     }
 }
