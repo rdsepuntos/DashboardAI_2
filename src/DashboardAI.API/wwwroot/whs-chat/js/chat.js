@@ -15,7 +15,7 @@ const CONFIG = {
     elevenlabsApiKey: '',
     elevenlabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // Default voice (Sarah)
     openaiApiKey: '',
-    googleMapsApiKey: 'AIzaSyDx17vZ4ZTrcYxxbRds4HDOv3x5vG5d7Nk', // Google Maps API key for location fields,
+    googleMapsApiKey: '', // Google Maps API key for location fields,
     // Known profile facts from localStorage — sent with every message so AI never asks for things it already knows
     userProfile: {
         FullName:      [_jmember.FirstName, _jmember.Surname].filter(Boolean).join(' ') || null,
@@ -1187,7 +1187,7 @@ async function checkAndHandleDashboardIntent(message) {
         addMessage('user', message);
         showTypingIndicator();
 
-        const dashBase = window.location.origin;
+        const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
         const genRes = await fetch(dashBase + '/api/dashboard/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1224,6 +1224,9 @@ async function checkAndHandleDashboardIntent(message) {
         messageDiv.appendChild(msgContent);
         messagesArea.appendChild(messageDiv);
         scrollToBottom();
+
+       parent.loadDashboardAI(url)
+
 
         return true;
     } catch (err) {

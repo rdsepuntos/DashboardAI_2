@@ -79,6 +79,15 @@ RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
   For any KPI that counts records use valueKey = "count".
   For any KPI that needs a real column ensure that column is in the dataSource columns list.
 
+  KPI PRE-FILTERS — to count a subset of records, add a "*Filter" config key:
+  The key name is the column name with "Filter" appended (camelCase):
+    statusFilter    = "Open"     → counts only rows where Status = "Open"
+    statusFilter    = "Closed"   → counts only rows where Status = "Closed"
+    typeFilter      = "Hazard"   → counts only rows where Type = "Hazard"
+    departmentFilter= "Safety"   → counts only rows where Department = "Safety"
+  Use this instead of inventing a separate dataSource or filter for KPI subsets.
+  Example: { "valueKey": "count", "format": "number", "color": "#f59e0b", "statusFilter": "Open" }
+
 WRONG:  "config": {}
 RIGHT:  "config": { "valueKey": "count", "format": "number" }
 
