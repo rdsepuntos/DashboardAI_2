@@ -82,6 +82,30 @@ namespace DashboardAI.Infrastructure.Services
                     $"Column '{aggregation.AggregateColumn}' is not registered for data source '{dataSourceName}'.");
 
             var (whereSql, dynParams) = BuildWhereClause(definition, parameters);
+
+            // Append AdditionalFilters (exact-match column = value conditions).
+            // Each column is validated against the registered column list to prevent injection.
+            if (aggregation.AdditionalFilters != null && aggregation.AdditionalFilters.Count > 0)
+            {
+                var extraConditions = new List<string>();
+                foreach (var kv in aggregation.AdditionalFilters)
+                {
+                    if (string.IsNullOrEmpty(kv.Key) || kv.Value == null) continue;
+
+                    if (!validColumns.Contains(kv.Key))
+                        throw new InvalidOperationException(
+                            $"Additional filter column '{kv.Key}' is not registered for data source '{dataSourceName}'.");
+
+                    var paramName = $"__af_{kv.Key}";
+                    extraConditions.Add($"[{kv.Key}] = @{paramName}");
+                    dynParams.Add(paramName, kv.Value);
+                }
+
+                if (extraConditions.Any())
+                    whereSql = (whereSql.Length > 0 ? whereSql + " AND " : " WHERE ")
+                               + string.Join(" AND ", extraConditions);
+            }
+
             var aggExpr = BuildAggregateExpression(aggregation.AggregateFunction, aggregation.AggregateColumn);
 
             string sql;

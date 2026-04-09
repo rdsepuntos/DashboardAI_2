@@ -34,6 +34,9 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
 
         /// <summary>Optional date bucketing: monthly | quarterly | yearly | financial_year.</summary>
         public string DateGroup { get; set; }
+
+        /// <summary>Exact-match column filters appended to the WHERE clause for KPI *Filter config keys.</summary>
+        public Dictionary<string, string> AdditionalFilters { get; set; }
     }
 
     public class QueryPagedWidgetDataRequest
@@ -87,7 +90,8 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                         GroupBy           = request.GroupBy,
                         AggregateFunction = request.AggregateFunction,
                         AggregateColumn   = request.AggregateColumn,
-                        DateGroup         = request.DateGroup
+                        DateGroup         = request.DateGroup,
+                        AdditionalFilters = request.AdditionalFilters
                     });
             }
 

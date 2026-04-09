@@ -216,11 +216,22 @@ const DashboardEngine = (() => {
         const groupBy = type === 'chart' ? (config.xKey || null) : null;
         const aggCol  = effectiveAgg !== 'count' ? (config.yKey || config.valueKey || null) : null;
 
+        // Collect *Filter config keys (e.g. statusFilter: "Open") and pass them
+        // to the server as exact-match WHERE conditions so KPI counts are scoped correctly.
+        const additionalFilters = {};
+        Object.keys(config).forEach(key => {
+          if (!key.endsWith('Filter')) return;
+          const col     = key.slice(0, -6);  // strip 'Filter'
+          const colName = col.charAt(0).toUpperCase() + col.slice(1);
+          if (config[key]) additionalFilters[colName] = config[key];
+        });
+
         const data = await _queryDataAggregated(widget.dataSource, params, {
           groupBy,
           aggregateFunction: effectiveAgg,
           aggregateColumn:   aggCol,
-          dateGroup:         config.dateGroup || null
+          dateGroup:         config.dateGroup || null,
+          additionalFilters: Object.keys(additionalFilters).length ? additionalFilters : null
         });
         _renderWidgetContent(widget, bodyEl, data, null, null, /* preAggregated */ true);
 
@@ -375,7 +386,8 @@ const DashboardEngine = (() => {
         groupBy:           agg.groupBy           || null,
         aggregateFunction: agg.aggregateFunction || null,
         aggregateColumn:   agg.aggregateColumn   || null,
-        dateGroup:         agg.dateGroup         || null
+        dateGroup:         agg.dateGroup         || null,
+        additionalFilters: agg.additionalFilters || null
       })
     });
     const data = await res.json();
