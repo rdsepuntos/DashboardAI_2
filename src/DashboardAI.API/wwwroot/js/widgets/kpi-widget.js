@@ -53,10 +53,11 @@ const KpiWidget = (() => {
 
     const formatted = _format(raw, config.format, config.prefix, config.suffix);
     const label = config.label || title || (valueKey !== 'count' ? valueKey : '') || '';
+    const color = config.color || '';
 
     el.innerHTML = `
       <div class="kpi-card">
-        <div class="kpi-value">${formatted}</div>
+        <div class="kpi-value"${color ? ` style="color:${color}"` : ''}>${formatted}</div>
         ${label ? `<div class="kpi-label">${label}</div>` : ''}
       </div>`;
   }

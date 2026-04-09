@@ -17,7 +17,7 @@ const ChartWidget = (() => {
   const _instances = {};
 
   const PALETTE = [
-    '#6366f1','#22c55e','#f59e0b','#ef4444','#06b6d4',
+    '#3B98F1','#22c55e','#f59e0b','#ef4444','#06b6d4',
     '#a855f7','#ec4899','#14b8a6','#f97316','#84cc16'
   ];
 
@@ -88,6 +88,7 @@ const ChartWidget = (() => {
     const yKey        = config.yKey || null;
     const aggregation = (config.aggregation || (yKey ? 'sum' : 'count')).toLowerCase();
     const dateGroup   = config.dateGroup || null;
+    const color       = config.color || PALETTE[0];
 
     // ── Aggregate data ───────────────────────────────────────────────────────
     let labels, values;
@@ -145,9 +146,9 @@ const ChartWidget = (() => {
     const dataset = {
       label:           widget.title || yKey,
       data:            values,
-      backgroundColor: isPie ? PALETTE : (PALETTE[0] + '33'),
-      borderColor:     isPie ? PALETTE : PALETTE[0],
-      borderWidth:     isPie ? 1 : 2,
+      backgroundColor: isPie ? PALETTE : (isArea ? color + '33' : color),
+      borderColor:     isPie ? PALETTE : color,
+      borderWidth:     isPie ? 1 : (isArea || chartType === 'line' ? 2 : 0),
       fill:            isArea,
       tension:         0.4,
       pointRadius:     isArea || chartType === 'line' ? 3 : 0
@@ -169,11 +170,12 @@ const ChartWidget = (() => {
         scales: isPie ? {} : {
           x: {
             ticks: { color: '#6b7280', font: { size: 11 } },
-            grid:  { color: '#ced4da' }
+            grid:  { display: false }
           },
           y: {
             ticks: { color: '#6b7280', font: { size: 11 } },
-            grid:  { color: '#ced4da' }
+            grid:  { color: '#e5e7eb' },
+            border: { dash: [4, 4] }
           }
         }
       }
