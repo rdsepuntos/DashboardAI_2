@@ -39,9 +39,12 @@ namespace DashboardAI.API.Controllers
             {
                 var data = await _handler.HandleAsync(new QueryWidgetDataRequest
                 {
-                    DataSource = request.DataSource,
-                    Parameters = request.Parameters ?? new Dictionary<string, object>(),
-                    StoreId    = request.StoreId
+                    DataSource        = request.DataSource,
+                    Parameters        = request.Parameters ?? new Dictionary<string, object>(),
+                    StoreId           = request.StoreId,
+                    GroupBy           = request.GroupBy,
+                    AggregateFunction = request.AggregateFunction,
+                    AggregateColumn   = request.AggregateColumn
                 });
 
                 return new JsonResult(data, _rawCasingSettings);
@@ -95,6 +98,19 @@ namespace DashboardAI.API.Controllers
         public string DataSource { get; set; }
         public int StoreId { get; set; }
         public Dictionary<string, object> Parameters { get; set; }
+
+        // ── Optional server-side aggregation ─────────────────────────────────
+        // When AggregateFunction is set the server runs GROUP BY instead of SELECT *.
+        // The aggregate result is returned in a column named "__value".
+
+        /// <summary>Column to GROUP BY. Omit for scalar KPI results.</summary>
+        public string GroupBy { get; set; }
+
+        /// <summary>Aggregate function: count | sum | avg | max | min.</summary>
+        public string AggregateFunction { get; set; }
+
+        /// <summary>Column to aggregate (ignored for count).</summary>
+        public string AggregateColumn { get; set; }
     }
 
     public class WidgetDataPagedRequest : WidgetDataRequest

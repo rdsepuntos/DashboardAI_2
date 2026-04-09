@@ -13,8 +13,28 @@
  */
 const KpiWidget = (() => {
 
-  function render(el, data, config, title) {
+  function render(el, data, config, title, preAggregated) {
     config = config || {};
+
+    // When the server already ran the aggregate, there is a single row with
+    // a "__value" column.  Read it directly and skip all client-side computation.
+    if (preAggregated) {
+      const rows = Array.isArray(data) ? data : (data ? [data] : []);
+      const raw  = rows.length > 0 ? rows[0].__value : null;
+      if (raw === null || raw === undefined) {
+        el.innerHTML = '<div class="widget-empty">No data</div>';
+        return;
+      }
+      const formatted = _format(raw, config.format, config.prefix, config.suffix);
+      const label     = config.label || title || '';
+      const color     = config.color || '';
+      el.innerHTML = `
+      <div class="kpi-card">
+        <div class="kpi-value"${color ? ` style="color:${color}"` : ''}>${formatted}</div>
+        ${label ? `<div class="kpi-label">${label}</div>` : ''}
+      </div>`;
+      return;
+    }
 
     let rows       = Array.isArray(data) ? data : (data ? [data] : []);
     const aggregation = (config.aggregation || '').toLowerCase();

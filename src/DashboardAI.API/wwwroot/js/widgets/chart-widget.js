@@ -75,7 +75,7 @@ const ChartWidget = (() => {
     }
   }
 
-  function render(el, data, widget) {
+  function render(el, data, widget, preAggregated) {
     const config    = widget.config || {};
     const chartType = (widget.chartType || 'bar').toLowerCase();
 
@@ -84,10 +84,13 @@ const ChartWidget = (() => {
       return;
     }
 
+    // When the server already ran GROUP BY, data rows are { [xKey]: ..., __value: ... }.
+    // Use xKey from config for labels and __value for the numeric series;
+    // skip all client-side grouping by treating data as aggregation='none'.
     const xKey        = config.xKey || _firstStringKey(data[0]);
-    const yKey        = config.yKey || null;
-    const aggregation = (config.aggregation || (yKey ? 'sum' : 'count')).toLowerCase();
-    const dateGroup   = config.dateGroup || null;
+    const yKey        = preAggregated ? '__value' : (config.yKey || null);
+    const aggregation = preAggregated ? 'none' : (config.aggregation || (yKey ? 'sum' : 'count')).toLowerCase();
+    const dateGroup   = preAggregated ? null    : (config.dateGroup || null);
     const color       = config.color || PALETTE[0];
 
     // ── Aggregate data ───────────────────────────────────────────────────────

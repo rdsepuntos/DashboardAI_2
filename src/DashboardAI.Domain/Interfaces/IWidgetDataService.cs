@@ -15,6 +15,16 @@ namespace DashboardAI.Domain.Interfaces
             IDictionary<string, object> parameters);
 
         /// <summary>
+        /// Same as QueryAsync but applies a server-side GROUP BY + aggregate, returning only summary rows.
+        /// The aggregate result is always in a column named "__value".
+        /// Only supported for views (not stored procedures).
+        /// </summary>
+        Task<IEnumerable<IDictionary<string, object>>> QueryAggregatedAsync(
+            string dataSourceName,
+            IDictionary<string, object> parameters,
+            AggregationRequest aggregation);
+
+        /// <summary>
         /// Same as QueryAsync but returns one page of results plus the total row count.
         /// </summary>
         Task<PagedResult<IDictionary<string, object>>> QueryPagedAsync(

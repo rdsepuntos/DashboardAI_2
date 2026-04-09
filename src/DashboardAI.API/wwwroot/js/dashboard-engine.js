@@ -185,17 +185,39 @@ const DashboardEngine = (() => {
     if (!bodyEl) return;
 
     const params   = _buildWidgetParams(widget);
-    const isTable  = (widget.type || '').toLowerCase() === 'table';
+    const type     = (widget.type || '').toLowerCase();
+    const isTable  = type === 'table';
     const pageSize = (widget.config && widget.config.pageSize) ? parseInt(widget.config.pageSize) : 50;
     const curPage  = page || 1;
+    const config   = widget.config || {};
 
     bodyEl.innerHTML = '<div class="widget-loading">Loading…</div>';
+
+    // Push GROUP BY to the server for chart/KPI widgets that have an aggregation
+    // configured — unless dateGroup is set (that bucketing stays client-side).
+    const aggregation = (config.aggregation || '').toLowerCase();
+    const canServerAggregate =
+      (type === 'chart' || type === 'kpi') &&
+      aggregation &&
+      aggregation !== 'none' &&
+      !config.dateGroup;
 
     try {
       if (isTable) {
         const result = await _queryDataPaged(widget.dataSource, params, curPage, pageSize);
         const fetchFn = (p) => _loadWidgetData(widget, p);
         _renderWidgetContent(widget, bodyEl, result.data, result, fetchFn);
+      } else if (canServerAggregate) {
+        // For charts use xKey as the GROUP BY column.
+        // For KPIs omit groupBy (scalar result).
+        const groupBy = type === 'chart' ? (config.xKey || null) : null;
+        const aggCol  = aggregation !== 'count' ? (config.yKey || config.valueKey || null) : null;
+        const data    = await _queryDataAggregated(widget.dataSource, params, {
+          groupBy,
+          aggregateFunction: aggregation,
+          aggregateColumn:   aggCol
+        });
+        _renderWidgetContent(widget, bodyEl, data, null, null, /* preAggregated */ true);
       } else {
         const data = await _queryData(widget.dataSource, params);
         _renderWidgetContent(widget, bodyEl, data);
@@ -224,12 +246,12 @@ const DashboardEngine = (() => {
     return params;
   }
 
-  function _renderWidgetContent(widget, bodyEl, data, meta, fetchFn) {
+  function _renderWidgetContent(widget, bodyEl, data, meta, fetchFn, preAggregated) {
     bodyEl.innerHTML = '';
 
     switch ((widget.type || '').toLowerCase()) {
-      case 'kpi':      KpiWidget.render(bodyEl, data, widget.config, widget.title);  break;
-      case 'chart':    ChartWidget.render(bodyEl, data, widget);                  break;
+      case 'kpi':      KpiWidget.render(bodyEl, data, widget.config, widget.title, preAggregated);  break;
+      case 'chart':    ChartWidget.render(bodyEl, data, widget, preAggregated);                  break;
       case 'table':    TableWidget.render(bodyEl, data, widget.config, meta, fetchFn); break;
       case 'map':      MapWidget.render(bodyEl, data, widget.config);              break;
       case 'markdown': MarkdownWidget.render(bodyEl, widget.config);              break;
@@ -329,6 +351,27 @@ const DashboardEngine = (() => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Query failed');
+    return data;
+  }
+
+  // Sends aggregation fields so the server runs GROUP BY instead of SELECT *.
+  // Returns pre-grouped rows: { [groupByCol]: ..., __value: ... } for charts,
+  // or a single { __value: ... } row for scalar KPI queries.
+  async function _queryDataAggregated(dataSource, params, agg) {
+    const res = await fetch(API_BASE + '/api/widget-data/query', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        dataSource,
+        storeId:           _session.storeId,
+        parameters:        params,
+        groupBy:           agg.groupBy           || null,
+        aggregateFunction: agg.aggregateFunction || null,
+        aggregateColumn:   agg.aggregateColumn   || null
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Aggregated query failed');
     return data;
   }
   async function _queryDataPaged(dataSource, params, page, pageSize) {

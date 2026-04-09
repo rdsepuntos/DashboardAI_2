@@ -18,6 +18,19 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
 
         /// <summary>Server-side locked StoreId (from user session)</summary>
         public int StoreId { get; set; }
+
+        // ── Optional server-side aggregation ─────────────────────────────────
+        // When AggregateFunction is set the query runs as a GROUP BY aggregate
+        // instead of SELECT *, dramatically reducing data transfer for chart/KPI widgets.
+
+        /// <summary>Column to GROUP BY. Null/empty = scalar result (KPI).</summary>
+        public string GroupBy { get; set; }
+
+        /// <summary>Aggregate function: count | sum | avg | max | min.</summary>
+        public string AggregateFunction { get; set; }
+
+        /// <summary>Column to aggregate (ignored for count).</summary>
+        public string AggregateColumn { get; set; }
     }
 
     public class QueryPagedWidgetDataRequest
@@ -59,6 +72,20 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                 // Enforce server-side StoreId — always override what the client sends
                 ["StoreId"] = request.StoreId
             };
+
+            // If aggregation is requested, push the GROUP BY to the database.
+            if (!string.IsNullOrWhiteSpace(request.AggregateFunction))
+            {
+                return await _dataService.QueryAggregatedAsync(
+                    request.DataSource,
+                    safeParams,
+                    new Domain.Entities.AggregationRequest
+                    {
+                        GroupBy           = request.GroupBy,
+                        AggregateFunction = request.AggregateFunction,
+                        AggregateColumn   = request.AggregateColumn
+                    });
+            }
 
             return await _dataService.QueryAsync(request.DataSource, safeParams);
         }
