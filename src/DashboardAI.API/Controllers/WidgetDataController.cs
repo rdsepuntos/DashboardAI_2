@@ -97,6 +97,7 @@ namespace DashboardAI.API.Controllers
                     Parameters        = request.Parameters ?? new Dictionary<string, object>(),
                     StoreId           = request.StoreId,
                     GroupBy           = request.GroupBy,
+                    GroupBy2          = request.GroupBy2,
                     AggregateFunction = request.AggregateFunction,
                     AggregateColumn   = request.AggregateColumn,
                     DateGroup         = request.DateGroup,
@@ -205,6 +206,9 @@ namespace DashboardAI.API.Controllers
 
         /// <summary>Exact-match column filters for KPI *Filter config keys, e.g. { "Status": "Open" }.</summary>
         public Dictionary<string, string> AdditionalFilters { get; set; }
+
+        /// <summary>Second GROUP BY column for heatmap (GROUP BY xKey, yKey).</summary>
+        public string GroupBy2 { get; set; }
     }
 
     public class WidgetDataPagedRequest : WidgetDataRequest

@@ -77,6 +77,10 @@ namespace DashboardAI.Infrastructure.Services
                 throw new InvalidOperationException(
                     $"Column '{aggregation.GroupBy}' is not registered for data source '{dataSourceName}'.");
 
+            if (!string.IsNullOrEmpty(aggregation.GroupBy2) && !validColumns.Contains(aggregation.GroupBy2))
+                throw new InvalidOperationException(
+                    $"Column '{aggregation.GroupBy2}' is not registered for data source '{dataSourceName}'.");
+
             if (!string.IsNullOrEmpty(aggregation.AggregateColumn) && !validColumns.Contains(aggregation.AggregateColumn))
                 throw new InvalidOperationException(
                     $"Column '{aggregation.AggregateColumn}' is not registered for data source '{dataSourceName}'.");
@@ -134,7 +138,15 @@ namespace DashboardAI.Infrastructure.Services
             var aggExpr = BuildAggregateExpression(aggregation.AggregateFunction, aggregation.AggregateColumn);
 
             string sql;
-            if (!string.IsNullOrEmpty(aggregation.GroupBy))
+            if (!string.IsNullOrEmpty(aggregation.GroupBy2))
+            {
+                // Two-column GROUP BY for heatmap: SELECT [xKey], [yKey], COUNT(*) AS __value
+                sql = $"SELECT [{aggregation.GroupBy}], [{aggregation.GroupBy2}], {aggExpr} AS __value"
+                    + $" FROM {dataSourceName}{whereSql}"
+                    + $" GROUP BY [{aggregation.GroupBy}], [{aggregation.GroupBy2}]"
+                    + $" ORDER BY [{aggregation.GroupBy}], [{aggregation.GroupBy2}]";
+            }
+            else if (!string.IsNullOrEmpty(aggregation.GroupBy))
             {
                 // When DateGroup is set, bucket the date column into a sortable string key
                 // returned as __group (e.g. '2025-01' for monthly).

@@ -39,6 +39,12 @@ namespace DashboardAI.Domain.Entities
         public string DateGroup { get; set; }
 
         /// <summary>
+        /// Second column to GROUP BY (heatmap use-case: GROUP BY [GroupBy], [GroupBy2]).
+        /// When set, the result rows contain both GroupBy and GroupBy2 columns plus __value.
+        /// </summary>
+        public string GroupBy2 { get; set; }
+
+        /// <summary>
         /// Optional exact-match column filters appended to the WHERE clause,
         /// e.g. { "Status": "Open" } → AND [Status] = @Status.
         /// Column names are validated against the registered column list.

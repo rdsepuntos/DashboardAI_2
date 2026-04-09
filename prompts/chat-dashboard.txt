@@ -150,6 +150,62 @@ config MUST have latKey + lngKey.
 WRONG:  "config": {}
 RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }
 
+--- GAUGE ---
+Shows a half-doughnut arc of a single scalar value within a min–max range.
+config MUST have valueKey + max.
+  valueKey    — "count" or a numeric column (same rules as KPI)
+  min         — scale minimum, usually "0"
+  max         — scale maximum (e.g. "100" for %, or the expected record-count ceiling)
+  format      — "number" | "percent" | "currency"
+  color       — arc colour (same palette as KPI)
+  label       — text shown under the number (falls back to widget title)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "valueKey": "count", "min": "0", "max": "200", "format": "number", "color": "#3B98F1" }
+
+--- STAT ---
+Like a KPI but displays a delta arrow + percentage change vs a reference value.
+config MUST have valueKey + prevValue.
+  valueKey      — "count" or a numeric column (same rules as KPI)
+  prevValue     — comparison number as a STRING (e.g. "142") representing the previous-period value
+  deltaLabel    — context string, e.g. "vs last quarter" or "vs last year"
+  goodDirection — "up" (increase = green) | "down" (decrease = green, default "up")
+  format / color / prefix / suffix — same as KPI
+
+WRONG:  "config": {}
+RIGHT:  "config": { "valueKey": "count", "prevValue": "120", "deltaLabel": "vs last quarter", "goodDirection": "up", "format": "number", "color": "#3B98F1" }
+
+--- PROGRESS ---
+Horizontal ranked progress bars, one per category, sorted descending.
+config MUST have xKey + aggregation.
+  xKey        — category column (same lookup rules as CHART xKey)
+  aggregation — count | sum | avg (default count)
+  yKey        — numeric column to aggregate (required for sum/avg)
+  showPercent — "true" | "false" (default true)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "Department", "aggregation": "count" }
+
+--- DONUT ---
+Doughnut chart with total count shown in the centre hole.
+config MUST have xKey + aggregation.
+  xKey        — category / label column
+  aggregation — count | sum | avg (default count)
+  yKey        — numeric column to aggregate (required for sum/avg)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
+
+--- HEATMAP ---
+Colour-intensity 2-D grid; rows = yKey values, columns = xKey values, cells = record count.
+config MUST have xKey + yKey.
+  xKey        — column for x-axis (e.g. month / day / team)
+  yKey        — column for y-axis (e.g. Status / HazardType / Department)
+  colorScale  — "heat" (amber gradient, default) | "cool" (blue gradient)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "Department", "yKey": "Status", "colorScale": "heat" }
+
 STRICT COLUMN RULE — every column name you use in config (xKey, yKey, valueKey,
 columns list, valueKey/labelKey in filters) MUST appear in the "columns" array of
 the dataSource in AVAILABLE DATA SOURCES. If a column does not exist in that list,

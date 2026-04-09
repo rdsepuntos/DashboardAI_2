@@ -9,7 +9,7 @@ namespace DashboardAI.Application.DTOs
         public string Id { get; set; }
 
         [JsonProperty("type")]
-        public string Type { get; set; }  // "chart" | "table" | "kpi" | "map" | "markdown"
+        public string Type { get; set; }  // "chart" | "table" | "kpi" | "map" | "markdown" | "gauge" | "stat" | "progress" | "donut" | "heatmap"
 
         [JsonProperty("chartType")]
         public string ChartType { get; set; }  // "bar" | "line" | "pie" | "area" (charts only)

@@ -50,6 +50,11 @@ namespace DashboardAI.Domain.Entities
         Table,
         Kpi,
         Map,
-        Markdown
+        Markdown,
+        Gauge,
+        Stat,
+        Progress,
+        Donut,
+        Heatmap
     }
 }

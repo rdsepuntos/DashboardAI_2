@@ -37,6 +37,9 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
 
         /// <summary>Exact-match column filters appended to the WHERE clause for KPI *Filter config keys.</summary>
         public Dictionary<string, string> AdditionalFilters { get; set; }
+
+        /// <summary>Second GROUP BY column (heatmap: GROUP BY xKey, yKey).</summary>
+        public string GroupBy2 { get; set; }
     }
 
     public class QueryPagedWidgetDataRequest
@@ -88,6 +91,7 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                     new Domain.Entities.AggregationRequest
                     {
                         GroupBy           = request.GroupBy,
+                        GroupBy2          = request.GroupBy2,
                         AggregateFunction = request.AggregateFunction,
                         AggregateColumn   = request.AggregateColumn,
                         DateGroup         = request.DateGroup,

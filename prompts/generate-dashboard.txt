@@ -37,6 +37,11 @@ Look at the widget title and pick type + chartType:
 - Title contains "total", "count", "average", "avg" (single number) => type=kpi
 - Title contains "detail", "list", "report"           => type=table
 - Title contains "map" or "location"                  => type=map
+- Title contains "gauge", "compliance rate", "% complete", "risk score" => type=gauge
+- Title contains "vs last", "compared to", "change", "delta"           => type=stat
+- Title contains "progress", "ranked", "top [N] by"                    => type=progress
+- Title contains "donut", "share of", "proportion"                     => type=donut
+- Title contains "heatmap" or two-axis matrix (e.g. "Status by Department") => type=heatmap
 
 === STEP 2: POPULATE config BASED ON TYPE ===
 
@@ -142,6 +147,59 @@ RIGHT:  "config": { "columns": "<comma-separated column names chosen from the da
 WRONG:  "config": {}
 RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }
 
+--- GAUGE: config MUST contain valueKey, max ---
+Shows a half-doughnut gauge of a single scalar value within a min–max range.
+  valueKey    — "count" or a numeric column (same rules as KPI valueKey)
+  min         — scale minimum, usually 0
+  max         — scale maximum (e.g. "100" for a percentage, total record count, etc.)
+  format      — "number" | "percent" | "currency"
+  color       — arc colour (same palette as KPI)
+  label       — text shown under the number (falls back to widget title)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "valueKey": "count", "min": "0", "max": "200", "format": "number", "color": "#3B98F1" }
+
+--- STAT: config MUST contain valueKey + prevValue ---
+Like a KPI but displays a delta arrow + percentage change vs a reference value.
+  valueKey      — "count" or a numeric column (same rules as KPI)
+  prevValue     — hardcoded comparison number as a STRING (e.g. "142") representing the previous period value
+  deltaLabel    — context string (e.g. "vs last quarter", "vs last year")
+  goodDirection — "up" (increase is good, shown green) | "down" (decrease is good, shown green)
+  format / color / prefix / suffix — same as KPI
+
+Estimate prevValue from context or set it to "0" if unknown.
+WRONG:  "config": {}
+RIGHT:  "config": { "valueKey": "count", "prevValue": "120", "deltaLabel": "vs last quarter", "goodDirection": "up", "format": "number", "color": "#3B98F1" }
+
+--- PROGRESS: config MUST contain xKey + aggregation ---
+Horizontal ranked progress bars, one per category, sorted by value descending.
+  xKey        — category column (same lookup rules as CHART xKey)
+  aggregation — count | sum | avg (default count)
+  yKey        — numeric column to aggregate (required for sum/avg)
+  showPercent — "true" | "false" (default true)
+  color       — optional; leave blank to use the rotating colour palette
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "Department", "aggregation": "count" }
+
+--- DONUT: config MUST contain xKey + aggregation ---
+Doughnut chart with total count in the centre hole.
+  xKey        — category / label column
+  aggregation — count | sum | avg (default count)
+  yKey        — numeric column to aggregate (required for sum/avg)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
+
+--- HEATMAP: config MUST contain xKey + yKey ---
+Colour-intensity 2-D grid: rows are yKey values, columns are xKey values, cells show record count.
+  xKey        — column for x-axis (e.g. month, day, team)
+  yKey        — column for y-axis (e.g. Status, HazardType, Department)
+  colorScale  — "heat" (amber, default) | "cool" (blue)
+
+WRONG:  "config": {}
+RIGHT:  "config": { "xKey": "Department", "yKey": "Status", "colorScale": "heat" }
+
 === STEP 3: OTHER WIDGET FIELDS ===
 
 FILTER SCHEMA:
@@ -167,10 +225,15 @@ Each widget MUST use a nested "position" object — NOT flat x/y/w/h:
   WRONG:   { "id": "w1", "x": 0, "y": 0, "w": 3, "h": 2, ... }
 
 Sizes:
-- KPI:   w=3, h=2
-- Chart: w=6, h=4
-- Table: w=12, h=5
-- Map:   w=6, h=5
+- KPI:      w=3, h=2
+- Chart:    w=6, h=4
+- Table:    w=12, h=5
+- Map:      w=6, h=5
+- Gauge:    w=3, h=3
+- Stat:     w=3, h=2
+- Progress: w=6, h=4
+- Donut:    w=6, h=4
+- Heatmap:  w=12, h=5
 
 Layout:
 - KPIs go in the first row (y=0). Fill left to right: x=0, x=3, x=6, x=9. Up to 4 KPIs fit in one row.

@@ -256,11 +256,17 @@ const DashboardEngine = (() => {
     const aggregation = (config.aggregation || '').toLowerCase();
 
     // ── Routing logic ────────────────────────────────────────────────────────
-    // chart / kpi  → always server-aggregate UNLESS dateGroup is set
-    //                (dateGroup needs raw date strings for client-side bucketing)
+    // chart / kpi / gauge / stat / donut / progress / heatmap
+    //              → always server-aggregate (no SELECT *)
     // table        → paged raw rows
-    // map          → raw rows (needs one coordinate per record)
-    // anything else → raw rows
+    // map / markdown → raw rows
+
+    // Scalar (no GROUP BY): kpi, gauge, stat
+    // Grouped (GROUP BY xKey): chart, donut, progress
+    // 2-column grouped: heatmap (GROUP BY xKey, yKey)
+    const _isScalar  = type === 'kpi'  || type === 'gauge' || type === 'stat';
+    const _isGrouped = type === 'chart' || type === 'donut' || type === 'progress';
+    const _is2D      = type === 'heatmap';
 
     try {
       if (isTable) {
@@ -268,12 +274,13 @@ const DashboardEngine = (() => {
         const fetchFn = (p) => _loadWidgetData(widget, p);
         _renderWidgetContent(widget, bodyEl, result.data, result, fetchFn);
 
-      } else if (type === 'chart' || type === 'kpi') {
+      } else if (_isScalar || _isGrouped || _is2D) {
         // Always server-aggregate — never SELECT *.
         // dateGroup is forwarded so the server does date bucketing in SQL;
         // the returned __group key is formatted client-side for labels only.
         const effectiveAgg = (!aggregation || aggregation === 'none') ? 'count' : aggregation;
-        const groupBy = type === 'chart' ? (config.xKey || null) : null;
+        const groupBy  = (_isGrouped || _is2D) ? (config.xKey || null) : null;
+        const groupBy2 = _is2D ? (config.yKey || null) : null;
         // count_distinct uses aggregateColumn = valueKey (for KPIs like "Total Unique Departments")
         const isCountDistinct = effectiveAgg === 'count_distinct';
         // "count" is a magic valueKey (not a real column) — don't pass it as aggregateColumn
@@ -294,8 +301,8 @@ const DashboardEngine = (() => {
           additionalFilters[colName] = Array.isArray(val) ? val.join(',') : val;
         });
 
-        if (type === 'kpi') {
-          console.log(`[KPI] ${widget.title}`, {
+        if (type === 'kpi' || type === 'gauge' || type === 'stat') {
+          console.log(`[${type.toUpperCase()}] ${widget.title}`, {
             config,
             additionalFilters,
             params
@@ -304,6 +311,7 @@ const DashboardEngine = (() => {
 
         const data = await _queryDataAggregated(widget.dataSource, params, {
           groupBy,
+          groupBy2,
           aggregateFunction: effectiveAgg,
           aggregateColumn:   aggCol,
           dateGroup:         config.dateGroup || null,
@@ -353,11 +361,16 @@ const DashboardEngine = (() => {
     bodyEl.innerHTML = '';
 
     switch ((widget.type || '').toLowerCase()) {
-      case 'kpi':      KpiWidget.render(bodyEl, data, widget.config, widget.title, preAggregated);  break;
-      case 'chart':    ChartWidget.render(bodyEl, data, widget, preAggregated);                  break;
-      case 'table':    TableWidget.render(bodyEl, data, widget.config, meta, fetchFn); break;
-      case 'map':      MapWidget.render(bodyEl, data, widget.config);              break;
-      case 'markdown': MarkdownWidget.render(bodyEl, widget.config);              break;
+      case 'kpi':      KpiWidget.render(bodyEl, data, widget.config, widget.title, preAggregated);      break;
+      case 'chart':    ChartWidget.render(bodyEl, data, widget, preAggregated);                        break;
+      case 'table':    TableWidget.render(bodyEl, data, widget.config, meta, fetchFn);                 break;
+      case 'map':      MapWidget.render(bodyEl, data, widget.config);                                  break;
+      case 'markdown': MarkdownWidget.render(bodyEl, widget.config);                                   break;
+      case 'gauge':    GaugeWidget.render(bodyEl, data, widget.config, widget.title, preAggregated);   break;
+      case 'stat':     StatWidget.render(bodyEl, data, widget.config, widget.title, preAggregated);    break;
+      case 'donut':    DonutWidget.render(bodyEl, data, widget, preAggregated);                        break;
+      case 'progress': ProgressWidget.render(bodyEl, data, widget, preAggregated);                    break;
+      case 'heatmap':  HeatmapWidget.render(bodyEl, data, widget.config, preAggregated);                break;
       default:
         bodyEl.innerHTML = `<div class="widget-empty">Unknown widget type: ${widget.type}</div>`;
     }
@@ -469,6 +482,7 @@ const DashboardEngine = (() => {
         storeId:           _session.storeId,
         parameters:        params,
         groupBy:           agg.groupBy           || null,
+        groupBy2:          agg.groupBy2          || null,
         aggregateFunction: agg.aggregateFunction || null,
         aggregateColumn:   agg.aggregateColumn   || null,
         dateGroup:         agg.dateGroup         || null,
