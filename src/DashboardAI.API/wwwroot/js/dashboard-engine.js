@@ -3,7 +3,7 @@
  * Loads a dashboard by ID, renders filters + widgets on a GridStack canvas,
  * and handles real-time filter changes that re-fetch widget data.
  */
-const API_BASE = location.protocol === 'file:' ? 'http://localhost:56231' : location.origin;
+const API_BASE = location.protocol === 'file:' ? 'http://localhost:56231' : 'https://beta.whsmonitor.com.au/dashboardv2';
 
 const DashboardEngine = (() => {
 

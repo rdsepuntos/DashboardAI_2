@@ -61,7 +61,13 @@ namespace DashboardAI.Infrastructure.Services
             };
             var raw = await CallOpenAIResponsesAsync(_generatePromptId, _generatePromptVersion, variables);
 
-            var dto = JsonConvert.DeserializeObject<DashboardDto>(raw);
+            // Normalise flat x/y/w/h at widget root → nested "position" object,
+            // in case GPT returns { "x":0,"y":0,"w":3,"h":2 } instead of
+            // { "position":{"x":0,"y":0,"w":3,"h":2} }
+            raw = NormalizeFlatPositionsInJson(raw);
+
+            var dto = JsonConvert.DeserializeObject<DashboardDto>(raw,
+                new FlatStringDictConverter());
 
             // Ensure server-controlled fields
             dto.StoreId = storeId;
@@ -300,6 +306,92 @@ namespace DashboardAI.Infrastructure.Services
                 if (w.AppliesFilters == null || w.AppliesFilters.Count == 0)
                     w.AppliesFilters = new List<string>(nonLocked);
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  Custom converter: Dictionary<string,string> that tolerates object/array values
+        //  by serialising them back to their JSON string representation.
+        // ─────────────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
+        //  If GPT returned flat x/y/w/h at widget root instead of a nested
+        //  "position" object, promote them before deserialisation.
+        // ─────────────────────────────────────────────────────────────────────
+        private static string NormalizeFlatPositionsInJson(string raw)
+        {
+            try
+            {
+                var root = JObject.Parse(raw);
+                var widgets = root["widgets"] as JArray;
+                if (widgets == null) return raw;
+
+                foreach (var w in widgets)
+                {
+                    // If a proper "position" object is already present, skip.
+                    if (w["position"] is JObject pos &&
+                        pos["w"] != null && (int)pos["w"] > 0)
+                        continue;
+
+                    // Read flat properties (default 0 if missing)
+                    int x = w["x"] != null ? (int)w["x"] : 0;
+                    int y = w["y"] != null ? (int)w["y"] : 0;
+                    int wVal = w["w"] != null ? (int)w["w"] : 0;
+                    int h = w["h"] != null ? (int)w["h"] : 0;
+
+                    // Apply type-based defaults if still zero
+                    var type = (w["type"]?.ToString() ?? "").ToLower();
+                    if (wVal == 0) wVal = type == "kpi" ? 3 : type == "table" ? 12 : 6;
+                    if (h == 0)    h    = type == "kpi" ? 2 : type == "table" ? 5  : 4;
+
+                    // Write nested position and remove flat properties
+                    ((JObject)w)["position"] = new JObject(
+                        new JProperty("x", x),
+                        new JProperty("y", y),
+                        new JProperty("w", wVal),
+                        new JProperty("h", h));
+
+                    ((JObject)w).Remove("x");
+                    ((JObject)w).Remove("y");
+                    ((JObject)w).Remove("w");
+                    ((JObject)w).Remove("h");
+                }
+
+                return root.ToString(Formatting.None);
+            }
+            catch
+            {
+                return raw; // If anything fails, return unchanged and let normal parsing handle it
+            }
+        }
+
+        private class FlatStringDictConverter : JsonConverter
+        {
+            public override bool CanConvert(Type objectType)
+                => objectType == typeof(Dictionary<string, string>);
+
+            public override object ReadJson(JsonReader reader, Type objectType,
+                object existingValue, JsonSerializer serializer)
+            {
+                if (reader.TokenType == JsonToken.Null) return null;
+
+                var result = new Dictionary<string, string>();
+                var jObj   = JObject.Load(reader);
+
+                foreach (var prop in jObj.Properties())
+                {
+                    // If the value is a simple scalar, use its string representation.
+                    // If it's an object or array, serialise it back to a JSON string.
+                    var val = prop.Value;
+                    result[prop.Name] = (val.Type == JTokenType.Object || val.Type == JTokenType.Array)
+                        ? val.ToString(Formatting.None)
+                        : val.Value<string>();
+                }
+
+                return result;
+            }
+
+            public override void WriteJson(JsonWriter writer, object value,
+                JsonSerializer serializer)
+                => serializer.Serialize(writer, value);
         }
 
         private static void EnsureLockedStoreFilter(DashboardDto dto, int storeId)
