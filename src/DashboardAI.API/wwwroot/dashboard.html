@@ -13,7 +13,7 @@
   <link  rel="stylesheet" hrefDF="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <!-- App styles -->
-  <link  rel="stylesheet" href="/css/dashboard.css" />
+  <link  rel="stylesheet" href="https://beta.whsmonitor.com.au/dashboardv2/css/dashboard.css" />
 
   <!-- Phosphor Icons -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
@@ -23,7 +23,9 @@
   <!-- ── Top Bar ─────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <a href="/" class="topbar-logo">
-      <span class="topbar-title" id="dashboardTitle">Loading…</span>
+	
+	 <span class="d-none topbar-title" style="display: none !important" id="dashboardTitle">Loading…</span>
+	<img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" />
     </a>
     <div class="topbar-actions">
       <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
@@ -71,13 +73,13 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <script src="/js/widgets/kpi-widget.js"></script>
-  <script src="/js/widgets/chart-widget.js"></script>
-  <script src="/js/widgets/table-widget.js"></script>
-  <script src="/js/widgets/map-widget.js"></script>
-  <script src="/js/widgets/markdown-widget.js"></script>
-  <script src="/js/dashboard-engine.js"></script>
-  <script src="/js/chat.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/kpi-widget.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/chart-widget.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/table-widget.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/map-widget.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/markdown-widget.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/dashboard-engine.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/chat.js"></script>
 
   <script>
     // Bootstrap: extract dashboard ID from URL path /dashboard/{id}

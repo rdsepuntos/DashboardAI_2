@@ -78,7 +78,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: -appl
 /* Top bar */
 .topbar {
   height: var(--topbar-h); display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; background: var(--color-surface); border-bottom: 1px solid var(--color-border);
+  padding: 0 20px;
   flex-shrink: 0; z-index: 100;
 }
 .topbar-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--color-text); }

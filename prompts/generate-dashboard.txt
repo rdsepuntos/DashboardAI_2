@@ -20,6 +20,15 @@ Use the data sources and request to generate a complete dashboard JSON.
   "widgets": [ ...widget objects... ]
 }
 
+=== STEP 0: ALWAYS START WITH 4 KPI WIDGETS ===
+Before adding any charts or tables, always include exactly 4 KPI widgets at the top of the dashboard (y=0, x=0/3/6/9).
+Choose 4 meaningful KPIs based on the data source and user request. Common KPIs:
+- "Total [Records]"         => valueKey="count"
+- "Open [Records]"          => valueKey="count" with a filter condition (or a relevant status-filtered count)
+- "Closed [Records]"        => valueKey="count"
+- "Average Score"           => valueKey="Score" (only if Score column exists, otherwise pick another count-based KPI)
+If you cannot find 4 distinct meaningful KPIs, repeat count-based KPIs with different labels (e.g. "Total Hazards", "Open Hazards", "Closed Hazards", "In Progress").
+
 === STEP 1: DECIDE WIDGET TYPE FROM THE TITLE ===
 Look at the widget title and pick type + chartType:
 - Title contains "by [Category]" or "per [Category]"  => type=chart, chartType=bar
@@ -99,11 +108,23 @@ that exists in the chosen dataSource columns list.
 appliesFilters: list the filter IDs that apply to this widget (all non-locked filters by default).
 
 POSITION RULES (12-column grid, no overlaps):
+Each widget MUST use a nested "position" object — NOT flat x/y/w/h:
+  CORRECT: { "id": "w1", "position": { "x": 0, "y": 0, "w": 3, "h": 2 }, ... }
+  WRONG:   { "id": "w1", "x": 0, "y": 0, "w": 3, "h": 2, ... }
+
+Sizes:
 - KPI:   w=3, h=2
 - Chart: w=6, h=4
 - Table: w=12, h=5
 - Map:   w=6, h=5
-- Place KPIs in row y=0, charts in y=2, tables at the bottom.
+
+Layout:
+- KPIs go in the first row (y=0). Fill left to right: x=0, x=3, x=6, x=9. Up to 4 KPIs fit in one row.
+- Charts go in the next row (y=2). Two charts fit per row: x=0 and x=6. If 3 charts, use a second chart row.
+- Tables always use x=0, w=12, placed below all charts.
+- Maps use w=6, placed like charts (x=0 or x=6).
+- Never place two widgets with the same y and overlapping x ranges.
+- Always use the FULL 12-column width — do NOT leave all widgets at x=0.
 
 === FINAL RULES ===
 1. Always include a locked StoreId filter:
