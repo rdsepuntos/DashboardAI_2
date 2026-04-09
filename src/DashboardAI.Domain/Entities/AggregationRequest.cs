@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace DashboardAI.Domain.Entities
 {
     /// <summary>
@@ -35,5 +37,13 @@ namespace DashboardAI.Domain.Entities
         /// returned as __group, and the raw column is not exposed.
         /// </summary>
         public string DateGroup { get; set; }
+
+        /// <summary>
+        /// Optional exact-match column filters appended to the WHERE clause,
+        /// e.g. { "Status": "Open" } → AND [Status] = @Status.
+        /// Column names are validated against the registered column list.
+        /// Used to honour widget config *Filter keys (statusFilter, typeFilter, etc.) server-side.
+        /// </summary>
+        public Dictionary<string, string> AdditionalFilters { get; set; }
     }
 }

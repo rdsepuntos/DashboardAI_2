@@ -45,7 +45,8 @@ namespace DashboardAI.API.Controllers
                     GroupBy           = request.GroupBy,
                     AggregateFunction = request.AggregateFunction,
                     AggregateColumn   = request.AggregateColumn,
-                    DateGroup         = request.DateGroup
+                    DateGroup         = request.DateGroup,
+                    AdditionalFilters = request.AdditionalFilters
                 });
 
                 return new JsonResult(data, _rawCasingSettings);
@@ -115,6 +116,9 @@ namespace DashboardAI.API.Controllers
 
         /// <summary>Optional date bucketing: monthly | quarterly | yearly | financial_year.</summary>
         public string DateGroup { get; set; }
+
+        /// <summary>Exact-match column filters for KPI *Filter config keys, e.g. { "Status": "Open" }.</summary>
+        public Dictionary<string, string> AdditionalFilters { get; set; }
     }
 
     public class WidgetDataPagedRequest : WidgetDataRequest
