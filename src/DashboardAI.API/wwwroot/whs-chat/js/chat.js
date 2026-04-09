@@ -1187,7 +1187,7 @@ async function checkAndHandleDashboardIntent(message) {
         addMessage('user', message);
         showTypingIndicator();
 
-        const dashBase = window.location.origin;
+        const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
         const genRes = await fetch(dashBase + '/api/dashboard/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1224,6 +1224,9 @@ async function checkAndHandleDashboardIntent(message) {
         messageDiv.appendChild(msgContent);
         messagesArea.appendChild(messageDiv);
         scrollToBottom();
+
+       parent.loadDashboardAI(url)
+
 
         return true;
     } catch (err) {

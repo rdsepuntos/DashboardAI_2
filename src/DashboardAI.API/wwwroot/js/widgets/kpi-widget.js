@@ -16,9 +16,22 @@ const KpiWidget = (() => {
   function render(el, data, config, title) {
     config = config || {};
 
-    const rows        = Array.isArray(data) ? data : (data ? [data] : []);
+    let rows       = Array.isArray(data) ? data : (data ? [data] : []);
     const aggregation = (config.aggregation || '').toLowerCase();
     const valueKey    = config.valueKey;
+
+    // Apply any *Filter config keys as pre-filters on the row set.
+    // e.g. statusFilter="Closed"  → keep only rows where row.Status === "Closed"
+    //      typeFilter="Hazard"    → keep only rows where row.Type   === "Hazard"
+    Object.keys(config).forEach(key => {
+      if (!key.endsWith('Filter')) return;
+      const col = key.slice(0, -6);                 // strip "Filter" suffix
+      const colName = col.charAt(0).toUpperCase() + col.slice(1); // Title-case
+      const filterVal = config[key];
+      if (filterVal) {
+        rows = rows.filter(r => String(r[colName] ?? '') === String(filterVal));
+      }
+    });
 
     let raw;
 
