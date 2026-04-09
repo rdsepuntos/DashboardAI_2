@@ -189,36 +189,46 @@ const DashboardEngine = (() => {
     const isTable  = type === 'table';
     const pageSize = (widget.config && widget.config.pageSize) ? parseInt(widget.config.pageSize) : 50;
     const curPage  = page || 1;
-    const config   = widget.config || {};
 
     bodyEl.innerHTML = '<div class="widget-loading">Loading…</div>';
 
-    // Push GROUP BY to the server for chart/KPI widgets that have an aggregation
-    // configured — unless dateGroup is set (that bucketing stays client-side).
+    const config      = widget.config || {};
     const aggregation = (config.aggregation || '').toLowerCase();
-    const canServerAggregate =
-      (type === 'chart' || type === 'kpi') &&
-      aggregation &&
-      aggregation !== 'none' &&
-      !config.dateGroup;
+
+    // ── Routing logic ────────────────────────────────────────────────────────
+    // chart / kpi  → always server-aggregate UNLESS dateGroup is set
+    //                (dateGroup needs raw date strings for client-side bucketing)
+    // table        → paged raw rows
+    // map          → raw rows (needs one coordinate per record)
+    // anything else → raw rows
 
     try {
       if (isTable) {
         const result = await _queryDataPaged(widget.dataSource, params, curPage, pageSize);
         const fetchFn = (p) => _loadWidgetData(widget, p);
         _renderWidgetContent(widget, bodyEl, result.data, result, fetchFn);
-      } else if (canServerAggregate) {
-        // For charts use xKey as the GROUP BY column.
-        // For KPIs omit groupBy (scalar result).
+
+      } else if ((type === 'chart' || type === 'kpi') && !config.dateGroup) {
+        // Resolve effective aggregation — never leave it empty or 'none' here,
+        // as that would pull SELECT * from the database unnecessarily.
+        // 'none' means the widget author intended raw rows; we honour that only
+        // when dateGroup is also set (handled by the outer else branch).
+        const effectiveAgg = (!aggregation || aggregation === 'none') ? 'count' : aggregation;
+
+        // For charts, GROUP BY the xKey column.
+        // For KPIs, omit groupBy to get a single scalar row.
         const groupBy = type === 'chart' ? (config.xKey || null) : null;
-        const aggCol  = aggregation !== 'count' ? (config.yKey || config.valueKey || null) : null;
-        const data    = await _queryDataAggregated(widget.dataSource, params, {
+        const aggCol  = effectiveAgg !== 'count' ? (config.yKey || config.valueKey || null) : null;
+
+        const data = await _queryDataAggregated(widget.dataSource, params, {
           groupBy,
-          aggregateFunction: aggregation,
+          aggregateFunction: effectiveAgg,
           aggregateColumn:   aggCol
         });
         _renderWidgetContent(widget, bodyEl, data, null, null, /* preAggregated */ true);
+
       } else {
+        // map, markdown, or chart/kpi with dateGroup — raw rows needed
         const data = await _queryData(widget.dataSource, params);
         _renderWidgetContent(widget, bodyEl, data);
       }
