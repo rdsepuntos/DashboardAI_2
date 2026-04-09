@@ -13,10 +13,30 @@
   <link  rel="stylesheet" hrefDF="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <!-- App styles -->
-  <link  rel="stylesheet" href="https://beta.whsmonitor.com.au/dashboardv2/css/dashboard.css" />
+  <link  rel="stylesheet" href="https://beta.whsmonitor.com.au/dashboardv2/css/dashboard.css?ver=11111" />
 
   <!-- Phosphor Icons -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+  <!-- Chat sidebar collapse overrides (remote engine uses .hidden; we restyle it as a 36px strip) -->
+  <style>
+    .chat-sidebar.hidden {
+      display: flex !important; /* override .hidden { display: none !important } from remote CSS */
+      width: 36px !important;
+      min-width: 36px !important;
+      border-left: 1px solid var(--color-border) !important;
+      overflow: hidden;
+    }
+    .chat-sidebar.hidden .chat-header,
+    .chat-sidebar.hidden .chat-messages,
+    .chat-sidebar.hidden .chat-input-area {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .chat-sidebar.hidden .chat-expand-btn {
+      display: flex !important;
+    }
+  </style>
 </head>
 <body class="dashboard-page">
 
@@ -32,11 +52,21 @@
     </div>
   </header>
 
-  <!-- ── Filter Bar ──────────────────────────────────────────────────────── -->
-  <div style="position: relative;top: 20px;" id="filterBar" class="filter-bar"></div>
-
   <!-- ── Main Layout ────────────────────────────────────────────────────── -->
   <div class="main-layout">
+
+    <!-- Filter Sidebar -->
+    <aside class="filter-sidebar collapsed" id="filterSidebar">
+      <div class="filter-sidebar-header">
+        <span class="filter-sidebar-title">Filters</span>
+        <div class="filter-sidebar-actions">
+          <a href="#" class="filter-clear-all" id="filterClearAll">Clear All</a>
+          <button class="filter-toggle-btn" id="filterToggleBtn" title="Collapse filters"><i class="ph ph-caret-left"></i></button>
+        </div>
+      </div>
+      <div id="filterBar" class="filter-bar"></div>
+      <button class="filter-expand-btn" id="filterExpandBtn" title="Expand filters"><i class="ph ph-caret-right"></i></button>
+    </aside>
 
     <!-- Dashboard canvas -->
     <main class="canvas-area" id="canvasArea">
@@ -45,9 +75,10 @@
 
     <!-- Chat sidebar -->
     <aside class="chat-sidebar" id="chatSidebar">
+      <button class="chat-expand-btn" id="chatExpandBtn" title="Expand chat"><i class="ph ph-caret-left"></i></button>
       <div class="chat-header">
         <span>AI Assistant</span>
-        <button class="btn-icon" id="closeChatBtn" title="Close"><i class="ph ph-x"></i></button>
+        <button class="chat-toggle-btn btn-icon" id="closeChatBtn" title="Collapse"><i class="ph ph-caret-right"></i></button>
       </div>
       <div class="chat-messages" id="chatMessages">
         <div class="chat-bubble assistant">
@@ -78,8 +109,8 @@
   <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/table-widget.js"></script>
   <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/map-widget.js"></script>
   <script src="https://beta.whsmonitor.com.au/dashboardv2/js/widgets/markdown-widget.js"></script>
-  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/dashboard-engine.js"></script>
-  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/chat.js"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/dashboard-engine.js?ver=1"></script>
+  <script src="https://beta.whsmonitor.com.au/dashboardv2/js/chat.js?ver=1"></script>
 
   <script>
     // Bootstrap: extract dashboard ID from URL path /dashboard/{id}
@@ -95,6 +126,20 @@
 
     DashboardEngine.init(dashboardId, SESSION);
     ChatManager.init(SESSION);
+
+    // Filter sidebar collapse toggle
+    document.getElementById('filterToggleBtn').addEventListener('click', () => {
+      document.getElementById('filterSidebar').classList.add('collapsed');
+    });
+    document.getElementById('filterExpandBtn').addEventListener('click', () => {
+      document.getElementById('filterSidebar').classList.remove('collapsed');
+    });
+
+    // Chat expand button — remote engine owns closeChatBtn & toggleChatBtn (they add/toggle .hidden)
+    // We only need to handle the expand button to remove .hidden
+    document.getElementById('chatExpandBtn').addEventListener('click', () => {
+      document.getElementById('chatSidebar').classList.remove('hidden');
+    });
   </script>
 </body>
 </html>
