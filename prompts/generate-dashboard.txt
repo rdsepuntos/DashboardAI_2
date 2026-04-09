@@ -79,14 +79,36 @@ RIGHT:  "config": { "xKey": "Status", "aggregation": "count" }
   For any KPI that counts records use valueKey = "count".
   For any KPI that needs a real column ensure that column is in the dataSource columns list.
 
+  WRONG: valueKey="Score" when "Score" does NOT appear in the dataSource columns list.
+  RIGHT: valueKey="count" when no numeric aggregation column is available.
+
+  COUNTING UNIQUE VALUES — use aggregation + aggregateColumn:
+  - "Total Departments Involved" => aggregation="count_distinct", aggregateColumn="Department", valueKey="count"
+  - "Total Locations Assessed"   => aggregation="count_distinct", aggregateColumn="Location",   valueKey="count"
+  - "Total Hazard Types"         => aggregation="count_distinct", aggregateColumn="HazardType",  valueKey="count"
+  Use count_distinct whenever the KPI title says "unique", "distinct", "different", or counts a category noun.
+  count_distinct requires aggregateColumn to be a real column in the dataSource columns list.
+
   KPI PRE-FILTERS — to count a subset of records, add a "*Filter" config key:
-  The key name is the column name with "Filter" appended (camelCase):
-    statusFilter    = "Open"     → counts only rows where Status = "Open"
-    statusFilter    = "Closed"   → counts only rows where Status = "Closed"
-    typeFilter      = "Hazard"   → counts only rows where Type = "Hazard"
-    departmentFilter= "Safety"   → counts only rows where Department = "Safety"
+  The key name is the column name with "Filter" appended (camelCase).
+  The value can be a single string OR a comma-separated list (generates SQL IN):
+    statusFilter = "Open"                        → WHERE Status = 'Open'
+    statusFilter = "In Progress,Not Started"      → WHERE Status IN ('In Progress','Not Started')
+    typeFilter   = "Hazard"                       → WHERE Type = 'Hazard'
   Use this instead of inventing a separate dataSource or filter for KPI subsets.
-  Example: { "valueKey": "count", "format": "number", "color": "#f59e0b", "statusFilter": "Open" }
+
+  HOW TO PICK statusFilter VALUES — always use "knownValues" from the column metadata:
+  Each column may have a "knownValues" array with the real distinct values from the database.
+  When the user wants an "Open" or "Active" KPI, DO NOT guess "Open" — instead:
+    1. Look at Status knownValues (e.g. ["Closed","In Progress","Not Started","Overdue"])
+    2. Identify TERMINAL statuses: any value whose name suggests completion or rejection,
+       such as: Closed, Completed, Cancelled, Archived, Resolved, Done, Rejected, Expired
+    3. "Open" KPI  => statusFilter = all knownValues EXCEPT terminal ones (comma-separated)
+    4. "Closed" KPI => statusFilter = only the terminal knownValues (comma-separated)
+    5. If knownValues is absent, fall back to statusFilter = "Open" or "Closed" as a best guess.
+  Example — if knownValues = ["Closed","In Progress","Not Started","Overdue"]:
+    "Open Risks" KPI   => statusFilter = "In Progress,Not Started,Overdue"
+    "Closed Risks" KPI => statusFilter = "Closed"
 
 WRONG:  "config": {}
 RIGHT:  "config": { "valueKey": "count", "format": "number" }
@@ -129,6 +151,10 @@ FILTER SCHEMA:
   "valueKey": "<column name from that dataSource>",
   "labelKey": "<column name from that dataSource>",
   "isLocked": false, "defaultValue": "" }
+
+CRITICAL: "defaultValue" is ALWAYS a plain string — NEVER an object, array, or null.
+  WRONG: "defaultValue": {}   WRONG: "defaultValue": null   WRONG: "defaultValue": []
+  RIGHT: "defaultValue": ""   RIGHT: "defaultValue": "2026-01-01"   RIGHT: "defaultValue": "5"
 
 For dropdown filters: optionsSource, valueKey, and labelKey MUST reference a real column
 that exists in the chosen dataSource columns list.

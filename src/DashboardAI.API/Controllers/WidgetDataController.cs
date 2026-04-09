@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using DashboardAI.Application.UseCases.QueryWidgetData;
+using DashboardAI.Domain.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
@@ -13,6 +15,7 @@ namespace DashboardAI.API.Controllers
     public class WidgetDataController : ControllerBase
     {
         private readonly QueryWidgetDataHandler _handler;
+        private readonly IDataSourceRegistry _registry;
 
         // Preserve original SQL column name casing — the global camelCase resolver
         // would turn "HazardType" into "hazardType", breaking widget config key lookups.
@@ -22,8 +25,59 @@ namespace DashboardAI.API.Controllers
             NullValueHandling = NullValueHandling.Ignore
         };
 
-        public WidgetDataController(QueryWidgetDataHandler handler)
-            => _handler = handler ?? throw new ArgumentNullException(nameof(handler));
+        private static readonly HashSet<string> _categoricalCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Status", "Type", "SubType", "HazardType", "Hazard",
+            "Department", "Division", "Location", "LocationType",
+            "Programme", "Checklist", "CreatedBy", "PersonResponsible", "ReportedBy"
+        };
+
+        public WidgetDataController(QueryWidgetDataHandler handler, IDataSourceRegistry registry)
+        {
+            _handler  = handler  ?? throw new ArgumentNullException(nameof(handler));
+            _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // GET /api/widget-data/debug-enrichment?storeId=11017
+        // Returns the enriched data_sources_json exactly as sent to OpenAI.
+        // Useful for verifying knownValues are populated before debugging the prompt.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpGet("debug-enrichment")]
+        public async Task<IActionResult> DebugEnrichment([FromQuery] int storeId)
+        {
+            var sources = _registry.GetAll().ToList();
+            var result  = new List<object>();
+
+            foreach (var src in sources)
+            {
+                var cols = new List<object>();
+                foreach (var col in src.Columns ?? Enumerable.Empty<DashboardAI.Domain.Entities.ColumnDefinition>())
+                {
+                    List<string> knownValues = null;
+                    if (string.Equals(col.DataType, "string", StringComparison.OrdinalIgnoreCase)
+                        && _categoricalCols.Contains(col.Name))
+                    {
+                        try
+                        {
+                            var vals = (await _handler.GetDistinctValuesAsync(
+                                src.Name, col.Name, storeId,
+                                new Dictionary<string, object>())).ToList();
+                            if (vals.Count > 0 && vals.Count <= 50)
+                                knownValues = vals;
+                        }
+                        catch (Exception ex)
+                        {
+                            knownValues = new List<string> { $"ERROR: {ex.Message}" };
+                        }
+                    }
+                    cols.Add(new { col.Name, col.DataType, knownValues });
+                }
+                result.Add(new { src.Name, columns = cols });
+            }
+
+            return new JsonResult(result, _rawCasingSettings);
+        }
 
         // ──────────────────────────────────────────────────────────────────────
         // POST /api/widget-data/query
@@ -93,6 +147,38 @@ namespace DashboardAI.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
             catch (Exception ex)                 { return StatusCode(500, new { error = ex.Message }); }
         }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // POST /api/widget-data/distinct
+        // Returns sorted distinct non-null values for a single column (for dropdowns).
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpPost("distinct")]
+        public async Task<IActionResult> Distinct([FromBody] WidgetDataDistinctRequest request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.DataSource) || string.IsNullOrWhiteSpace(request.ColumnName))
+                return BadRequest(new { error = "DataSource and ColumnName are required." });
+
+            try
+            {
+                var values = await _handler.GetDistinctValuesAsync(
+                    request.DataSource,
+                    request.ColumnName,
+                    request.StoreId,
+                    request.Parameters ?? new Dictionary<string, object>());
+
+                return new JsonResult(values, _rawCasingSettings);
+            }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+            catch (Exception ex)                 { return StatusCode(500, new { error = ex.Message }); }
+        }
+    }
+
+    public class WidgetDataDistinctRequest
+    {
+        public string DataSource  { get; set; }
+        public string ColumnName  { get; set; }
+        public int    StoreId     { get; set; }
+        public Dictionary<string, object> Parameters { get; set; }
     }
 
     public class WidgetDataRequest

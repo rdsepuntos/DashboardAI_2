@@ -1,9 +1,9 @@
 {
-    "id": "37463a7c-341c-40d8-aec5-58010c4e26cc",
-    "title": "Store 5651 — Incident Summary & Analysis Dashboard",
-    "storeId": 5651,
-    "userId": "20707",
-    "originalPrompt": "Generate Incident Report",
+    "id": "227c999e-d280-45a5-b42e-d70483a16e70",
+    "title": "Rapid Risk Assessment Dashboard",
+    "storeId": 11017,
+    "userId": "47334",
+    "originalPrompt": "generate rapid risk dashboard",
     "filters": [
         {
             "id": "f_store",
@@ -11,38 +11,71 @@
             "label": "Store",
             "param": "StoreId",
             "isLocked": true,
-            "defaultValue": "5651"
+            "defaultValue": "11017"
         },
         {
             "id": "f_store",
             "type": "dropdown",
             "label": "Store",
             "param": "StoreID",
-            "optionsSource": "AID_IncidentAssessor",
+            "optionsSource": "AID_RapidRiskAssessor",
             "valueKey": "StoreID",
             "labelKey": "StoreID",
             "isLocked": true,
-            "defaultValue": "5651"
-        },
-        {
-            "id": "f_date",
-            "type": "daterange",
-            "label": "Incident Date Range",
-            "param": "StartDate",
-            "optionsSource": "AID_IncidentAssessor",
-            "valueKey": "StartDt",
-            "labelKey": "StartDt",
-            "isLocked": false,
-            "defaultValue": ""
+            "defaultValue": "11017"
         },
         {
             "id": "f_status",
             "type": "dropdown",
             "label": "Status",
             "param": "Status",
-            "optionsSource": "AID_IncidentAssessor",
+            "optionsSource": "AID_RapidRiskAssessor",
             "valueKey": "Status",
             "labelKey": "Status",
+            "isLocked": false,
+            "defaultValue": ""
+        },
+        {
+            "id": "f_hazardtype",
+            "type": "dropdown",
+            "label": "Hazard Type",
+            "param": "HazardType",
+            "optionsSource": "AID_RapidRiskAssessor",
+            "valueKey": "HazardType",
+            "labelKey": "HazardType",
+            "isLocked": false,
+            "defaultValue": ""
+        },
+        {
+            "id": "f_department",
+            "type": "dropdown",
+            "label": "Department",
+            "param": "Department",
+            "optionsSource": "AID_RapidRiskAssessor",
+            "valueKey": "Department",
+            "labelKey": "Department",
+            "isLocked": false,
+            "defaultValue": ""
+        },
+        {
+            "id": "f_location",
+            "type": "dropdown",
+            "label": "Location",
+            "param": "Location",
+            "optionsSource": "AID_RapidRiskAssessor",
+            "valueKey": "Location",
+            "labelKey": "Location",
+            "isLocked": false,
+            "defaultValue": ""
+        },
+        {
+            "id": "f_date",
+            "type": "daterange",
+            "label": "Date Range",
+            "param": "StartDate",
+            "optionsSource": "AID_RapidRiskAssessor",
+            "valueKey": "StartDt",
+            "labelKey": "StartDt",
             "isLocked": false,
             "defaultValue": ""
         }
@@ -51,8 +84,8 @@
         {
             "id": "w1",
             "type": "kpi",
-            "title": "Total Incidents",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Total Rapid Risk Assessments",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
                 "x": 0,
                 "y": 0,
@@ -65,15 +98,18 @@
                 "color": "#3B98F1"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         },
         {
             "id": "w2",
             "type": "kpi",
-            "title": "Open Incidents",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Open Rapid Risk Assessments",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
                 "x": 3,
                 "y": 0,
@@ -83,19 +119,22 @@
             "config": {
                 "valueKey": "count",
                 "format": "number",
-                "color": "#f59e0b",
-                "statusFilter": "Open"
+                "statusFilter": "",
+                "color": "#f59e0b"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         },
         {
             "id": "w3",
             "type": "kpi",
-            "title": "Closed Incidents",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Closed Rapid Risk Assessments",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
                 "x": 6,
                 "y": 0,
@@ -105,19 +144,22 @@
             "config": {
                 "valueKey": "count",
                 "format": "number",
-                "color": "#22c55e",
-                "statusFilter": "Closed"
+                "statusFilter": "",
+                "color": "#22c55e"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         },
         {
             "id": "w4",
             "type": "kpi",
-            "title": "Incidents Average Score",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Total Locations Assessed",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
                 "x": 9,
                 "y": 0,
@@ -125,43 +167,27 @@
                 "h": 2
             },
             "config": {
-                "valueKey": "Score",
+                "aggregation": "count_distinct",
+                "aggregateColumn": "Location",
+                "valueKey": "count",
                 "format": "number",
                 "color": "#a855f7"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         },
         {
             "id": "w5",
             "type": "chart",
-            "title": "Incidents by Status",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Rapid Risk Assessments by Hazard Type",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
                 "x": 0,
-                "y": 2,
-                "w": 6,
-                "h": 4
-            },
-            "config": {
-                "xKey": "Status",
-                "aggregation": "count",
-                "color": "#3B98F1"
-            },
-            "appliesFilters": [
-                "f_date",
-                "f_status"
-            ]
-        },
-        {
-            "id": "w6",
-            "type": "chart",
-            "title": "Incidents by Hazard Type",
-            "dataSource": "AID_IncidentAssessor",
-            "position": {
-                "x": 6,
                 "y": 2,
                 "w": 6,
                 "h": 4
@@ -169,77 +195,64 @@
             "config": {
                 "xKey": "HazardType",
                 "aggregation": "count",
-                "color": "#a855f7"
+                "color": "#3B98F1"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         },
         {
-            "id": "w7",
+            "id": "w6",
             "type": "chart",
-            "title": "Monthly Incident Trends",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Rapid Risk Assessments over Time",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
-                "x": 0,
-                "y": 6,
+                "x": 6,
+                "y": 2,
                 "w": 6,
                 "h": 4
             },
             "config": {
                 "xKey": "StartDt",
                 "aggregation": "count",
-                "dateGroup": "monthly",
-                "color": "#3B98F1"
+                "color": "#06b6d4",
+                "dateGroup": "monthly"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         },
         {
-            "id": "w8",
-            "type": "chart",
-            "title": "Average Incident Score by Department",
-            "dataSource": "AID_IncidentAssessor",
-            "position": {
-                "x": 6,
-                "y": 6,
-                "w": 6,
-                "h": 4
-            },
-            "config": {
-                "xKey": "Department",
-                "aggregation": "avg",
-                "yKey": "Score",
-                "color": "#a855f7"
-            },
-            "appliesFilters": [
-                "f_date",
-                "f_status"
-            ]
-        },
-        {
-            "id": "w9",
+            "id": "w7",
             "type": "table",
-            "title": "Incident Details Report",
-            "dataSource": "AID_IncidentAssessor",
+            "title": "Rapid Risk Assessment Details",
+            "dataSource": "AID_RapidRiskAssessor",
             "position": {
                 "x": 0,
-                "y": 10,
+                "y": 6,
                 "w": 12,
                 "h": 5
             },
             "config": {
-                "columns": "StartDt,Status,Type,SubType,Location,PersonResponsible,Score,RiskDescription"
+                "columns": "StartDt,Status,RecordName,Type,SubType,Location,Checklist,PersonResponsible"
             },
             "appliesFilters": [
-                "f_date",
-                "f_status"
+                "f_status",
+                "f_hazardtype",
+                "f_department",
+                "f_location",
+                "f_date"
             ]
         }
     ],
-    "createdAt": "2026-04-09T02:14:21Z",
-    "updatedAt": "2026-04-09T02:14:21Z"
+    "createdAt": "2026-04-09T04:36:00Z",
+    "updatedAt": "2026-04-09T04:36:00Z"
 }

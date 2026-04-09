@@ -34,5 +34,12 @@ namespace DashboardAI.Application.DTOs
 
         [JsonProperty("description")]
         public string Description { get; set; }
+
+        /// <summary>
+        /// Populated at runtime for categorical columns (e.g. Status).
+        /// Tells OpenAI exactly which values exist so it can use them in statusFilter.
+        /// </summary>
+        [JsonProperty("knownValues", NullValueHandling = NullValueHandling.Ignore)]
+        public List<string> KnownValues { get; set; }
     }
 }

@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using DashboardAI.Application.Converters;
 
 namespace DashboardAI.Application.DTOs
 {
@@ -30,6 +31,7 @@ namespace DashboardAI.Application.DTOs
         public bool IsLocked { get; set; }
 
         [JsonProperty("defaultValue")]
+        [JsonConverter(typeof(ForgivingStringConverter))]
         public string DefaultValue { get; set; }
     }
 }

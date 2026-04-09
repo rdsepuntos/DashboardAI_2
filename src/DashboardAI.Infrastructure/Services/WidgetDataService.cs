@@ -81,10 +81,18 @@ namespace DashboardAI.Infrastructure.Services
                 throw new InvalidOperationException(
                     $"Column '{aggregation.AggregateColumn}' is not registered for data source '{dataSourceName}'.");
 
+            // count_distinct requires an aggregateColumn
+            if (string.Equals(aggregation.AggregateFunction, "count_distinct", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrEmpty(aggregation.AggregateColumn))
+                throw new InvalidOperationException(
+                    "count_distinct requires an aggregateColumn.");
+
             var (whereSql, dynParams) = BuildWhereClause(definition, parameters);
 
-            // Append AdditionalFilters (exact-match column = value conditions).
+            // Append AdditionalFilters.
             // Each column is validated against the registered column list to prevent injection.
+            // A value containing commas is treated as a multi-value list → generates [col] IN (...)
+            // A single value generates [col] = @param
             if (aggregation.AdditionalFilters != null && aggregation.AdditionalFilters.Count > 0)
             {
                 var extraConditions = new List<string>();
@@ -96,9 +104,26 @@ namespace DashboardAI.Infrastructure.Services
                         throw new InvalidOperationException(
                             $"Additional filter column '{kv.Key}' is not registered for data source '{dataSourceName}'.");
 
-                    var paramName = $"__af_{kv.Key}";
-                    extraConditions.Add($"[{kv.Key}] = @{paramName}");
-                    dynParams.Add(paramName, kv.Value);
+                    var values = kv.Value.Split(',').Select(v => v.Trim())
+                                        .Where(v => v.Length > 0).ToList();
+
+                    if (values.Count == 1)
+                    {
+                        var paramName = $"__af_{kv.Key}";
+                        extraConditions.Add($"[{kv.Key}] = @{paramName}");
+                        dynParams.Add(paramName, values[0]);
+                    }
+                    else if (values.Count > 1)
+                    {
+                        var inParams = new List<string>();
+                        for (int i = 0; i < values.Count; i++)
+                        {
+                            var paramName = $"__af_{kv.Key}_{i}";
+                            inParams.Add($"@{paramName}");
+                            dynParams.Add(paramName, values[i]);
+                        }
+                        extraConditions.Add($"[{kv.Key}] IN ({string.Join(", ", inParams)})");
+                    }
                 }
 
                 if (extraConditions.Any())
@@ -208,6 +233,45 @@ OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
             }
         }
 
+        // ── Distinct column values (for prompt enrichment) ────────────────────────
+
+        public async Task<IEnumerable<string>> GetDistinctValuesAsync(
+            string dataSourceName,
+            string columnName,
+            IDictionary<string, object> parameters)
+        {
+            var definition = _registry.GetByName(dataSourceName)
+                ?? throw new InvalidOperationException($"Data source '{dataSourceName}' not found in registry.");
+
+            // Only supported for views
+            if (definition.Kind != DataSourceKind.View)
+                return Enumerable.Empty<string>();
+
+            // Validate the column exists in the definition
+            var colExists = definition.Columns?.Any(c =>
+                string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)) == true;
+
+            if (!colExists)
+                return Enumerable.Empty<string>();
+
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                var (whereSql, dynParams) = BuildWhereClause(definition, parameters);
+                var sql = $"SELECT DISTINCT [{columnName}] FROM {dataSourceName}{whereSql} " +
+                          $"WHERE [{columnName}] IS NOT NULL ORDER BY [{columnName}]";
+
+                // If BuildWhereClause already added a WHERE, we need AND instead
+                if (!string.IsNullOrEmpty(whereSql))
+                {
+                    sql = $"SELECT DISTINCT [{columnName}] FROM {dataSourceName}{whereSql} " +
+                          $"AND [{columnName}] IS NOT NULL ORDER BY [{columnName}]";
+                }
+
+                var results = await conn.QueryAsync<string>(sql, dynParams);
+                return results ?? Enumerable.Empty<string>();
+            }
+        }
+
         // ─────────────────────────────────────────────────────────────────────────
 
         private DynamicParameters BuildDynamicParameters(
@@ -277,11 +341,12 @@ OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
             var safeCol = $"[{column}]";
             switch (function.Trim().ToUpperInvariant())
             {
-                case "SUM": return $"SUM({safeCol})";
-                case "AVG": return $"AVG({safeCol})";
-                case "MAX": return $"MAX({safeCol})";
-                case "MIN": return $"MIN({safeCol})";
-                default:    return "COUNT(*)";
+                case "SUM":           return $"SUM({safeCol})";
+                case "AVG":           return $"AVG({safeCol})";
+                case "MAX":           return $"MAX({safeCol})";
+                case "MIN":           return $"MIN({safeCol})";
+                case "COUNT_DISTINCT": return $"COUNT(DISTINCT {safeCol})";
+                default:              return "COUNT(*)";
             }
         }
 
