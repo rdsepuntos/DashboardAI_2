@@ -44,7 +44,8 @@ namespace DashboardAI.API.Controllers
                     StoreId           = request.StoreId,
                     GroupBy           = request.GroupBy,
                     AggregateFunction = request.AggregateFunction,
-                    AggregateColumn   = request.AggregateColumn
+                    AggregateColumn   = request.AggregateColumn,
+                    DateGroup         = request.DateGroup
                 });
 
                 return new JsonResult(data, _rawCasingSettings);
@@ -111,6 +112,9 @@ namespace DashboardAI.API.Controllers
 
         /// <summary>Column to aggregate (ignored for count).</summary>
         public string AggregateColumn { get; set; }
+
+        /// <summary>Optional date bucketing: monthly | quarterly | yearly | financial_year.</summary>
+        public string DateGroup { get; set; }
     }
 
     public class WidgetDataPagedRequest : WidgetDataRequest

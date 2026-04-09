@@ -208,27 +208,24 @@ const DashboardEngine = (() => {
         const fetchFn = (p) => _loadWidgetData(widget, p);
         _renderWidgetContent(widget, bodyEl, result.data, result, fetchFn);
 
-      } else if ((type === 'chart' || type === 'kpi') && !config.dateGroup) {
-        // Resolve effective aggregation — never leave it empty or 'none' here,
-        // as that would pull SELECT * from the database unnecessarily.
-        // 'none' means the widget author intended raw rows; we honour that only
-        // when dateGroup is also set (handled by the outer else branch).
+      } else if (type === 'chart' || type === 'kpi') {
+        // Always server-aggregate — never SELECT *.
+        // dateGroup is forwarded so the server does date bucketing in SQL;
+        // the returned __group key is formatted client-side for labels only.
         const effectiveAgg = (!aggregation || aggregation === 'none') ? 'count' : aggregation;
-
-        // For charts, GROUP BY the xKey column.
-        // For KPIs, omit groupBy to get a single scalar row.
         const groupBy = type === 'chart' ? (config.xKey || null) : null;
         const aggCol  = effectiveAgg !== 'count' ? (config.yKey || config.valueKey || null) : null;
 
         const data = await _queryDataAggregated(widget.dataSource, params, {
           groupBy,
           aggregateFunction: effectiveAgg,
-          aggregateColumn:   aggCol
+          aggregateColumn:   aggCol,
+          dateGroup:         config.dateGroup || null
         });
         _renderWidgetContent(widget, bodyEl, data, null, null, /* preAggregated */ true);
 
       } else {
-        // map, markdown, or chart/kpi with dateGroup — raw rows needed
+        // map, markdown — raw rows needed
         const data = await _queryData(widget.dataSource, params);
         _renderWidgetContent(widget, bodyEl, data);
       }
@@ -377,7 +374,8 @@ const DashboardEngine = (() => {
         parameters:        params,
         groupBy:           agg.groupBy           || null,
         aggregateFunction: agg.aggregateFunction || null,
-        aggregateColumn:   agg.aggregateColumn   || null
+        aggregateColumn:   agg.aggregateColumn   || null,
+        dateGroup:         agg.dateGroup         || null
       })
     });
     const data = await res.json();

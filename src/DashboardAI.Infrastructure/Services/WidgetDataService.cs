@@ -87,11 +87,25 @@ namespace DashboardAI.Infrastructure.Services
             string sql;
             if (!string.IsNullOrEmpty(aggregation.GroupBy))
             {
-                // Grouped: one row per group key
-                sql = $"SELECT [{aggregation.GroupBy}], {aggExpr} AS __value"
-                    + $" FROM {dataSourceName}{whereSql}"
-                    + $" GROUP BY [{aggregation.GroupBy}]"
-                    + $" ORDER BY [{aggregation.GroupBy}]";
+                // When DateGroup is set, bucket the date column into a sortable string key
+                // returned as __group (e.g. '2025-01' for monthly).
+                // Otherwise GROUP BY the raw column value.
+                if (!string.IsNullOrEmpty(aggregation.DateGroup))
+                {
+                    var dateExpr = BuildDateGroupExpression(aggregation.GroupBy, aggregation.DateGroup);
+                    sql = $"SELECT {dateExpr} AS __group, {aggExpr} AS __value"
+                        + $" FROM {dataSourceName}{whereSql}"
+                        + $" GROUP BY {dateExpr}"
+                        + $" ORDER BY {dateExpr}";
+                }
+                else
+                {
+                    // Grouped: one row per group key
+                    sql = $"SELECT [{aggregation.GroupBy}], {aggExpr} AS __value"
+                        + $" FROM {dataSourceName}{whereSql}"
+                        + $" GROUP BY [{aggregation.GroupBy}]"
+                        + $" ORDER BY [{aggregation.GroupBy}]";
+                }
             }
             else
             {
@@ -188,6 +202,38 @@ OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
             }
 
             return dynParams;
+        }
+
+        /// <summary>
+        /// Builds a SQL expression that buckets a date column into a sortable string key.
+        /// All results are lexicographically sortable (no further sort expressions needed).
+        ///   monthly        → CONVERT(char(7), [col], 120)      e.g. '2025-01'
+        ///   quarterly      → CONCAT(YEAR([col]),'-Q',DATEPART(QUARTER,[col])) e.g. '2025-Q1'
+        ///   yearly         → CAST(YEAR([col]) AS char(4))       e.g. '2025'
+        ///   financial_year → CONCAT('FY', fyStartYear)          e.g. 'FY2024'
+        /// </summary>
+        private static string BuildDateGroupExpression(string column, string dateGroup)
+        {
+            var col = $"[{column}]";
+            switch ((dateGroup ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "monthly":
+                    return $"CONVERT(char(7), {col}, 120)";
+
+                case "quarterly":
+                    return $"CONCAT(CAST(YEAR({col}) AS char(4)), '-Q', CAST(DATEPART(QUARTER, {col}) AS char(1)))";
+
+                case "yearly":
+                    return $"CAST(YEAR({col}) AS char(4))";
+
+                case "financial_year":
+                    // Australian FY: Jul–Jun.  Jul 2024–Jun 2025 = FY2024.
+                    return $"CONCAT('FY', CAST(CASE WHEN MONTH({col}) >= 7 THEN YEAR({col}) ELSE YEAR({col}) - 1 END AS char(4)))";
+
+                default:
+                    // Unknown mode — fall back to ISO date string (no bucketing)
+                    return $"CONVERT(char(10), {col}, 120)";
+            }
         }
 
         /// <summary>
