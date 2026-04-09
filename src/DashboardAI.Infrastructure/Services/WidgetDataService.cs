@@ -50,6 +50,62 @@ namespace DashboardAI.Infrastructure.Services
             }
         }
 
+        // ── Aggregated result (server-side GROUP BY) ─────────────────────────────
+
+        public async Task<IEnumerable<IDictionary<string, object>>> QueryAggregatedAsync(
+            string dataSourceName,
+            IDictionary<string, object> parameters,
+            AggregationRequest aggregation)
+        {
+            if (aggregation == null) throw new ArgumentNullException(nameof(aggregation));
+
+            var definition = _registry.GetByName(dataSourceName)
+                ?? throw new InvalidOperationException($"Data source '{dataSourceName}' not found in registry.");
+
+            if (definition.Kind == DataSourceKind.StoredProcedure)
+                throw new InvalidOperationException(
+                    $"Server-side aggregation is not supported for stored procedures. Use QueryAsync instead.");
+
+            // Security: validate groupBy and aggregateColumn against the registered column list
+            var validColumns = definition.Columns != null
+                ? new System.Collections.Generic.HashSet<string>(
+                    definition.Columns.Select(c => c.Name),
+                    StringComparer.OrdinalIgnoreCase)
+                : new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrEmpty(aggregation.GroupBy) && !validColumns.Contains(aggregation.GroupBy))
+                throw new InvalidOperationException(
+                    $"Column '{aggregation.GroupBy}' is not registered for data source '{dataSourceName}'.");
+
+            if (!string.IsNullOrEmpty(aggregation.AggregateColumn) && !validColumns.Contains(aggregation.AggregateColumn))
+                throw new InvalidOperationException(
+                    $"Column '{aggregation.AggregateColumn}' is not registered for data source '{dataSourceName}'.");
+
+            var (whereSql, dynParams) = BuildWhereClause(definition, parameters);
+            var aggExpr = BuildAggregateExpression(aggregation.AggregateFunction, aggregation.AggregateColumn);
+
+            string sql;
+            if (!string.IsNullOrEmpty(aggregation.GroupBy))
+            {
+                // Grouped: one row per group key
+                sql = $"SELECT [{aggregation.GroupBy}], {aggExpr} AS __value"
+                    + $" FROM {dataSourceName}{whereSql}"
+                    + $" GROUP BY [{aggregation.GroupBy}]"
+                    + $" ORDER BY [{aggregation.GroupBy}]";
+            }
+            else
+            {
+                // Scalar: single row with the aggregate value (for KPI widgets)
+                sql = $"SELECT {aggExpr} AS __value FROM {dataSourceName}{whereSql}";
+            }
+
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                var rows = await conn.QueryAsync(sql, dynParams);
+                return rows.Select(r => (IDictionary<string, object>)r).ToList();
+            }
+        }
+
         // ── Paged result ──────────────────────────────────────────────────────────
 
         public async Task<PagedResult<IDictionary<string, object>>> QueryPagedAsync(
@@ -132,6 +188,31 @@ OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
             }
 
             return dynParams;
+        }
+
+        /// <summary>
+        /// Builds the SQL aggregate expression for a given function + column,
+        /// e.g. "COUNT(*)", "SUM([SomeColumn])", "AVG([SomeColumn])".
+        /// </summary>
+        private static string BuildAggregateExpression(string function, string column)
+        {
+            if (string.IsNullOrWhiteSpace(function) ||
+                string.Equals(function, "count", StringComparison.OrdinalIgnoreCase))
+                return "COUNT(*)";
+
+            // For non-count functions a column is required; fall back to COUNT(*) if missing
+            if (string.IsNullOrWhiteSpace(column))
+                return "COUNT(*)";
+
+            var safeCol = $"[{column}]";
+            switch (function.Trim().ToUpperInvariant())
+            {
+                case "SUM": return $"SUM({safeCol})";
+                case "AVG": return $"AVG({safeCol})";
+                case "MAX": return $"MAX({safeCol})";
+                case "MIN": return $"MIN({safeCol})";
+                default:    return "COUNT(*)";
+            }
         }
 
         /// <summary>
