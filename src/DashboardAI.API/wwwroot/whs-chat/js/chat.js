@@ -55,7 +55,8 @@ let state = {
     pendingResponse: null,   // queued AI response waiting for thinking phrase to finish
     sessionCompleted: false, // true once the session has been formally completed
     sessionCost: { totalUSD: 0 }, // accumulated AI spend
-    smartFillTriggered: false // true once Smart Fill has run for this session
+    smartFillTriggered: false, // true once Smart Fill has run for this session
+    _initialMessageBubbleShown: false // true when dashboard-intent path already added the user bubble
 };
 
 // Voice APIs
@@ -137,8 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sel) sel.value = savedConfidence;
     }
 
-    // Restore Smart Fill toggle
-    const smartFillOn = localStorage.getItem('smartFill') === 'true';
+    // Restore Smart Fill toggle (default: enabled on first visit)
+    const smartFillOn = localStorage.getItem('smartFill') !== 'false';
     const sfToggle = document.getElementById('smartFillToggle');
     if (sfToggle) {
         sfToggle.checked = smartFillOn;
@@ -186,9 +187,9 @@ function applySmartFillStyle(enabled) {
     knob.style.transform    = enabled ? 'translateX(18px)' : 'translateX(0)';
 }
 
-/** Returns true when Smart Fill mode is active */
+/** Returns true when Smart Fill mode is active (defaults to enabled on first visit) */
 function isSmartFillEnabled() {
-    return localStorage.getItem('smartFill') === 'true';
+    return localStorage.getItem('smartFill') !== 'false';
 }
 
 function autoResizeTextarea() {
@@ -1185,6 +1186,7 @@ async function checkAndHandleDashboardIntent(message) {
 
         // Show user message then a typing indicator
         addMessage('user', message);
+        state._initialMessageBubbleShown = true;
         showTypingIndicator();
 
         const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
@@ -1201,6 +1203,11 @@ async function checkAndHandleDashboardIntent(message) {
         removeTypingIndicator();
 
         if (!genRes.ok) {
+            // If no session exists yet, fall through to the normal template-chat flow
+            // so the user's message still starts an intelligent session.
+            if (!state.sessionStarted) {
+                return false;
+            }
             const err = await genRes.json().catch(() => ({}));
             addMessage('assistant', `⚠ Could not generate dashboard: ${err.error || 'Unknown error'}`);
             return true;
@@ -1208,25 +1215,9 @@ async function checkAndHandleDashboardIntent(message) {
 
         const result = await genRes.json();
         const url = dashBase + result.redirectUrl;
-        const contentDiv = document.createElement('div');
-        contentDiv.innerHTML = `✅ Your dashboard is ready!<br/><br/><a href="${url}" target="_blank" style="color:#6366f1;font-weight:600;">Open Dashboard →</a>`;
 
-        const messagesArea = document.getElementById('messagesArea');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message assistant';
-        const icon = document.createElement('div');
-        icon.className = 'message-icon';
-        icon.innerHTML = '<i class="ph-thin ph-chats-circle"></i>';
-        const msgContent = document.createElement('div');
-        msgContent.className = 'message-content';
-        msgContent.appendChild(contentDiv);
-        messageDiv.appendChild(icon);
-        messageDiv.appendChild(msgContent);
-        messagesArea.appendChild(messageDiv);
-        scrollToBottom();
-
-       parent.loadDashboardAI(url)
-
+        state._initialMessageBubbleShown = false; // reset so next message works correctly
+        parent.loadDashboardAI(url);
 
         return true;
     } catch (err) {
@@ -1454,7 +1445,11 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
     // Store initial message
     if (!selectedTemplateID) {
         state.initialMessage = initialMessage;
-        addMessage('user', initialMessage);
+        // Skip the bubble if the dashboard-intent path already rendered it
+        if (!state._initialMessageBubbleShown) {
+            addMessage('user', initialMessage);
+        }
+        state._initialMessageBubbleShown = false; // reset for next turn
     }
 
     // Show typing indicator
