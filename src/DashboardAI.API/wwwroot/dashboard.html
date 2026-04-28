@@ -146,7 +146,7 @@
       // ── Progress overlay ────────────────────────────────────────────────────
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;backdrop-filter:blur(3px)';
-      overlay.innerHTML = `<div style="background:#1e3a8a;border-radius:12px;padding:30px 44px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5);min-width:280px">
+      overlay.innerHTML = `<div style="background:#3B98F1;border-radius:12px;padding:30px 44px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5);min-width:280px">
         <div style="color:#fff;font-size:15px;font-weight:700;letter-spacing:.03em;margin-bottom:6px">Preparing Report</div>
         <div id="__pdf_prog" style="color:rgba(255,255,255,.72);font-size:11px;margin-bottom:16px">Preparing…</div>
         <div style="height:5px;background:rgba(255,255,255,.18);border-radius:3px;overflow:hidden">
@@ -261,10 +261,17 @@
         for (let i = 0; i < chartItems.length; i++) {
           const item = chartItems[i];
           setProg(`Capturing widget ${i+1} of ${chartItems.length}…`, 20 + Math.round(((i+1) / Math.max(chartItems.length, 1)) * 55));
-          const canvas = await html2canvas(item.content, {
-            scale: 3, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false
-          });
-          const img      = canvas.toDataURL('image/png');
+          // Prefer reading the Chart.js canvas directly — gives just the chart, no widget header
+          const chartCanvas = item.content.querySelector('canvas');
+          let img;
+          if (chartCanvas) {
+            img = chartCanvas.toDataURL('image/png');
+          } else {
+            const capturedCanvas = await html2canvas(item.content, {
+              scale: 3, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false
+            });
+            img = capturedCanvas.toDataURL('image/png');
+          }
           const cc       = COLORS[cIdx % COLORS.length];
           const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
           const insight = aiMode ? getInsight(item.title) : null;
@@ -408,7 +415,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
-:root{--blue:#2563eb;--blue-lt:#dbeafe;--blue-dk:#1e40af;--teal:#0d9488;--amber:#d97706;--dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;--white:#fff}
+:root{--blue:#3B98F1;--blue-lt:#dbeafe;--blue-dk:#1e40af;--teal:#0d9488;--amber:#d97706;--dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;--white:#fff}
 .page{width:595px;min-height:842px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);border-radius:3px;position:relative;overflow:hidden;display:flex;flex-direction:column}
 .cover-top{background:var(--blue);height:354px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;position:relative;overflow:hidden}
 .cover-top::before{content:'';position:absolute;width:320px;height:320px;border-radius:50%;border:50px solid rgba(255,255,255,.07);top:-80px;right:-80px}
@@ -428,7 +435,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .cover-dots span:not(:first-child){opacity:.35}
 .section-header{display:flex;align-items:center;padding:0 28px;margin:20px 0 0;position:relative}
 .section-header::after{content:'';position:absolute;bottom:-1px;left:28px;right:28px;height:1px;background:var(--border)}
-.section-pill{background:var(--blue-dk);color:white;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 14px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:6px}
+.section-pill{background:var(--blue);color:white;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 14px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:6px}
 .section-pill .dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.5)}
 .section-date{margin-left:auto;font-size:8px;color:var(--mid)}
 .kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
@@ -460,7 +467,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kpi-label{font-size:9px;color:var(--mid);text-transform:uppercase;letter-spacing:.08em}
 .kpi-trend{display:flex;align-items:center;gap:3px;font-size:9px;color:#059669;font-weight:600}
 .kpi-trend.down{color:#dc2626}
-.table-banner{background:var(--blue-dk);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.table-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .table-banner .tit{font-size:13px;font-weight:700;color:white;display:flex;align-items:center;gap:8px}
 .table-banner .cnt{font-size:8.5px;color:rgba(255,255,255,.65);background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px}
 .data-table-wrap{padding:0 28px 20px;overflow:hidden}
@@ -486,6 +493,11 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .print-bar{display:none}
   .page{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;width:100%;min-height:100vh}
   .page:last-child{page-break-after:avoid;break-after:avoid}
+  .cover-top{height:42vh;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .cover-bottom{min-height:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kpi-mini{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .data-table thead th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style></head><body>
 <div class="print-bar">
