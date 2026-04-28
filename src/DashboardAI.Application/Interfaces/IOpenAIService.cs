@@ -4,6 +4,14 @@ using DashboardAI.Application.DTOs;
 
 namespace DashboardAI.Application.Interfaces
 {
+    public class WidgetDescribeItem
+    {
+        public string Title        { get; set; }
+        public string Type         { get; set; }
+        public string ChartType    { get; set; }
+        public string CurrentValue { get; set; }
+    }
+
     public interface IOpenAIService
     {
         /// <summary>
@@ -25,5 +33,13 @@ namespace DashboardAI.Application.Interfaces
             DashboardDto currentDashboard,
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso);
+
+        /// <summary>
+        /// Generates a 1-2 sentence professional insight for each widget.
+        /// Returns a dictionary mapping widget title to description text.
+        /// </summary>
+        Task<Dictionary<string, string>> DescribeWidgetsAsync(
+            string dashboardTitle,
+            IEnumerable<WidgetDescribeItem> widgets);
     }
 }

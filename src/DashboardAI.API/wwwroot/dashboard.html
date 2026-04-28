@@ -49,6 +49,7 @@
     </a>
     <div class="topbar-actions">
       <button onclick="generatePDF()" class="btn-icon" title="Generate Report" style="margin-right:4px"><i class="ph ph-file-text"></i></button>
+      <button onclick="generatePDF(true)" class="btn-icon" title="Generate AI Report (with insights)" style="margin-right:4px"><i class="ph ph-sparkle"></i></button>
       <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
     </div>
   </header>
@@ -138,7 +139,7 @@
     DashboardEngine.init(dashboardId, SESSION);
     ChatManager.init(SESSION);
 
-    async function generatePDF() {
+    async function generatePDF(aiMode = false) {
       const btn = document.querySelector('[onclick="generatePDF()"]');
       if (btn) btn.disabled = true;
 
@@ -193,6 +194,35 @@
         }
         const tableWidgets = allData ? allData.filter(d => d.type === 'table') : [];
 
+        // ── AI descriptions (aiMode only) ─────────────────────────────────────
+        let descriptions = {};
+        if (aiMode) {
+          try {
+            setProg('Generating AI insights…', 12);
+            const allForDesc = [
+              ...gridItems.map(i => {
+                const valEl = i.content.querySelector('.kpi-value,.stat-value,.metric-value,[class*="kpi-val"],[class*="stat-val"],.big-number');
+                return { title: i.title, type: i.type, chartType: i.content.dataset?.chartType || '', currentValue: valEl?.textContent?.trim() || '' };
+              }),
+              ...tableWidgets.map(({ widget }) => ({ title: widget.title || 'Table Data', type: 'table', chartType: '', currentValue: '' }))
+            ];
+            const res = await fetch('https://beta.whsmonitor.com.au/dashboardv2/api/chat/describe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dashboardTitle: printTitle, userId: SESSION.userId, storeId: SESSION.storeId, widgets: allForDesc })
+            });
+            if (res.ok) { const d = await res.json(); descriptions = d.descriptions || {}; }
+          } catch (e) { console.warn('[AI Report] Description fetch failed:', e); }
+        }
+        // Case-insensitive lookup — OpenAI may return keys with different capitalisation
+        const getDesc = title => {
+          if (!title) return '';
+          if (descriptions[title]) return descriptions[title];
+          const lower = title.toLowerCase();
+          const key = Object.keys(descriptions).find(k => k.toLowerCase() === lower);
+          return key ? descriptions[key] : '';
+        };
+
         // ── Separate KPI/stat from chart widgets ───────────────────────────────
         const COLORS     = ['', 'teal', 'indigo', 'amber'];
         const kpiItems   = gridItems.filter(i => i.type === 'kpi' || i.type === 'stat');
@@ -230,11 +260,13 @@
           const img      = canvas.toDataURL('image/png');
           const cc       = COLORS[cIdx % COLORS.length];
           const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
+          const aiNote = aiMode ? `<div class="widget-note" contenteditable="true">${esc(getDesc(item.title))}</div>` : '';
           cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}"${spanFull}>
             <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
             <div class="widget-card-body" style="padding:0;overflow:hidden;min-height:0">
               <img src="${img}" style="width:100%;display:block" />
             </div>
+            ${aiNote}
           </div>`;
           cIdx++;
         }
@@ -298,11 +330,13 @@
               <tbody>${rows}</tbody>
             </table></div>`;
           }
+          const tableNote = aiMode ? `<div class="widget-note table-note" contenteditable="true">${esc(getDesc(widget.title || 'Table Data'))}</div>` : '';
           tablePagesHtml += `<div class="page">
             <div class="table-section-banner">
               <span class="tit">&#128203; ${esc(widget.title || 'Table Data')}</span>
               ${data && data.length ? `<span class="cnt">${data.length} records &middot; ${printDate}</span>` : ''}
             </div>
+            ${tableNote}
             ${bodyHtml}
             <div class="page-footer">
               <span class="doc-title">${esc(printTitle)}</span>
@@ -391,6 +425,10 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .page-footer .brand{font-size:7.5px;color:var(--mid);font-weight:600;letter-spacing:.05em}
 .page-footer .doc-title{font-size:7px;color:#9ca3af}
 .page-footer .pg{font-size:7.5px;color:var(--mid)}
+.widget-note{padding:8px 14px;font-size:9px;color:#374151;line-height:1.6;border-top:1px solid var(--border);outline:none;background:#fafafa;min-height:28px;font-family:inherit}
+.widget-note.table-note{margin:8px 28px;border:1px solid var(--border);border-radius:4px;border-top:1px solid var(--border)}
+.widget-note:empty::before{content:"Click to add notes\\2026";color:#9ca3af;font-style:italic;pointer-events:none}
+@media print{.widget-note:empty{display:none!important}.widget-note{background:none;border-color:transparent}}
 .print-bar{background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;width:100%;position:sticky;top:0;z-index:99}
 .print-bar-title{color:rgba(255,255,255,.65);font-size:12px}
 .print-btn{background:#2563eb;color:white;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em;font-family:inherit}
@@ -404,7 +442,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 }
 </style></head><body>
 <div class="print-bar">
-  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}</span>
+  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
   <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
 </div>
 

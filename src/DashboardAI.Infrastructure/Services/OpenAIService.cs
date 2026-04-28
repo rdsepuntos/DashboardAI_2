@@ -106,7 +106,58 @@ namespace DashboardAI.Infrastructure.Services
             return commands ?? new List<ChatCommandDto>();
         }
 
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ────────────────────────────────────────────────────────────────────────
+        //  Generate AI insights / descriptions for each widget (chat/completions)
+        // ────────────────────────────────────────────────────────────────────────
+        public async Task<Dictionary<string, string>> DescribeWidgetsAsync(
+            string dashboardTitle,
+            IEnumerable<WidgetDescribeItem> widgets)
+        {
+            var list = widgets?.ToList() ?? new List<WidgetDescribeItem>();
+            var widgetLines = string.Join("\n", list.Select((w, i) =>
+                $"{i + 1}. [{w.Type}{(string.IsNullOrEmpty(w.ChartType) ? "" : "/" + w.ChartType)}] \"{w.Title}\"" +
+                (string.IsNullOrWhiteSpace(w.CurrentValue) ? "" : $" — current value: {w.CurrentValue}")));
+
+            var systemMsg = "You are a Workplace Health & Safety reporting analyst. Write concise, factual, professional insights suitable for printed WHS reports. Return ONLY valid JSON.";
+            var userMsg   = $"Dashboard: \"{dashboardTitle}\"\n\n" +
+                            "For each widget listed below, write a 1-2 sentence professional insight that explains what the widget shows and highlights any notable observations relevant to workplace safety.\n\n" +
+                            $"Widgets:\n{widgetLines}\n\n" +
+                            "Return ONLY a JSON object where each key is exactly the widget title and each value is the description string.";
+
+            var body = new
+            {
+                model    = "gpt-4o-mini",
+                messages = new object[]
+                {
+                    new { role = "system", content = systemMsg },
+                    new { role = "user",   content = userMsg   }
+                },
+                response_format = new { type = "json_object" }
+            };
+
+            var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/chat/completions")
+            {
+                Content = new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json")
+            };
+            req.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+            var response = await _http.SendAsync(req);
+            var json     = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"OpenAI error {(int)response.StatusCode}: {json}");
+
+            var parsed  = JObject.Parse(json);
+            var content = parsed["choices"]?[0]?["message"]?["content"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                throw new InvalidOperationException($"OpenAI returned empty content. Raw: {json}");
+
+            return JsonConvert.DeserializeObject<Dictionary<string, string>>(content)
+                   ?? new Dictionary<string, string>();
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         //  OpenAI Responses API
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         private async Task<string> CallOpenAIResponsesAsync(
