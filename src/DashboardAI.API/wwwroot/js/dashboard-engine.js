@@ -288,18 +288,7 @@ const DashboardEngine = (() => {
           || (config.valueKey !== 'count' ? config.valueKey : null);
         const aggCol = (isCountDistinct || effectiveAgg !== 'count') ? (_rawAggCol || null) : null;
 
-        // Collect *Filter config keys (e.g. statusFilter: "Open" or statusFilter: ["In Progress","Not Started"])
-        // and pass them to the server as WHERE conditions so KPI counts are scoped correctly.
-        // Array values are joined as comma-separated strings; the server generates IN (...) for them.
-        const additionalFilters = {};
-        Object.keys(config).forEach(key => {
-          if (!key.endsWith('Filter')) return;
-          const col     = key.slice(0, -6);  // strip 'Filter'
-          const colName = col.charAt(0).toUpperCase() + col.slice(1);
-          const val = config[key];
-          if (!val) return;
-          additionalFilters[colName] = Array.isArray(val) ? val.join(',') : val;
-        });
+        const additionalFilters = _buildAdditionalFilters(config);
 
         if (type === 'kpi' || type === 'gauge' || type === 'stat') {
           console.log(`[${type.toUpperCase()}] ${widget.title}`, {
@@ -554,9 +543,79 @@ const DashboardEngine = (() => {
     return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
   }
 
+  /** Extracts *Filter config keys into a plain object for server WHERE clauses. */
+  function _buildAdditionalFilters(config) {
+    const out = {};
+    Object.keys(config).forEach(key => {
+      if (!key.endsWith('Filter')) return;
+      const col     = key.slice(0, -6);
+      const colName = col.charAt(0).toUpperCase() + col.slice(1);
+      const val     = config[key];
+      if (!val) return;
+      out[colName] = Array.isArray(val) ? val.join(',') : val;
+    });
+    return out;
+  }
+
   function getDashboard()   { return _dashboard; }
   function getSession()     { return _session; }
+  function getFilterState() { return Object.assign({}, _filterState); }
 
-  return { init, render, applyCommands, refreshAllWidgets, getDashboard, getSession };
+  /**
+   * Fetches ALL widget data for PDF export — tables get every row (no pagination),
+   * charts/KPIs get their aggregated results. Widgets are returned sorted by grid
+   * position (top-to-bottom, left-to-right) so the PDF order matches the screen.
+   * @returns {Promise<Array<{widget, type, data, error?}>>}
+   */
+  async function getAllWidgetDataForPrint() {
+    const widgets = (_dashboard?.widgets || [])
+      .slice()
+      .sort((a, b) => {
+        const ay = a.position?.y || 0, by = b.position?.y || 0;
+        return ay !== by ? ay - by : (a.position?.x || 0) - (b.position?.x || 0);
+      });
+
+    const results = [];
+    for (const widget of widgets) {
+      const type   = (widget.type || '').toLowerCase();
+      const params = _buildWidgetParams(widget);
+      const config = widget.config || {};
+
+      try {
+        if (type === 'table') {
+          const result = await _queryDataPaged(widget.dataSource, params, 1, 9999);
+          results.push({ widget, type, data: result.data || [], totalCount: result.totalCount });
+
+        } else if (['kpi','gauge','stat','chart','donut','progress','heatmap'].includes(type)) {
+          const agg          = (config.aggregation || '').toLowerCase();
+          const effectiveAgg = (!agg || agg === 'none') ? 'count' : agg;
+          const isScalar     = type === 'kpi' || type === 'gauge' || type === 'stat';
+          const is2D         = type === 'heatmap';
+          const groupBy      = isScalar ? null : (config.xKey || null);
+          const groupBy2     = is2D ? (config.yKey || null) : null;
+          const isCD         = effectiveAgg === 'count_distinct';
+          const rawAggCol    = config.yKey || config.aggregateColumn
+                             || (config.valueKey !== 'count' ? config.valueKey : null);
+          const aggCol       = (isCD || effectiveAgg !== 'count') ? (rawAggCol || null) : null;
+          const additionalFilters = _buildAdditionalFilters(config);
+
+          const data = await _queryDataAggregated(widget.dataSource, params, {
+            groupBy, groupBy2,
+            aggregateFunction: effectiveAgg,
+            aggregateColumn:   aggCol,
+            dateGroup:         config.dateGroup || null,
+            additionalFilters: Object.keys(additionalFilters).length ? additionalFilters : null
+          });
+          results.push({ widget, type, data });
+        }
+        // map, markdown — not representable in PDF; skip
+      } catch(e) {
+        results.push({ widget, type, data: [], error: e.message });
+      }
+    }
+    return results;
+  }
+
+  return { init, render, applyCommands, refreshAllWidgets, getDashboard, getSession, getFilterState, getAllWidgetDataForPrint };
 
 })();

@@ -48,6 +48,7 @@
 	<img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" />
     </a>
     <div class="topbar-actions">
+      <button onclick="generatePDF()" class="btn-icon" title="Export as PDF" style="margin-right:4px"><i class="ph ph-file-pdf"></i></button>
       <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
     </div>
   </header>
@@ -117,6 +118,11 @@
   <script src="https://beta.whsmonitor.com.au/dashboardv2/js/dashboard-engine.js?ver=1"></script>
   <script src="https://beta.whsmonitor.com.au/dashboardv2/js/chat.js?ver=1"></script>
 
+  <!-- jsPDF + AutoTable + html2canvas for visual PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
   <script>
     // Bootstrap: extract dashboard ID from URL path /dashboard/{id}
     const pathParts    = window.location.pathname.split('/');
@@ -131,6 +137,166 @@
 
     DashboardEngine.init(dashboardId, SESSION);
     ChatManager.init(SESSION);
+
+    async function generatePDF() {
+      const btn = document.querySelector('[onclick="generatePDF()"]');
+      if (btn) btn.disabled = true;
+
+      try {
+        if (!window.jspdf)      throw new Error('jsPDF not loaded — please refresh.');
+        if (!window.html2canvas) throw new Error('html2canvas not loaded — please refresh.');
+
+        const { jsPDF }   = window.jspdf;
+        const dashboard   = DashboardEngine.getDashboard();
+
+        // A4 landscape in points
+        const doc      = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+        const PAGE_W   = doc.internal.pageSize.getWidth();   // ~841.89
+        const PAGE_H   = doc.internal.pageSize.getHeight();  // ~595.28
+        const MARGIN   = 32;
+        const CONTENT_W = PAGE_W - MARGIN * 2;
+
+        // ── Helpers ──────────────────────────────────────────────────────────
+        const fmtCell = v => {
+          if (v === null || v === undefined) return '—';
+          const s = String(v).trim();
+          if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) {
+            const d = new Date(s);
+            if (!isNaN(d.getTime()))
+              return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+          }
+          return s;
+        };
+        const fmtHeader = c => c.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim();
+        const TABLE_HEAD = { fillColor: [59, 130, 246], textColor: 255, fontStyle: 'bold' };
+        const TABLE_ALT  = { fillColor: [249, 250, 251] };
+
+        // ── SECTION 1: Visual dashboard layout (html2canvas) ─────────────────
+        // Collect grid items sorted top→bottom, left→right
+        const items = [...document.querySelectorAll('#gridContainer .grid-stack-item')]
+          .map(el => {
+            const r = el.getBoundingClientRect();
+            const content = el.querySelector('.grid-stack-item-content');
+            return { el, content, top: r.top, left: r.left, width: r.width, height: r.height, type: el.dataset.type };
+          })
+          .filter(i => i.content && i.width > 0 && i.height > 0 && i.type !== 'table')
+          .sort((a, b) => a.top !== b.top ? a.top - b.top : a.left - b.left);
+
+        if (items.length === 0 && !DashboardEngine.getAllWidgetDataForPrint) throw new Error('No widgets found on the dashboard.');
+
+        // Group into visual rows (items within 20px vertically)
+        const rows = [];
+        for (const item of items) {
+          const lastRow = rows[rows.length - 1];
+          if (lastRow && Math.abs(item.top - lastRow[0].top) < 20) {
+            lastRow.push(item);
+          } else {
+            rows.push([item]);
+          }
+        }
+
+        // Cover header — strip leading "Store N" / "Store N - " prefix from title
+        const rawTitle   = (dashboard.title || '').replace(/^Store\s+\d+\s*[-–—]?\s*/i, '').trim();
+        const printTitle = rawTitle || 'Dashboard Report';
+
+        let pageY = MARGIN;
+        doc.setFontSize(18); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
+        doc.text(printTitle, MARGIN, pageY);
+        pageY += 18;
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(107, 114, 128);
+        doc.text('Generated: ' + new Date().toLocaleString(), MARGIN, pageY);
+        pageY += 20;
+
+        // Screenshot each row of widgets
+        for (const row of rows) {
+          const rowScreenH   = Math.max(...row.map(i => i.height));
+          const totalScreenW = row.reduce((s, i) => s + i.width, 0);
+          const rowPdfH      = rowScreenH * (CONTENT_W / totalScreenW);
+
+          if (pageY + rowPdfH > PAGE_H - MARGIN) { doc.addPage(); pageY = MARGIN; }
+
+          let colX = MARGIN;
+          for (const item of row) {
+            const canvas = await html2canvas(item.content, {
+              scale: 2, useCORS: true, allowTaint: true,
+              backgroundColor: '#ffffff', logging: false
+            });
+            const imgW = (item.width / totalScreenW) * CONTENT_W;
+            doc.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', colX, pageY, imgW, rowPdfH);
+            colX += imgW;
+          }
+          pageY += rowPdfH + 10;
+        }
+
+        // ── SECTION 2: Full table data (all rows, no pagination) ─────────────
+        let allData = null;
+        if (DashboardEngine.getAllWidgetDataForPrint) {
+          allData = await DashboardEngine.getAllWidgetDataForPrint();
+        }
+        const tableWidgets = allData ? allData.filter(d => d.type === 'table') : [];
+
+        if (tableWidgets.length > 0) {
+          // Section header on a new page
+          doc.addPage();
+          let ty = MARGIN;
+          doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
+          doc.text('Table Data', MARGIN, ty);
+          ty += 22;
+
+          for (const { widget, data, error } of tableWidgets) {
+            // Widget title
+            doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
+            if (ty + 40 > PAGE_H - MARGIN) { doc.addPage(); ty = MARGIN; }
+            doc.text(widget.title || '', MARGIN, ty);
+            ty += 12;
+
+            if (error || !data || data.length === 0) {
+              doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+              doc.setTextColor(error ? [220, 38, 38] : [156, 163, 175]);
+              doc.text(error ? 'Error: ' + error : 'No data available', MARGIN + 4, ty);
+              doc.setTextColor(0);
+              ty += 18;
+              continue;
+            }
+
+            const cfg  = widget.config || {};
+            const cols = cfg.columns
+              ? cfg.columns.split(',').map(c => c.trim()).filter(Boolean)
+              : Object.keys(data[0]);
+
+            doc.autoTable({
+              startY:  ty,
+              head:    [cols.map(fmtHeader)],
+              body:    data.map(row => cols.map(c => fmtCell(row[c]))),
+              margin:  { left: MARGIN, right: MARGIN },
+              styles:      { fontSize: 7.5, cellPadding: 3, overflow: 'linebreak' },
+              headStyles:  { ...TABLE_HEAD, fontSize: 8 },
+              alternateRowStyles: TABLE_ALT,
+              didDrawPage: (d) => { ty = d.cursor.y; }
+            });
+            ty = doc.lastAutoTable.finalY + 20;
+          }
+        }
+
+        // ── Page numbers ──────────────────────────────────────────────────────
+        const total = doc.internal.getNumberOfPages();
+        for (let p = 1; p <= total; p++) {
+          doc.setPage(p);
+          doc.setFontSize(7); doc.setTextColor(180);
+          doc.text(`Page ${p} of ${total}`, PAGE_W - MARGIN, PAGE_H - 14, { align: 'right' });
+        }
+
+        const filename = printTitle
+          .replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.pdf';
+        doc.save(filename);
+
+      } catch (err) {
+        console.error('[PDF]', err);
+        alert('PDF generation failed: ' + err.message);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
 
     // Filter sidebar collapse toggle
     document.getElementById('filterToggleBtn').addEventListener('click', () => {

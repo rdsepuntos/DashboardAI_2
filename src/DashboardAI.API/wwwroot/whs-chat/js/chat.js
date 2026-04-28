@@ -2803,6 +2803,12 @@ function showCompletionUI(missingFields) {
     openBtn.innerHTML = '<i class="ph-thin ph-arrow-square-out" style="margin-right:4px"></i>Open Form';
     openBtn.onclick = () => { const url = getFormUrl(); if (url) window.open(url, '_blank'); };
 
+    const printBtn = document.createElement('button');
+    printBtn.className = 'suggestion-pill';
+    printBtn.style.background = '#0d6efd';
+    printBtn.innerHTML = '<i class="ph-thin ph-printer" style="margin-right:4px"></i>Print PDF';
+    printBtn.onclick = () => printChatAsPDF();
+
     const newBtn = document.createElement('button');
     newBtn.className = 'suggestion-pill';
     newBtn.style.background = '#6b7280';
@@ -2810,6 +2816,7 @@ function showCompletionUI(missingFields) {
     newBtn.onclick = () => startNewSession();
 
     actionsDiv.appendChild(openBtn);
+    actionsDiv.appendChild(printBtn);
     actionsDiv.appendChild(newBtn);
     contentDiv.appendChild(actionsDiv);
 
@@ -2819,6 +2826,89 @@ function showCompletionUI(missingFields) {
     scrollToBottom();
 
     if (state.voiceMode) speakText(msg);
+}
+
+function printChatAsPDF() {
+    const messages = document.querySelectorAll('#messagesArea .message');
+    const sessionDate = new Date().toLocaleString();
+    const templateName = state.templateName || '-';
+    const internalNo = state.internalNo || state.regOthId || '-';
+    const userName = CONFIG.userName || 'User';
+
+    // Build extracted fields table
+    let fieldsHtml = '';
+    if (state.extractedFieldsMap.size > 0) {
+        fieldsHtml = '<table class="fields-table"><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>';
+        state.extractedFieldsMap.forEach((field) => {
+            const name = field.fieldName || '';
+            const value = field.extractedValue || field.value || '';
+            fieldsHtml += `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(value)}</td></tr>`;
+        });
+        fieldsHtml += '</tbody></table>';
+    }
+
+    // Build messages HTML
+    let messagesHtml = '';
+    messages.forEach(msg => {
+        const isUser = msg.classList.contains('user');
+        const contentEl = msg.querySelector('.message-content');
+        if (!contentEl) return;
+        // Clone content and remove suggestion pills / fields-summary noise
+        const clone = contentEl.cloneNode(true);
+        clone.querySelectorAll('.suggestions, .fields-summary, .file-upload-container, .map-container, .typing-indicator').forEach(el => el.remove());
+        const html = clone.innerHTML.trim();
+        if (!html) return;
+        const senderLabel = isUser ? escapeHtml(userName) : 'Assistant';
+        messagesHtml += `<div class="msg ${isUser ? 'msg-user' : 'msg-ai'}"><span class="msg-sender">${senderLabel}</span><div class="msg-body">${html}</div></div>`;
+    });
+
+    const printHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chat Session — ${escapeHtml(templateName)}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #1f2937; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #111827; }
+  .meta { font-size: 12px; color: #6b7280; margin-bottom: 20px; }
+  .meta span { margin-right: 16px; }
+  h2 { font-size: 14px; color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; margin: 20px 0 10px; }
+  .msg { margin-bottom: 12px; }
+  .msg-sender { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin-bottom: 3px; }
+  .msg-user .msg-sender { color: #2563eb; }
+  .msg-ai .msg-sender { color: #7c3aed; }
+  .msg-body { background: #f9fafb; border-left: 3px solid #e5e7eb; padding: 8px 12px; border-radius: 0 6px 6px 0; }
+  .msg-user .msg-body { border-left-color: #2563eb; }
+  .msg-ai .msg-body { border-left-color: #7c3aed; }
+  .msg-body p { margin: 0 0 6px; }
+  .msg-body p:last-child { margin: 0; }
+  .fields-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .fields-table th, .fields-table td { text-align: left; padding: 6px 10px; border: 1px solid #e5e7eb; font-size: 12px; }
+  .fields-table th { background: #f3f4f6; font-weight: 600; }
+  .fields-table tr:nth-child(even) td { background: #f9fafb; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(templateName)}</h1>
+<div class="meta">
+  <span><strong>Internal No:</strong> ${escapeHtml(String(internalNo))}</span>
+  <span><strong>User:</strong> ${escapeHtml(userName)}</span>
+  <span><strong>Date:</strong> ${sessionDate}</span>
+</div>
+${fieldsHtml ? '<h2>Extracted Fields</h2>' + fieldsHtml : ''}
+<h2>Conversation</h2>
+${messagesHtml}
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('Please allow pop-ups to print the PDF.'); return; }
+    win.document.write(printHtml);
+    win.document.close();
+    win.focus();
+    // Give the browser a moment to render before opening print dialog
+    setTimeout(() => win.print(), 400);
 }
 
 function startNewSession() {
