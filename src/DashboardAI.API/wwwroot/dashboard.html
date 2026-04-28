@@ -142,158 +142,325 @@
       const btn = document.querySelector('[onclick="generatePDF()"]');
       if (btn) btn.disabled = true;
 
+      // ── Progress overlay ────────────────────────────────────────────────────
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;backdrop-filter:blur(3px)';
+      overlay.innerHTML = `<div style="background:#1e3a8a;border-radius:12px;padding:30px 44px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5);min-width:280px">
+        <div style="color:#fff;font-size:15px;font-weight:700;letter-spacing:.03em;margin-bottom:6px">Preparing Report</div>
+        <div id="__pdf_prog" style="color:rgba(255,255,255,.72);font-size:11px;margin-bottom:16px">Preparing…</div>
+        <div style="height:5px;background:rgba(255,255,255,.18);border-radius:3px;overflow:hidden">
+          <div id="__pdf_bar" style="height:100%;width:0%;background:#60a5fa;border-radius:3px;transition:width .35s ease"></div>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      const setProg = (msg, pct) => {
+        const m = document.getElementById('__pdf_prog'); if (m) m.textContent = msg;
+        const b = document.getElementById('__pdf_bar');  if (b) b.style.width = pct + '%';
+      };
+
       try {
-        if (!window.jspdf)      throw new Error('jsPDF not loaded — please refresh.');
         if (!window.html2canvas) throw new Error('html2canvas not loaded — please refresh.');
 
-        const { jsPDF }   = window.jspdf;
-        const dashboard   = DashboardEngine.getDashboard();
-
-        // A4 landscape in points
-        const doc      = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-        const PAGE_W   = doc.internal.pageSize.getWidth();   // ~841.89
-        const PAGE_H   = doc.internal.pageSize.getHeight();  // ~595.28
-        const MARGIN   = 32;
-        const CONTENT_W = PAGE_W - MARGIN * 2;
-
-        // ── Helpers ──────────────────────────────────────────────────────────
-        const fmtCell = v => {
-          if (v === null || v === undefined) return '—';
-          const s = String(v).trim();
-          if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) {
-            const d = new Date(s);
-            if (!isNaN(d.getTime()))
-              return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-          }
-          return s;
-        };
-        const fmtHeader = c => c.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim();
-        const TABLE_HEAD = { fillColor: [59, 130, 246], textColor: 255, fontStyle: 'bold' };
-        const TABLE_ALT  = { fillColor: [249, 250, 251] };
-
-        // ── SECTION 1: Visual dashboard layout (html2canvas) ─────────────────
-        // Collect grid items sorted top→bottom, left→right
-        const items = [...document.querySelectorAll('#gridContainer .grid-stack-item')]
-          .map(el => {
-            const r = el.getBoundingClientRect();
-            const content = el.querySelector('.grid-stack-item-content');
-            return { el, content, top: r.top, left: r.left, width: r.width, height: r.height, type: el.dataset.type };
-          })
-          .filter(i => i.content && i.width > 0 && i.height > 0 && i.type !== 'table')
-          .sort((a, b) => a.top !== b.top ? a.top - b.top : a.left - b.left);
-
-        if (items.length === 0 && !DashboardEngine.getAllWidgetDataForPrint) throw new Error('No widgets found on the dashboard.');
-
-        // Group into visual rows (items within 20px vertically)
-        const rows = [];
-        for (const item of items) {
-          const lastRow = rows[rows.length - 1];
-          if (lastRow && Math.abs(item.top - lastRow[0].top) < 20) {
-            lastRow.push(item);
-          } else {
-            rows.push([item]);
-          }
-        }
-
-        // Cover header — strip leading "Store N" / "Store N - " prefix from title
-        const rawTitle   = (dashboard.title || '').replace(/^Store\s+\d+\s*[-–—]?\s*/i, '').trim();
+        const dashboard  = DashboardEngine.getDashboard();
+        const rawTitle   = (dashboard?.title || '').replace(/^Store\s+\d+\s*[-–—]?\s*/i, '').trim();
         const printTitle = rawTitle || 'Dashboard Report';
+        const printDate  = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' });
+        const storeLabel = (typeof SESSION !== 'undefined' && SESSION.storeId) ? `Store ID ${SESSION.storeId}` : '';
 
-        let pageY = MARGIN;
-        doc.setFontSize(18); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
-        doc.text(printTitle, MARGIN, pageY);
-        pageY += 18;
-        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(107, 114, 128);
-        doc.text('Generated: ' + new Date().toLocaleString(), MARGIN, pageY);
-        pageY += 20;
+        // HTML-escape helper — prevents XSS when injecting dynamic content into HTML
+        const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-        // Screenshot each row of widgets
-        for (const row of rows) {
-          const rowScreenH   = Math.max(...row.map(i => i.height));
-          const totalScreenW = row.reduce((s, i) => s + i.width, 0);
-          const rowPdfH      = rowScreenH * (CONTENT_W / totalScreenW);
+        // ── Collect non-table widgets ──────────────────────────────────────────
+        setProg('Collecting widgets…', 5);
+        const gridItems = [...document.querySelectorAll('#gridContainer .grid-stack-item')]
+          .map(el => ({
+            content: el.querySelector('.grid-stack-item-content'),
+            type:    el.dataset.type || '',
+            title:   el.querySelector('.widget-header h3, .widget-title')?.textContent?.trim() || '',
+            gsW: parseInt(el.getAttribute('gs-w') || '6', 10),
+            gsH: parseInt(el.getAttribute('gs-h') || '2', 10),
+            gsX: parseInt(el.getAttribute('gs-x') || '0', 10),
+            gsY: parseInt(el.getAttribute('gs-y') || '0', 10),
+          }))
+          .filter(i => i.content && i.type !== 'table')
+          .sort((a, b) => a.gsY !== b.gsY ? a.gsY - b.gsY : a.gsX - b.gsX);
 
-          if (pageY + rowPdfH > PAGE_H - MARGIN) { doc.addPage(); pageY = MARGIN; }
-
-          let colX = MARGIN;
-          for (const item of row) {
-            const canvas = await html2canvas(item.content, {
-              scale: 2, useCORS: true, allowTaint: true,
-              backgroundColor: '#ffffff', logging: false
-            });
-            const imgW = (item.width / totalScreenW) * CONTENT_W;
-            doc.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', colX, pageY, imgW, rowPdfH);
-            colX += imgW;
-          }
-          pageY += rowPdfH + 10;
-        }
-
-        // ── SECTION 2: Full table data (all rows, no pagination) ─────────────
+        // ── Fetch table data ───────────────────────────────────────────────────
+        setProg('Fetching table data…', 10);
         let allData = null;
         if (DashboardEngine.getAllWidgetDataForPrint) {
           allData = await DashboardEngine.getAllWidgetDataForPrint();
         }
         const tableWidgets = allData ? allData.filter(d => d.type === 'table') : [];
 
-        if (tableWidgets.length > 0) {
-          // Section header on a new page
-          doc.addPage();
-          let ty = MARGIN;
-          doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
-          doc.text('Table Data', MARGIN, ty);
-          ty += 22;
+        // ── Separate KPI/stat from chart widgets ───────────────────────────────
+        const COLORS     = ['', 'teal', 'indigo', 'amber'];
+        const kpiItems   = gridItems.filter(i => i.type === 'kpi' || i.type === 'stat');
+        const chartItems = gridItems.filter(i => i.type !== 'kpi' && i.type !== 'stat');
 
-          for (const { widget, data, error } of tableWidgets) {
-            // Widget title
-            doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
-            if (ty + 40 > PAGE_H - MARGIN) { doc.addPage(); ty = MARGIN; }
-            doc.text(widget.title || '', MARGIN, ty);
-            ty += 12;
+        // KPI mini strip — first ≤4 KPI/stat widgets
+        let kpiStripHtml = '';
+        kpiItems.slice(0, 4).forEach((item, idx) => {
+          const body     = item.content;
+          const valEl    = body.querySelector('.kpi-value,.stat-value,.metric-value,[class*="kpi-val"],[class*="stat-val"],.big-number');
+          const lblEl    = body.querySelector('.kpi-label,.stat-label,.kpi-subtitle,[class*="kpi-lbl"],[class*="stat-lbl"]');
+          const trendEl  = body.querySelector('.kpi-trend,.stat-trend,[class*="trend"]');
+          const val      = esc(valEl?.textContent?.trim()   || '—');
+          const lbl      = esc(lblEl?.textContent?.trim()   || item.title);
+          const trendRaw = trendEl?.textContent?.trim() || '';
+          const isDown   = /▼|down|decr|-\d/i.test(trendRaw);
+          const trend    = esc(trendRaw);
+          const cc       = COLORS[idx % COLORS.length];
+          kpiStripHtml  += `<div class="kpi-mini${cc ? ' '+cc : ''}">
+            <div class="kpi-mini-val">${val}</div>
+            <div class="kpi-mini-lbl">${lbl}</div>
+            ${trend ? `<div class="kpi-mini-trend${isDown ? ' down' : ''}">${trend}</div>` : ''}
+          </div>`;
+        });
 
-            if (error || !data || data.length === 0) {
-              doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-              doc.setTextColor(error ? [220, 38, 38] : [156, 163, 175]);
-              doc.text(error ? 'Error: ' + error : 'No data available', MARGIN + 4, ty);
-              doc.setTextColor(0);
-              ty += 18;
-              continue;
-            }
+        // Chart cards (screenshots) + KPI overflow cards
+        let cardsHtml = '';
+        let cIdx = 0;
+        for (let i = 0; i < chartItems.length; i++) {
+          const item = chartItems[i];
+          setProg(`Capturing widget ${i+1} of ${chartItems.length}…`, 20 + Math.round(((i+1) / Math.max(chartItems.length, 1)) * 55));
+          const canvas = await html2canvas(item.content, {
+            scale: 3, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false
+          });
+          const img      = canvas.toDataURL('image/png');
+          const cc       = COLORS[cIdx % COLORS.length];
+          const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
+          cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}"${spanFull}>
+            <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
+            <div class="widget-card-body" style="padding:0;overflow:hidden;min-height:0">
+              <img src="${img}" style="width:100%;display:block" />
+            </div>
+          </div>`;
+          cIdx++;
+        }
+        kpiItems.slice(4).forEach(item => {
+          const body     = item.content;
+          const valEl    = body.querySelector('.kpi-value,.stat-value,.metric-value,[class*="kpi-val"],[class*="stat-val"],.big-number');
+          const lblEl    = body.querySelector('.kpi-label,.stat-label,.kpi-subtitle,[class*="kpi-lbl"],[class*="stat-lbl"]');
+          const trendEl  = body.querySelector('.kpi-trend,.stat-trend,[class*="trend"]');
+          const val      = esc(valEl?.textContent?.trim()   || '—');
+          const lbl      = esc(lblEl?.textContent?.trim()   || item.title);
+          const trendRaw = trendEl?.textContent?.trim() || '';
+          const isDown   = /▼|down|decr|-\d/i.test(trendRaw);
+          const trend    = esc(trendRaw);
+          const cc       = COLORS[cIdx % COLORS.length];
+          cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}">
+            <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'KPI'}</span></div>
+            <div class="widget-card-body">
+              <div class="kpi-value">${val}</div>
+              ${lbl ? `<div class="kpi-label">${lbl}</div>` : ''}
+              ${trend ? `<div class="kpi-trend${isDown ? ' down' : ''}">${trend}</div>` : ''}
+            </div>
+          </div>`;
+          cIdx++;
+        });
 
-            const cfg  = widget.config || {};
-            const cols = cfg.columns
-              ? cfg.columns.split(',').map(c => c.trim()).filter(Boolean)
-              : Object.keys(data[0]);
-
-            doc.autoTable({
-              startY:  ty,
-              head:    [cols.map(fmtHeader)],
-              body:    data.map(row => cols.map(c => fmtCell(row[c]))),
-              margin:  { left: MARGIN, right: MARGIN },
-              styles:      { fontSize: 7.5, cellPadding: 3, overflow: 'linebreak' },
-              headStyles:  { ...TABLE_HEAD, fontSize: 8 },
-              alternateRowStyles: TABLE_ALT,
-              didDrawPage: (d) => { ty = d.cursor.y; }
-            });
-            ty = doc.lastAutoTable.finalY + 20;
+        // ── Table pages ────────────────────────────────────────────────────────
+        const fmtCell = v => {
+          if (v === null || v === undefined) return '-';
+          const s = String(v).trim();
+          if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) {
+            const d = new Date(s);
+            if (!isNaN(d.getTime()))
+              return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
           }
-        }
+          return esc(s);
+        };
+        const fmtHdr     = c => esc(c.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim());
+        const badgeClass = v => {
+          const s = String(v).toLowerCase();
+          if (/\bopen\b|high|fail|\bdanger\b|critical|reject/.test(s)) return 'red';
+          if (/clos|done|complet|pass|resolv|approv/.test(s))          return 'green';
+          if (/review|pending|\bprogress\b|medium|warn/.test(s))       return 'amber';
+          return '';
+        };
 
-        // ── Page numbers ──────────────────────────────────────────────────────
-        const total = doc.internal.getNumberOfPages();
-        for (let p = 1; p <= total; p++) {
-          doc.setPage(p);
-          doc.setFontSize(7); doc.setTextColor(180);
-          doc.text(`Page ${p} of ${total}`, PAGE_W - MARGIN, PAGE_H - 14, { align: 'right' });
-        }
+        let tablePagesHtml = '';
+        tableWidgets.forEach(({ widget, data, error }) => {
+          let bodyHtml;
+          if (error || !data || !data.length) {
+            bodyHtml = `<div style="padding:20px 28px;color:#6b7280;font-size:11px">${error ? 'Error: '+esc(String(error)) : 'No data available'}</div>`;
+          } else {
+            const cfg  = widget.config || {};
+            const cols = cfg.columns ? cfg.columns.split(',').map(c => c.trim()).filter(Boolean) : Object.keys(data[0]);
+            const rows = data.map(row => `<tr>${cols.map(c => {
+              const raw = fmtCell(row[c]);
+              const bc  = badgeClass(raw);
+              return `<td>${bc ? `<span class="badge ${bc}">${raw}</span>` : raw}</td>`;
+            }).join('')}</tr>`).join('');
+            bodyHtml = `<div class="data-table-wrap"><table class="data-table">
+              <thead><tr>${cols.map(c => `<th>${fmtHdr(c)}</th>`).join('')}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table></div>`;
+          }
+          tablePagesHtml += `<div class="page">
+            <div class="table-section-banner">
+              <span class="tit">&#128203; ${esc(widget.title || 'Table Data')}</span>
+              ${data && data.length ? `<span class="cnt">${data.length} records &middot; ${printDate}</span>` : ''}
+            </div>
+            ${bodyHtml}
+            <div class="page-footer">
+              <span class="doc-title">${esc(printTitle)}</span>
+              <span class="pg">Table</span>
+            </div>
+          </div>`;
+        });
 
-        const filename = printTitle
-          .replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.pdf';
-        doc.save(filename);
+        // ── Widget overview page ───────────────────────────────────────────────
+        const kpiCols        = Math.min(Math.max(kpiItems.length, 1), 4);
+        const widgetPageHtml = gridItems.length > 0 ? `<div class="page">
+          <div class="page-header">
+            <div class="page-header-accent"></div>
+            <div class="page-header-title">Dashboard Overview</div>
+            <div class="page-header-sub">${esc(printTitle)} &mdash; ${printDate}</div>
+          </div>
+          ${kpiStripHtml ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${kpiCols},1fr)">${kpiStripHtml}</div>` : ''}
+          ${cardsHtml    ? `<div class="cards-grid">${cardsHtml}</div>` : ''}
+          <div class="page-footer">
+            <span class="doc-title">${esc(printTitle)}</span>
+            <span class="pg">1</span>
+          </div>
+        </div>` : '';
+
+        // ── Logo ───────────────────────────────────────────────────────────────
+        const logoSrc  = document.querySelector('.topbar-logo img')?.src || '';
+        const logoHtml = logoSrc ? `<img src="${logoSrc}" crossorigin="anonymous" style="max-height:24px;width:auto" />` : '';
+
+        // ── Assemble HTML document ─────────────────────────────────────────────
+        setProg('Building report…', 90);
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>${esc(printTitle)} — Report</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
+:root{--blue:#2563eb;--blue-lt:#dbeafe;--blue-dk:#1e40af;--teal:#0d9488;--dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;--white:#fff}
+.page{width:595px;min-height:842px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);border-radius:3px;position:relative;overflow:hidden;display:flex;flex-direction:column}
+.cover-top{background:var(--blue);height:354px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;position:relative;overflow:hidden}
+.cover-top::before{content:'';position:absolute;width:320px;height:320px;border-radius:50%;border:50px solid rgba(255,255,255,.07);top:-80px;right:-80px}
+.cover-top::after{content:'';position:absolute;width:180px;height:180px;border-radius:50%;border:30px solid rgba(255,255,255,.06);bottom:40px;left:-50px}
+.cover-logo{background:white;border-radius:10px;padding:10px 20px;margin-bottom:24px;position:relative;z-index:1;font-size:15px;font-weight:700;color:var(--blue);letter-spacing:.02em;display:flex;align-items:center;gap:8px}
+.cover-divider{width:50px;height:3px;background:rgba(255,255,255,.4);border-radius:2px;margin-bottom:16px;position:relative;z-index:1}
+.cover-title{font-size:26px;font-weight:800;color:#fff;text-align:center;position:relative;z-index:1;padding:0 32px;line-height:1.25}
+.cover-subtitle{font-size:11px;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.12em;margin-top:8px;position:relative;z-index:1}
+.cover-bottom{background:var(--blue-lt);flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px}
+.cover-meta-row{display:flex;gap:32px}
+.cover-meta-item{text-align:center}
+.cover-meta-item .val{font-size:22px;font-weight:700;color:var(--blue)}
+.cover-meta-item .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-top:2px}
+.cover-date{font-size:10px;color:var(--mid);margin-top:8px}
+.cover-dots{display:flex;gap:8px;margin-top:6px}
+.cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
+.cover-dots span:not(:first-child){opacity:.35}
+.page-header{padding:20px 28px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.page-header-accent{width:4px;height:20px;background:var(--blue);border-radius:2px;flex-shrink:0}
+.page-header-title{font-size:13px;font-weight:700;color:var(--dark)}
+.page-header-sub{font-size:9px;color:var(--mid);margin-left:auto}
+.kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
+.kpi-mini{background:var(--light);border-radius:6px;padding:10px 12px;border-left:3px solid var(--blue)}
+.kpi-mini.teal{border-color:var(--teal)}.kpi-mini.indigo{border-color:#4f46e5}.kpi-mini.amber{border-color:#d97706}
+.kpi-mini-val{font-size:18px;font-weight:800;color:var(--dark)}
+.kpi-mini-lbl{font-size:8px;color:var(--mid);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+.kpi-mini-trend{font-size:8px;color:#059669;font-weight:600;margin-top:3px}
+.kpi-mini-trend.down{color:#dc2626}
+.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 28px}
+.widget-card{border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.10),0 0 0 1px var(--border);display:flex;flex-direction:column}
+.widget-card-header{background:var(--blue);color:white;font-size:11px;font-weight:700;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;letter-spacing:.01em}
+.widget-card-header .h-tit{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.widget-card-header .h-badge{font-size:8px;color:rgba(255,255,255,.75);background:rgba(255,255,255,.15);padding:2px 8px;border-radius:10px;white-space:nowrap;margin-left:8px}
+.widget-card.teal .widget-card-header{background:var(--teal)}
+.widget-card.indigo .widget-card-header{background:#4f46e5}
+.widget-card.amber .widget-card-header{background:#d97706}
+.widget-card-body{flex:1;background:#fff;padding:10px;min-height:120px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px}
+.kpi-value{font-size:30px;font-weight:800;color:var(--blue)}
+.kpi-label{font-size:9px;color:var(--mid);text-transform:uppercase;letter-spacing:.08em}
+.kpi-trend{display:flex;align-items:center;gap:3px;font-size:9px;color:#059669;font-weight:600}
+.kpi-trend.down{color:#dc2626}
+.table-section-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.table-section-banner .tit{font-size:13px;font-weight:700;color:white}
+.table-section-banner .cnt{font-size:9px;color:rgba(255,255,255,.7);background:rgba(255,255,255,.15);padding:3px 8px;border-radius:10px}
+.data-table-wrap{padding:12px 28px;overflow:hidden;flex:1}
+.data-table{width:100%;border-collapse:collapse;font-size:7.5px}
+.data-table thead th{background:var(--blue);color:white;padding:6px 8px;text-align:left;font-weight:600;letter-spacing:.03em}
+.data-table tbody tr:nth-child(even) td{background:#f9fafb}
+.data-table tbody td{padding:5px 8px;color:var(--dark);border-bottom:1px solid var(--border)}
+.badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:7px;font-weight:600}
+.badge.green{background:#d1fae5;color:#065f46}.badge.red{background:#fee2e2;color:#991b1b}.badge.amber{background:#fef3c7;color:#92400e}
+.page-footer{margin-top:auto;padding:8px 28px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.page-footer .brand{font-size:7.5px;color:var(--mid);font-weight:600;letter-spacing:.05em}
+.page-footer .doc-title{font-size:7px;color:#9ca3af}
+.page-footer .pg{font-size:7.5px;color:var(--mid)}
+.print-bar{background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;width:100%;position:sticky;top:0;z-index:99}
+.print-bar-title{color:rgba(255,255,255,.65);font-size:12px}
+.print-btn{background:#2563eb;color:white;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em;font-family:inherit}
+.print-btn:hover{background:#1d4ed8}
+@page{size:A4 portrait;margin:0}
+@media print{
+  body{background:white;padding:0;gap:0}
+  .print-bar{display:none}
+  .page{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;width:100%;min-height:100vh}
+  .page:last-child{page-break-after:avoid;break-after:avoid}
+}
+</style></head><body>
+<div class="print-bar">
+  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}</span>
+  <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
+</div>
+
+<div class="page">
+  <div class="cover-top">
+    <div class="cover-logo">${logoHtml}</div>
+    <div class="cover-divider"></div>
+    <div class="cover-title">${esc(printTitle)}</div>
+    <div class="cover-subtitle">Workplace Health &amp; Safety</div>
+  </div>
+  <div class="cover-bottom">
+    <div class="cover-meta-row">
+      <div class="cover-meta-item">
+        <div class="val">${gridItems.length + tableWidgets.length}</div>
+        <div class="lbl">Total Widgets</div>
+      </div>
+      <div class="cover-meta-item">
+        <div class="val" style="color:var(--teal)">${tableWidgets.length}</div>
+        <div class="lbl">Data Tables</div>
+      </div>
+      <div class="cover-meta-item">
+        <div class="val" style="color:#4f46e5;font-size:14px">${printDate}</div>
+        <div class="lbl">Report Date</div>
+      </div>
+    </div>
+    ${storeLabel ? `<div class="cover-date">${esc(storeLabel)}</div>` : ''}
+    <div class="cover-dots"><span></span><span></span><span></span></div>
+  </div>
+  <div class="page-footer">
+    <span class="doc-title">${esc(printTitle)}</span>
+    <span class="pg">Cover</span>
+  </div>
+</div>
+
+${widgetPageHtml}
+${tablePagesHtml}
+
+</body></html>`;
+
+        // ── Open report in new window ──────────────────────────────────────────
+        setProg('Opening report…', 98);
+        const win = window.open('', '_blank', 'width=720,height=960,scrollbars=yes');
+        if (!win) {
+          alert('Popup blocked — please allow popups for this page and try again.');
+          return;
+        }
+        win.document.write(html);
+        win.document.close();
 
       } catch (err) {
-        console.error('[PDF]', err);
-        alert('PDF generation failed: ' + err.message);
+        console.error('[Report]', err);
+        alert('Report generation failed: ' + err.message);
       } finally {
+        overlay.remove();
         if (btn) btn.disabled = false;
       }
     }

@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Report — UX Preview</title>
+  <style>
+    /* ── Viewer chrome ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #e8eaed;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 40px;
+    }
+    .viewer-label {
+      width: 100%;
+      max-width: 680px;
+      font-size: 13px;
+      color: #5f6368;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .viewer-label select {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #dadce0;
+      font-size: 13px;
+    }
+    .page-label {
+      text-align: center;
+      font-size: 11px;
+      color: #9aa0a6;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      margin-bottom: -30px;
+    }
+
+    /* ── A4 page shell ─────────────────────────────────────────────── */
+    .page {
+      width: 595px;
+      min-height: 842px;
+      background: #fff;
+      box-shadow: 0 2px 12px rgba(0,0,0,.18);
+      border-radius: 3px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Design tokens ─────────────────────────────────────────────── */
+    :root {
+      --blue:    #2563eb;
+      --blue-lt: #dbeafe;
+      --blue-dk: #1e40af;
+      --teal:    #0d9488;
+      --dark:    #111827;
+      --mid:     #6b7280;
+      --light:   #f3f4f6;
+      --border:  #e5e7eb;
+      --white:   #ffffff;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       PAGE 1 — COVER
+    ══════════════════════════════════════════════════════════════════ */
+    .cover-top {
+      background: var(--blue);
+      height: 354px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding-bottom: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    /* subtle geometric accent circles */
+    .cover-top::before {
+      content: '';
+      position: absolute;
+      width: 320px; height: 320px;
+      border-radius: 50%;
+      border: 50px solid rgba(255,255,255,.07);
+      top: -80px; right: -80px;
+    }
+    .cover-top::after {
+      content: '';
+      position: absolute;
+      width: 180px; height: 180px;
+      border-radius: 50%;
+      border: 30px solid rgba(255,255,255,.06);
+      bottom: 40px; left: -50px;
+    }
+    .cover-logo {
+      background: white;
+      border-radius: 10px;
+      padding: 10px 20px;
+      margin-bottom: 24px;
+      position: relative;
+      z-index: 1;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--blue);
+      letter-spacing: .02em;
+    }
+    .cover-divider {
+      width: 50px; height: 3px;
+      background: rgba(255,255,255,.4);
+      border-radius: 2px;
+      margin-bottom: 16px;
+      position: relative; z-index: 1;
+    }
+    .cover-title {
+      font-size: 26px;
+      font-weight: 800;
+      color: #fff;
+      text-align: center;
+      position: relative; z-index: 1;
+      padding: 0 32px;
+      line-height: 1.25;
+    }
+    .cover-subtitle {
+      font-size: 11px;
+      color: rgba(255,255,255,.65);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      margin-top: 8px;
+      position: relative; z-index: 1;
+    }
+
+    .cover-bottom {
+      background: var(--blue-lt);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 32px;
+    }
+    .cover-meta-row {
+      display: flex;
+      gap: 32px;
+    }
+    .cover-meta-item {
+      text-align: center;
+    }
+    .cover-meta-item .val {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--blue);
+    }
+    .cover-meta-item .lbl {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--mid);
+      margin-top: 2px;
+    }
+    .cover-date {
+      font-size: 10px;
+      color: var(--mid);
+      margin-top: 8px;
+    }
+    .cover-dots {
+      display: flex; gap: 8px; margin-top: 6px;
+    }
+    .cover-dots span {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+    .cover-dots span:not(:first-child) { opacity: .35; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       PAGE 2 — WIDGET CARDS
+    ══════════════════════════════════════════════════════════════════ */
+    .page-header {
+      padding: 20px 28px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .page-header-accent {
+      width: 4px; height: 20px;
+      background: var(--blue);
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .page-header-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--dark);
+    }
+    .page-header-sub {
+      font-size: 9px;
+      color: var(--mid);
+      margin-left: auto;
+    }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding: 14px 28px;
+      flex: 1;
+    }
+    .widget-card {
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.10), 0 0 0 1px var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+    .widget-card-header {
+      background: var(--blue);
+      color: white;
+      font-size: 8.5px;
+      font-weight: 600;
+      padding: 7px 10px;
+      letter-spacing: .02em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .widget-card-header .icon {
+      opacity: .7;
+      font-size: 10px;
+    }
+    /* Teal variant */
+    .widget-card.teal .widget-card-header { background: var(--teal); }
+    /* Indigo variant */
+    .widget-card.indigo .widget-card-header { background: #4f46e5; }
+    /* Amber variant */
+    .widget-card.amber .widget-card-header { background: #d97706; }
+
+    .widget-card-body {
+      flex: 1;
+      background: #fff;
+      padding: 10px;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+    }
+    /* KPI card body */
+    .kpi-value {
+      font-size: 30px;
+      font-weight: 800;
+      color: var(--blue);
+    }
+    .kpi-label { font-size: 9px; color: var(--mid); text-transform: uppercase; letter-spacing: .08em; }
+    .kpi-trend {
+      display: flex; align-items: center; gap: 3px;
+      font-size: 9px; color: #059669; font-weight: 600;
+    }
+    .kpi-trend.down { color: #dc2626; }
+
+    /* Chart placeholder */
+    .chart-placeholder {
+      width: 100%; height: 100px;
+      display: flex; align-items: flex-end; gap: 4px;
+      padding: 0 4px;
+    }
+    .bar {
+      flex: 1;
+      border-radius: 2px 2px 0 0;
+      background: var(--blue-lt);
+    }
+    .bar.active { background: var(--blue); }
+
+    /* Donut placeholder */
+    .donut-wrap {
+      position: relative; width: 80px; height: 80px;
+    }
+    .donut-wrap svg { width: 80px; height: 80px; }
+    .donut-center {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+    .donut-center .pct { font-size: 14px; font-weight: 800; color: var(--dark); }
+    .donut-center .lbl { font-size: 7px; color: var(--mid); }
+
+    /* Line chart placeholder */
+    .line-placeholder { width: 100%; height: 80px; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       PAGE 3 — KPI SUMMARY ROW + CHART
+    ══════════════════════════════════════════════════════════════════ */
+    .kpi-summary-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      padding: 14px 28px 8px;
+    }
+    .kpi-mini {
+      background: var(--light);
+      border-radius: 6px;
+      padding: 10px 12px;
+      border-left: 3px solid var(--blue);
+    }
+    .kpi-mini.teal { border-color: var(--teal); }
+    .kpi-mini.indigo { border-color: #4f46e5; }
+    .kpi-mini.amber { border-color: #d97706; }
+    .kpi-mini-val { font-size: 18px; font-weight: 800; color: var(--dark); }
+    .kpi-mini-lbl { font-size: 8px; color: var(--mid); margin-top: 2px; text-transform: uppercase; letter-spacing: .06em; }
+    .kpi-mini-trend { font-size: 8px; color: #059669; font-weight: 600; margin-top: 3px; }
+    .kpi-mini-trend.down { color: #dc2626; }
+
+    .full-chart-card {
+      margin: 0 28px;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.10), 0 0 0 1px var(--border);
+    }
+    .full-chart-header {
+      background: var(--blue);
+      color: white;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 8px 12px;
+      letter-spacing: .03em;
+    }
+    .full-chart-body {
+      background: #fff;
+      padding: 12px;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       PAGE 4 — DATA TABLE
+    ══════════════════════════════════════════════════════════════════ */
+    .table-section-banner {
+      background: var(--blue);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .table-section-banner .tit {
+      font-size: 13px;
+      font-weight: 700;
+      color: white;
+    }
+    .table-section-banner .cnt {
+      font-size: 9px;
+      color: rgba(255,255,255,.7);
+      background: rgba(255,255,255,.15);
+      padding: 3px 8px;
+      border-radius: 10px;
+    }
+    .data-table-wrap {
+      padding: 12px 28px;
+      overflow: hidden;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 7.5px;
+    }
+    .data-table thead th {
+      background: var(--blue);
+      color: white;
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 600;
+      letter-spacing: .03em;
+    }
+    .data-table tbody tr:nth-child(even) td { background: #f9fafb; }
+    .data-table tbody td {
+      padding: 5px 8px;
+      color: var(--dark);
+      border-bottom: 1px solid var(--border);
+    }
+    .badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 7px;
+      font-weight: 600;
+    }
+    .badge.green { background:#d1fae5; color:#065f46; }
+    .badge.red   { background:#fee2e2; color:#991b1b; }
+    .badge.amber { background:#fef3c7; color:#92400e; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       SHARED FOOTER
+    ══════════════════════════════════════════════════════════════════ */
+    .page-footer {
+      margin-top: auto;
+      padding: 8px 28px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .page-footer .brand { font-size: 7.5px; color: var(--mid); font-weight: 600; letter-spacing: .05em; }
+    .page-footer .doc-title { font-size: 7px; color: #9ca3af; }
+    .page-footer .pg { font-size: 7.5px; color: var(--mid); }
+  </style>
+</head>
+<body>
+
+  <div class="viewer-label">
+    <strong>PDF Report Preview</strong>
+    &mdash; This is a static mockup. Adjust colours/layout here, then we'll wire it up.
+  </div>
+
+  <!-- ══ PAGE 1: COVER ══════════════════════════════════════════════════ -->
+  <div class="page-label">Page 1 — Cover</div>
+  <div class="page">
+    <div class="cover-top">
+      <div class="cover-logo">⚠ WHSMonitor</div>
+      <div class="cover-divider"></div>
+      <div class="cover-title">Hazard &amp; Incident<br>Analytics Report</div>
+      <div class="cover-subtitle">Workplace Health &amp; Safety</div>
+    </div>
+    <div class="cover-bottom">
+      <div class="cover-meta-row">
+        <div class="cover-meta-item">
+          <div class="val">247</div>
+          <div class="lbl">Total Incidents</div>
+        </div>
+        <div class="cover-meta-item">
+          <div class="val" style="color:var(--teal)">18</div>
+          <div class="lbl">Open Actions</div>
+        </div>
+        <div class="cover-meta-item">
+          <div class="val" style="color:#4f46e5">94%</div>
+          <div class="lbl">Resolved</div>
+        </div>
+      </div>
+      <div class="cover-date">Generated: 28 April 2026 &nbsp;·&nbsp; Store ID 1</div>
+      <div class="cover-dots"><span></span><span></span><span></span></div>
+    </div>
+    <div class="page-footer">
+      <span class="brand">WHSMONITOR</span>
+      <span class="doc-title">Hazard &amp; Incident Analytics Report — April 2026</span>
+      <span class="pg">Cover</span>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 2: KPI STRIP + 2-COL CHART CARDS ══════════════════════════ -->
+  <div class="page-label">Page 2 — KPI Summary &amp; Charts</div>
+  <div class="page">
+    <div class="page-header">
+      <div class="page-header-accent"></div>
+      <div class="page-header-title">Dashboard Overview</div>
+      <div class="page-header-sub">Hazard &amp; Incident Analytics Report — April 2026</div>
+    </div>
+
+    <!-- KPI mini strip -->
+    <div class="kpi-summary-row">
+      <div class="kpi-mini">
+        <div class="kpi-mini-val">247</div>
+        <div class="kpi-mini-lbl">Total Hazards</div>
+        <div class="kpi-mini-trend">▲ 12% vs last month</div>
+      </div>
+      <div class="kpi-mini teal">
+        <div class="kpi-mini-val">18</div>
+        <div class="kpi-mini-lbl">Open Actions</div>
+        <div class="kpi-mini-trend down">▼ 4% vs last month</div>
+      </div>
+      <div class="kpi-mini indigo">
+        <div class="kpi-mini-val">94%</div>
+        <div class="kpi-mini-lbl">Resolved</div>
+        <div class="kpi-mini-trend">▲ 2% vs last month</div>
+      </div>
+      <div class="kpi-mini amber">
+        <div class="kpi-mini-val">6</div>
+        <div class="kpi-mini-lbl">High Priority</div>
+        <div class="kpi-mini-trend down">▼ 1 vs last month</div>
+      </div>
+    </div>
+
+    <!-- 2-col chart cards -->
+    <div class="cards-grid">
+      <!-- Bar chart card -->
+      <div class="widget-card">
+        <div class="widget-card-header">📊 Hazards by Location</div>
+        <div class="widget-card-body">
+          <div class="chart-placeholder">
+            <div class="bar" style="height:40%"></div>
+            <div class="bar active" style="height:80%"></div>
+            <div class="bar" style="height:55%"></div>
+            <div class="bar active" style="height:95%"></div>
+            <div class="bar" style="height:30%"></div>
+            <div class="bar" style="height:65%"></div>
+            <div class="bar active" style="height:50%"></div>
+          </div>
+          <div style="font-size:8px;color:var(--mid);align-self:flex-start;margin-top:4px">Warehouse · Office · Floor · Loading Dock · Reception · Yard · Plant</div>
+        </div>
+      </div>
+
+      <!-- Donut card -->
+      <div class="widget-card teal">
+        <div class="widget-card-header">🍩 Incident Types</div>
+        <div class="widget-card-body" style="flex-direction:row;gap:14px;justify-content:center">
+          <div class="donut-wrap">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="14" fill="none" stroke="#e5e7eb" stroke-width="5"/>
+              <circle cx="18" cy="18" r="14" fill="none" stroke="#0d9488" stroke-width="5"
+                stroke-dasharray="56 44" stroke-dashoffset="25" stroke-linecap="round"/>
+            </svg>
+            <div class="donut-center"><div class="pct">56%</div><div class="lbl">Near Miss</div></div>
+          </div>
+          <div style="font-size:8px;color:var(--dark);display:flex;flex-direction:column;gap:6px;justify-content:center">
+            <div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;background:#0d9488;border-radius:2px"></span>Near Miss (56%)</div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;background:#2563eb;border-radius:2px"></span>First Aid (24%)</div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;background:#d97706;border-radius:2px"></span>Medical (14%)</div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;background:#dc2626;border-radius:2px"></span>LTI (6%)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI big number -->
+      <div class="widget-card indigo">
+        <div class="widget-card-header">🎯 Avg Days to Close</div>
+        <div class="widget-card-body">
+          <div class="kpi-value" style="color:#4f46e5">4.2</div>
+          <div class="kpi-label">Days</div>
+          <div class="kpi-trend">▲ Improved by 0.8 days</div>
+        </div>
+      </div>
+
+      <!-- Trend line -->
+      <div class="widget-card amber">
+        <div class="widget-card-header">📈 Monthly Trend</div>
+        <div class="widget-card-body">
+          <svg class="line-placeholder" viewBox="0 0 220 80" preserveAspectRatio="none">
+            <polyline points="0,60 30,45 60,55 90,30 120,40 150,20 180,28 220,15"
+              fill="none" stroke="#fef3c7" stroke-width="1.5"/>
+            <polyline points="0,60 30,45 60,55 90,30 120,40 150,20 180,28 220,15"
+              fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="220" cy="15" r="3" fill="#d97706"/>
+          </svg>
+          <div style="font-size:8px;color:var(--mid);align-self:flex-start">Jan → Apr 2026</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-footer">
+      <span class="brand">WHSMONITOR</span>
+      <span class="doc-title">Hazard &amp; Incident Analytics Report</span>
+      <span class="pg">1 / 3</span>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 3: FULL-WIDTH CHART + SMALLER CARDS ═══════════════════════ -->
+  <div class="page-label">Page 3 — Detail Charts</div>
+  <div class="page">
+    <div class="page-header">
+      <div class="page-header-accent"></div>
+      <div class="page-header-title">Detailed Breakdown</div>
+      <div class="page-header-sub">Hazard &amp; Incident Analytics Report — April 2026</div>
+    </div>
+
+    <!-- Full-width chart -->
+    <div class="full-chart-card" style="margin-top:14px">
+      <div class="full-chart-header">📅 Incidents by Week — Rolling 12 Weeks</div>
+      <div class="full-chart-body">
+        <svg width="100%" height="100" viewBox="0 0 520 100" preserveAspectRatio="none">
+          <!-- area fill -->
+          <defs>
+            <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#2563eb" stop-opacity=".25"/>
+              <stop offset="100%" stop-color="#2563eb" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <polygon points="0,100 0,70 43,55 87,65 130,40 173,50 217,30 260,45 303,25 347,35 390,20 433,28 520,18 520,100"
+            fill="url(#ag)"/>
+          <polyline points="0,70 43,55 87,65 130,40 173,50 217,30 260,45 303,25 347,35 390,20 433,28 520,18"
+            fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- dots -->
+          <circle cx="303" cy="25" r="3.5" fill="#2563eb"/>
+          <circle cx="520" cy="18" r="3.5" fill="#2563eb"/>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:7px;color:var(--mid);padding:0 4px;margin-top:4px">
+          <span>W1</span><span>W2</span><span>W3</span><span>W4</span><span>W5</span>
+          <span>W6</span><span>W7</span><span>W8</span><span>W9</span><span>W10</span>
+          <span>W11</span><span>W12</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3-col mini cards -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:12px 28px 0">
+      <div class="widget-card">
+        <div class="widget-card-header">Risk Level</div>
+        <div class="widget-card-body" style="gap:4px">
+          <div style="width:100%">
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--mid);margin-bottom:2px"><span>Low</span><span>58%</span></div>
+            <div style="height:6px;background:var(--light);border-radius:3px"><div style="height:100%;width:58%;background:#059669;border-radius:3px"></div></div>
+          </div>
+          <div style="width:100%">
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--mid);margin-bottom:2px"><span>Medium</span><span>30%</span></div>
+            <div style="height:6px;background:var(--light);border-radius:3px"><div style="height:100%;width:30%;background:#d97706;border-radius:3px"></div></div>
+          </div>
+          <div style="width:100%">
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--mid);margin-bottom:2px"><span>High</span><span>12%</span></div>
+            <div style="height:6px;background:var(--light);border-radius:3px"><div style="height:100%;width:12%;background:#dc2626;border-radius:3px"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="widget-card teal">
+        <div class="widget-card-header">Dept Breakdown</div>
+        <div class="widget-card-body">
+          <svg viewBox="0 0 80 80" width="70" height="70">
+            <circle cx="40" cy="40" r="32" fill="none" stroke="#e5e7eb" stroke-width="12"/>
+            <circle cx="40" cy="40" r="32" fill="none" stroke="#0d9488" stroke-width="12"
+              stroke-dasharray="80 121" stroke-dashoffset="25"/>
+            <circle cx="40" cy="40" r="32" fill="none" stroke="#2563eb" stroke-width="12"
+              stroke-dasharray="40 161" stroke-dashoffset="-55"/>
+            <circle cx="40" cy="40" r="32" fill="none" stroke="#d97706" stroke-width="12"
+              stroke-dasharray="24 177" stroke-dashoffset="-95"/>
+          </svg>
+        </div>
+      </div>
+      <div class="widget-card indigo">
+        <div class="widget-card-header">Compliance Score</div>
+        <div class="widget-card-body">
+          <div class="kpi-value" style="color:#4f46e5;font-size:36px">87<span style="font-size:16px">%</span></div>
+          <div class="kpi-label">YTD Target: 90%</div>
+          <div style="height:4px;width:100%;background:var(--light);border-radius:2px;margin-top:6px">
+            <div style="height:100%;width:87%;background:#4f46e5;border-radius:2px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-footer" style="margin-top:12px">
+      <span class="brand">WHSMONITOR</span>
+      <span class="doc-title">Hazard &amp; Incident Analytics Report</span>
+      <span class="pg">2 / 3</span>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 4: DATA TABLE ══════════════════════════════════════════════ -->
+  <div class="page-label">Page 4 — Data Table (all rows)</div>
+  <div class="page">
+    <div class="table-section-banner">
+      <span class="tit">📋 Hazard Register — Full Data</span>
+      <span class="cnt">247 records · Exported 28 Apr 2026</span>
+    </div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Date</th>
+            <th>Location</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Risk</th>
+            <th>Assigned To</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>1001</td><td>01/04/2026</td><td>Warehouse A</td><td>Near Miss</td><td>Forklift pedestrian interaction near bay 3</td><td><span class="badge amber">Medium</span></td><td>J. Smith</td><td><span class="badge green">Closed</span></td></tr>
+          <tr><td>1002</td><td>02/04/2026</td><td>Office Level 2</td><td>First Aid</td><td>Trip on loose carpet near kitchen</td><td><span class="badge green">Low</span></td><td>M. Lee</td><td><span class="badge green">Closed</span></td></tr>
+          <tr><td>1003</td><td>03/04/2026</td><td>Loading Dock</td><td>Near Miss</td><td>Pallet imbalance during unloading</td><td><span class="badge red">High</span></td><td>K. Brown</td><td><span class="badge amber">In Review</span></td></tr>
+          <tr><td>1004</td><td>05/04/2026</td><td>Plant Room</td><td>Medical</td><td>Chemical exposure — inadequate PPE</td><td><span class="badge red">High</span></td><td>S. Patel</td><td><span class="badge red">Open</span></td></tr>
+          <tr><td>1005</td><td>07/04/2026</td><td>Yard</td><td>Near Miss</td><td>Vehicle reversing without spotter</td><td><span class="badge amber">Medium</span></td><td>T. Walsh</td><td><span class="badge green">Closed</span></td></tr>
+          <tr><td>1006</td><td>09/04/2026</td><td>Warehouse B</td><td>First Aid</td><td>Minor laceration from sharp packaging</td><td><span class="badge green">Low</span></td><td>J. Smith</td><td><span class="badge green">Closed</span></td></tr>
+          <tr><td>1007</td><td>11/04/2026</td><td>Reception</td><td>Near Miss</td><td>Wet floor — no signage present</td><td><span class="badge amber">Medium</span></td><td>M. Lee</td><td><span class="badge green">Closed</span></td></tr>
+          <tr><td>1008</td><td>14/04/2026</td><td>Loading Dock</td><td>LTI</td><td>Worker struck by moving trolley — knee injury</td><td><span class="badge red">High</span></td><td>HR Team</td><td><span class="badge amber">In Review</span></td></tr>
+          <tr><td>1009</td><td>17/04/2026</td><td>Office Level 1</td><td>Near Miss</td><td>Unsecured server rack door</td><td><span class="badge green">Low</span></td><td>IT Ops</td><td><span class="badge green">Closed</span></td></tr>
+          <tr><td>1010</td><td>21/04/2026</td><td>Warehouse A</td><td>First Aid</td><td>Sprained wrist lifting box without aid</td><td><span class="badge amber">Medium</span></td><td>K. Brown</td><td><span class="badge red">Open</span></td></tr>
+          <tr style="opacity:.4"><td colspan="8" style="text-align:center;font-style:italic;padding:8px">… 237 more rows …</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="page-footer">
+      <span class="brand">WHSMONITOR</span>
+      <span class="doc-title">Hazard &amp; Incident Analytics Report</span>
+      <span class="pg">3 / 3</span>
+    </div>
+  </div>
+
+  <div class="viewer-label" style="justify-content:center;padding:12px 0">
+    ✅ Review the pages above and let me know what to change — colours, layout, font size, card style, cover design — then I'll implement it in the real PDF export.
+  </div>
+
+</body>
+</html>
