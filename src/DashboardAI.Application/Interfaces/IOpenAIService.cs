@@ -12,6 +12,18 @@ namespace DashboardAI.Application.Interfaces
         public string CurrentValue { get; set; }
     }
 
+    /// <summary>
+    /// A single widget insight returned by the AI — includes a description and a layout hint.
+    /// </summary>
+    public class WidgetInsight
+    {
+        /// <summary>1-2 sentence professional WHS insight.</summary>
+        public string Description { get; set; }
+
+        /// <summary>"side" = image-left / text-right; "full" = full-width stacked.</summary>
+        public string Layout      { get; set; }
+    }
+
     public interface IOpenAIService
     {
         /// <summary>
@@ -35,10 +47,10 @@ namespace DashboardAI.Application.Interfaces
             string currentDateIso);
 
         /// <summary>
-        /// Generates a 1-2 sentence professional insight for each widget.
-        /// Returns a dictionary mapping widget title to description text.
+        /// Generates a professional insight and layout recommendation for each widget.
+        /// Returns a dictionary mapping widget title to a WidgetInsight (description + layout hint).
         /// </summary>
-        Task<Dictionary<string, string>> DescribeWidgetsAsync(
+        Task<Dictionary<string, WidgetInsight>> DescribeWidgetsAsync(
             string dashboardTitle,
             IEnumerable<WidgetDescribeItem> widgets);
     }

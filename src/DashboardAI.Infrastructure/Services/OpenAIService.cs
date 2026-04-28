@@ -109,7 +109,7 @@ namespace DashboardAI.Infrastructure.Services
         // ────────────────────────────────────────────────────────────────────────
         //  Generate AI insights / descriptions for each widget (chat/completions)
         // ────────────────────────────────────────────────────────────────────────
-        public async Task<Dictionary<string, string>> DescribeWidgetsAsync(
+        public async Task<Dictionary<string, WidgetInsight>> DescribeWidgetsAsync(
             string dashboardTitle,
             IEnumerable<WidgetDescribeItem> widgets)
         {
@@ -120,9 +120,11 @@ namespace DashboardAI.Infrastructure.Services
 
             var systemMsg = "You are a Workplace Health & Safety reporting analyst. Write concise, factual, professional insights suitable for printed WHS reports. Return ONLY valid JSON.";
             var userMsg   = $"Dashboard: \"{dashboardTitle}\"\n\n" +
-                            "For each widget listed below, write a 1-2 sentence professional insight that explains what the widget shows and highlights any notable observations relevant to workplace safety.\n\n" +
+                            "For each widget listed below, write a professional insight and recommend a print-report layout.\n\n" +
                             $"Widgets:\n{widgetLines}\n\n" +
-                            "Return ONLY a JSON object where each key is exactly the widget title and each value is the description string.";
+                            "Return ONLY a JSON object where each key is exactly the widget title and each value is an object with two fields:\n" +
+                            "- \"description\": a 1-2 sentence professional WHS insight explaining what the widget shows and any notable safety observations.\n" +
+                            "- \"layout\": either \"side\" (the chart visual pairs well with explanatory text beside it — good for bar/line/donut charts with clear trends) or \"full\" (full-width layout is better — good for tables, KPIs, heatmaps, or widgets that need more vertical space).";
 
             var body = new
             {
@@ -153,8 +155,8 @@ namespace DashboardAI.Infrastructure.Services
             if (string.IsNullOrWhiteSpace(content))
                 throw new InvalidOperationException($"OpenAI returned empty content. Raw: {json}");
 
-            return JsonConvert.DeserializeObject<Dictionary<string, string>>(content)
-                   ?? new Dictionary<string, string>();
+            return JsonConvert.DeserializeObject<Dictionary<string, WidgetInsight>>(content)
+                   ?? new Dictionary<string, WidgetInsight>();
         }
 
         // ─────────────────────────────────────────────────────────────────────

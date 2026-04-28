@@ -214,13 +214,19 @@
             if (res.ok) { const d = await res.json(); descriptions = d.descriptions || {}; }
           } catch (e) { console.warn('[AI Report] Description fetch failed:', e); }
         }
-        // Case-insensitive lookup — OpenAI may return keys with different capitalisation
-        const getDesc = title => {
-          if (!title) return '';
-          if (descriptions[title]) return descriptions[title];
-          const lower = title.toLowerCase();
-          const key = Object.keys(descriptions).find(k => k.toLowerCase() === lower);
-          return key ? descriptions[key] : '';
+        // Case-insensitive lookup — API now returns {description, layout} objects per widget
+        const getInsight = title => {
+          if (!title) return { description: '', layout: 'full' };
+          let raw = descriptions[title];
+          if (!raw) {
+            const lower = title.toLowerCase();
+            const k = Object.keys(descriptions).find(k => k.toLowerCase() === lower);
+            raw = k ? descriptions[k] : null;
+          }
+          if (!raw) return { description: '', layout: 'full' };
+          // Backward-compat: handle plain strings from older API responses
+          if (typeof raw === 'string') return { description: raw, layout: 'full' };
+          return { description: raw.description || '', layout: raw.layout || 'full' };
         };
 
         // ── Separate KPI/stat from chart widgets ───────────────────────────────
@@ -260,14 +266,29 @@
           const img      = canvas.toDataURL('image/png');
           const cc       = COLORS[cIdx % COLORS.length];
           const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
-          const aiNote = aiMode ? `<div class="widget-note" contenteditable="true">${esc(getDesc(item.title))}</div>` : '';
-          cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}"${spanFull}>
-            <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
-            <div class="widget-card-body" style="padding:0;overflow:hidden;min-height:0">
-              <img src="${img}" style="width:100%;display:block" />
-            </div>
-            ${aiNote}
-          </div>`;
+          const insight = aiMode ? getInsight(item.title) : null;
+          const isSide  = aiMode && insight?.layout === 'side';
+          if (isSide) {
+            cardsHtml += `<div class="widget-card widget-card-side${cc ? ' '+cc : ''}" style="grid-column:1/-1">
+              <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
+              <div class="wcs-body">
+                <div class="wcs-img"><img src="${img}" style="width:100%;display:block" /></div>
+                <div class="wcs-text" contenteditable="true">
+                  <div class="wcs-label">AI Insight</div>
+                  <p>${esc(insight.description)}</p>
+                </div>
+              </div>
+            </div>`;
+          } else {
+            const aiNote = aiMode ? `<div class="widget-note" contenteditable="true">${esc(insight?.description || '')}</div>` : '';
+            cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}"${spanFull}>
+              <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
+              <div class="widget-card-body" style="padding:0;overflow:hidden;min-height:0">
+                <img src="${img}" style="width:100%;display:block" />
+              </div>
+              ${aiNote}
+            </div>`;
+          }
           cIdx++;
         }
         kpiItems.slice(4).forEach(item => {
@@ -330,7 +351,7 @@
               <tbody>${rows}</tbody>
             </table></div>`;
           }
-          const tableNote = aiMode ? `<div class="widget-note table-note" contenteditable="true">${esc(getDesc(widget.title || 'Table Data'))}</div>` : '';
+          const tableNote = aiMode ? `<div class="widget-note table-note" contenteditable="true">${esc(getInsight(widget.title || 'Table Data').description)}</div>` : '';
           tablePagesHtml += `<div class="page">
             <div class="table-section-banner">
               <span class="tit">&#128203; ${esc(widget.title || 'Table Data')}</span>
@@ -407,6 +428,14 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .widget-card.indigo .widget-card-header{background:#4f46e5}
 .widget-card.amber .widget-card-header{background:#d97706}
 .widget-card-body{flex:1;background:#fff;padding:10px;min-height:120px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px}
+.widget-card-side{}
+.wcs-body{display:flex;flex-direction:row;flex:1;min-height:180px}
+.wcs-img{flex:0 0 58%;overflow:hidden}
+.wcs-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wcs-text{flex:1;padding:20px 18px;display:flex;flex-direction:column;justify-content:center;border-left:2px solid var(--border);background:#fafafa;outline:none;cursor:text}
+.wcs-label{font-size:7.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--blue);margin-bottom:10px;opacity:.85}
+.wcs-text p{font-size:10px;color:#374151;line-height:1.8;margin:0;outline:none}
+@media print{.wcs-text,.wcs-text p{outline:none!important}}
 .kpi-value{font-size:30px;font-weight:800;color:var(--blue)}
 .kpi-label{font-size:9px;color:var(--mid);text-transform:uppercase;letter-spacing:.08em}
 .kpi-trend{display:flex;align-items:center;gap:3px;font-size:9px;color:#059669;font-weight:600}
