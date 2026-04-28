@@ -274,12 +274,19 @@
           }
           const cc       = COLORS[cIdx % COLORS.length];
           const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
-          const insight = aiMode ? getInsight(item.title) : null;
-          let layout    = aiMode ? (insight?.layout || 'full') : 'full';
-          // Alternate right/left if AI picks the same side twice in a row
-          if (layout === 'right' || layout === 'left') {
-            if (layout === lastSideLayout) layout = layout === 'right' ? 'left' : 'right';
-            lastSideLayout = layout;
+          const insight  = aiMode ? getInsight(item.title) : null;
+          // Layout is driven by widget width, not AI choice:
+          //   full-width (gsW >= 10)  → bottom (insight below chart)
+          //   partial-width           → alternate right / left
+          //   no AI mode / no desc    → full (chart only)
+          let layout;
+          if (!aiMode || !insight?.description) {
+            layout = 'full';
+          } else if (item.gsW >= 10) {
+            layout = 'bottom';
+          } else {
+            lastSideLayout = lastSideLayout === 'right' ? 'left' : 'right';
+            layout = lastSideLayout;
           }
           if (layout === 'right') {
             cardsHtml += `<div class="wc${cc ? ' '+cc : ''}" style="grid-column:1/-1">
