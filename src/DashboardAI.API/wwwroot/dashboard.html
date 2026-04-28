@@ -384,6 +384,7 @@
           }
           const tableNote = aiMode && getInsight(widget.title || 'Table Data').description ? `<div class="table-insight"><div class="table-insight-text">${esc(getInsight(widget.title || 'Table Data').description)}</div></div>` : '';
           tablePagesHtml += `<div class="page">
+            <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
             <div class="table-banner">
               <span class="tit">&#128203; ${esc(widget.title || 'Table Data')}</span>
               ${data && data.length ? `<span class="cnt">${data.length} records &middot; ${printDate}</span>` : ''}
@@ -400,6 +401,7 @@
         // ── Widget overview page ───────────────────────────────────────────────
         const kpiCols        = Math.min(Math.max(kpiItems.length, 1), 4);
         const widgetPageHtml = gridItems.length > 0 ? `<div class="page">
+          <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
           <div class="table-banner">
             <span class="tit">Dashboard Overview</span>
             <span class="cnt">${esc(printTitle)} &mdash; ${printDate}</span>
@@ -463,12 +465,12 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .wc-note{padding:10px 14px;font-size:10px;color:#374151;line-height:1.75;border-top:1px solid var(--border);background:#fafafa}
 .wc-body-right{display:flex;flex-direction:row;flex:1;min-height:190px}
 .wc-body-right .wc-img{flex:0 0 60%;overflow:hidden}
-.wc-body-right .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wc-body-right .wc-img img{display:block;width:100%;height:100%;object-fit:contain;background:#fff}
 .wc-aside{flex:1;padding:18px 16px;display:flex;flex-direction:column;justify-content:center;background:#fafafa}
 .wc-aside p{font-size:11px;color:#374151;line-height:1.8;margin:0}
 .wc-body-left{display:flex;flex-direction:row;flex:1;min-height:190px}
 .wc-body-left .wc-img{flex:0 0 60%;overflow:hidden;order:2}
-.wc-body-left .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wc-body-left .wc-img img{display:block;width:100%;height:100%;object-fit:contain;background:#fff}
 .wc-body-left .wc-aside{order:1;background:#fafafa}
 .kpi-value{font-size:30px;font-weight:800;color:var(--blue)}
 .kpi-label{font-size:9px;color:var(--mid);text-transform:uppercase;letter-spacing:.08em}
@@ -479,6 +481,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .table-banner .cnt{font-size:8.5px;color:rgba(255,255,255,.65);background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px}
 .data-table-wrap{padding:0 28px 20px;overflow:hidden}
 .data-table{width:100%;border-collapse:collapse;font-size:8px}
+.data-table thead{display:table-header-group}
 .data-table thead th{background:var(--blue);color:white;padding:6px 8px;text-align:left;font-weight:600;letter-spacing:.03em}
 .data-table tbody tr:nth-child(even) td{background:#f9fafb}
 .data-table tbody td{padding:5px 8px;color:var(--dark);border-bottom:1px solid var(--border)}
@@ -490,6 +493,9 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .page-footer .pg{font-size:7.5px;color:var(--mid)}
 .table-insight{display:flex;align-items:flex-start;gap:10px;margin:14px 28px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:4px;background:#fafafa}
 .table-insight-text{font-size:9px;color:#374151;line-height:1.75}
+.run-header{display:none;align-items:center;justify-content:space-between;padding:6px 28px;background:#f8fafc;border-bottom:1px solid var(--border);flex-shrink:0}
+.run-header .rh-title{font-size:8px;font-weight:700;color:var(--blue);letter-spacing:.06em;text-transform:uppercase}
+.run-header .rh-date{font-size:8px;color:var(--mid)}
 .print-bar{background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;width:100%;position:sticky;top:0;z-index:99}
 .print-bar-title{color:rgba(255,255,255,.65);font-size:12px}
 .print-btn{background:#2563eb;color:white;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em;font-family:inherit}
@@ -505,6 +511,11 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kpi-mini{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .data-table thead th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .wc{page-break-inside:avoid;break-inside:avoid}
+  .kpi-summary-row{page-break-inside:avoid;break-inside:avoid}
+  .data-table tbody tr{page-break-inside:avoid;break-inside:avoid}
+  .table-insight{page-break-inside:avoid;break-inside:avoid}
+  .run-header{display:flex !important}
 }
 </style></head><body>
 <div class="print-bar">
