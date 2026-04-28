@@ -124,7 +124,7 @@ namespace DashboardAI.Infrastructure.Services
                             $"Widgets:\n{widgetLines}\n\n" +
                             "Return ONLY a JSON object where each key is exactly the widget title and each value is an object with two fields:\n" +
                             "- \"description\": a 1-2 sentence professional WHS insight explaining what the widget shows and any notable safety observations.\n" +
-                            "- \"layout\": either \"side\" (the chart visual pairs well with explanatory text beside it — good for bar/line/donut charts with clear trends) or \"full\" (full-width layout is better — good for tables, KPIs, heatmaps, or widgets that need more vertical space).";
+                            "- \"layout\": choose one of \"right\" (chart left, insight right — good for bar/line charts with clear trends), \"left\" (insight left, chart right — good for summary-first presentation), \"bottom\" (chart top, insight below — good for donut/gauge/smaller charts), or \"full\" (chart only, no insight — good for tables, KPIs, heatmaps, or widgets that need full width).";
 
             var body = new
             {

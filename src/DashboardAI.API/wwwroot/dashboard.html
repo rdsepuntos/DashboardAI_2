@@ -257,6 +257,7 @@
         // Chart cards (screenshots) + KPI overflow cards
         let cardsHtml = '';
         let cIdx = 0;
+        let lastSideLayout = null; // track last "right"/"left" to force alternation
         for (let i = 0; i < chartItems.length; i++) {
           const item = chartItems[i];
           setProg(`Capturing widget ${i+1} of ${chartItems.length}…`, 20 + Math.round(((i+1) / Math.max(chartItems.length, 1)) * 55));
@@ -267,26 +268,42 @@
           const cc       = COLORS[cIdx % COLORS.length];
           const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
           const insight = aiMode ? getInsight(item.title) : null;
-          const isSide  = aiMode && insight?.layout === 'side';
-          if (isSide) {
-            cardsHtml += `<div class="widget-card widget-card-side${cc ? ' '+cc : ''}" style="grid-column:1/-1">
-              <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
-              <div class="wcs-body">
-                <div class="wcs-img"><img src="${img}" style="width:100%;display:block" /></div>
-                <div class="wcs-text" contenteditable="true">
-                  <div class="wcs-label">AI Insight</div>
-                  <p>${esc(insight.description)}</p>
-                </div>
+          let layout    = aiMode ? (insight?.layout || 'full') : 'full';
+          // Alternate right/left if AI picks the same side twice in a row
+          if (layout === 'right' || layout === 'left') {
+            if (layout === lastSideLayout) layout = layout === 'right' ? 'left' : 'right';
+            lastSideLayout = layout;
+          }
+          if (layout === 'right') {
+            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}" style="grid-column:1/-1">
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
+              <div class="wc-body-right">
+                <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
+                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+              </div>
+            </div>`;
+          } else if (layout === 'left') {
+            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}" style="grid-column:1/-1">
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
+              <div class="wc-body-left">
+                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+                <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
+              </div>
+            </div>`;
+          } else if (layout === 'bottom' && insight?.description) {
+            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}"${spanFull}>
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
+              <div class="wc-body-bottom">
+                <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
+                <div class="wc-note">${esc(insight.description)}</div>
               </div>
             </div>`;
           } else {
-            const aiNote = aiMode ? `<div class="widget-note" contenteditable="true">${esc(insight?.description || '')}</div>` : '';
-            cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}"${spanFull}>
-              <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'Widget'}</span></div>
-              <div class="widget-card-body" style="padding:0;overflow:hidden;min-height:0">
-                <img src="${img}" style="width:100%;display:block" />
+            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}"${spanFull}>
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
+              <div class="wc-body-bottom">
+                <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
               </div>
-              ${aiNote}
             </div>`;
           }
           cIdx++;
@@ -302,8 +319,8 @@
           const isDown   = /▼|down|decr|-\d/i.test(trendRaw);
           const trend    = esc(trendRaw);
           const cc       = COLORS[cIdx % COLORS.length];
-          cardsHtml += `<div class="widget-card${cc ? ' '+cc : ''}">
-            <div class="widget-card-header"><span class="h-tit">${esc(item.title) || 'KPI'}</span></div>
+          cardsHtml += `<div class="wc${cc ? ' '+cc : ''}">
+            <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'KPI'}</span></div>
             <div class="widget-card-body">
               <div class="kpi-value">${val}</div>
               ${lbl ? `<div class="kpi-label">${lbl}</div>` : ''}
@@ -351,9 +368,9 @@
               <tbody>${rows}</tbody>
             </table></div>`;
           }
-          const tableNote = aiMode ? `<div class="widget-note table-note" contenteditable="true">${esc(getInsight(widget.title || 'Table Data').description)}</div>` : '';
+          const tableNote = aiMode && getInsight(widget.title || 'Table Data').description ? `<div class="table-insight"><div class="table-insight-text">${esc(getInsight(widget.title || 'Table Data').description)}</div></div>` : '';
           tablePagesHtml += `<div class="page">
-            <div class="table-section-banner">
+            <div class="table-banner">
               <span class="tit">&#128203; ${esc(widget.title || 'Table Data')}</span>
               ${data && data.length ? `<span class="cnt">${data.length} records &middot; ${printDate}</span>` : ''}
             </div>
@@ -369,9 +386,9 @@
         // ── Widget overview page ───────────────────────────────────────────────
         const kpiCols        = Math.min(Math.max(kpiItems.length, 1), 4);
         const widgetPageHtml = gridItems.length > 0 ? `<div class="page">
-          <div class="page-header">
-            <div class="page-header-title">Dashboard Overview</div>
-            <div class="page-header-sub">${esc(printTitle)} &mdash; ${printDate}</div>
+          <div class="table-banner">
+            <span class="tit">Dashboard Overview</span>
+            <span class="cnt">${esc(printTitle)} &mdash; ${printDate}</span>
           </div>
           ${kpiStripHtml ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${kpiCols},1fr)">${kpiStripHtml}</div>` : ''}
           ${cardsHtml    ? `<div class="cards-grid">${cardsHtml}</div>` : ''}
@@ -391,7 +408,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
-:root{--blue:#2563eb;--blue-lt:#dbeafe;--blue-dk:#1e40af;--teal:#0d9488;--dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;--white:#fff}
+:root{--blue:#2563eb;--blue-lt:#dbeafe;--blue-dk:#1e40af;--teal:#0d9488;--amber:#d97706;--dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;--white:#fff}
 .page{width:595px;min-height:842px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);border-radius:3px;position:relative;overflow:hidden;display:flex;flex-direction:column}
 .cover-top{background:var(--blue);height:354px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;position:relative;overflow:hidden}
 .cover-top::before{content:'';position:absolute;width:320px;height:320px;border-radius:50%;border:50px solid rgba(255,255,255,.07);top:-80px;right:-80px}
@@ -409,9 +426,11 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .cover-dots{display:flex;gap:8px;margin-top:6px}
 .cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .cover-dots span:not(:first-child){opacity:.35}
-.page-header{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.page-header-title{font-size:13px;font-weight:700;color:white}
-.page-header-sub{font-size:9px;color:rgba(255,255,255,.7);background:rgba(255,255,255,.15);padding:3px 8px;border-radius:10px;white-space:nowrap}
+.section-header{display:flex;align-items:center;padding:0 28px;margin:20px 0 0;position:relative}
+.section-header::after{content:'';position:absolute;bottom:-1px;left:28px;right:28px;height:1px;background:var(--border)}
+.section-pill{background:var(--blue-dk);color:white;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 14px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:6px}
+.section-pill .dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.5)}
+.section-date{margin-left:auto;font-size:8px;color:var(--mid)}
 .kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
 .kpi-mini{background:var(--light);border-radius:6px;padding:10px 12px;border-left:3px solid var(--blue)}
 .kpi-mini.teal{border-color:var(--teal)}.kpi-mini.indigo{border-color:#4f46e5}.kpi-mini.amber{border-color:#d97706}
@@ -419,32 +438,33 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kpi-mini-lbl{font-size:8px;color:var(--mid);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
 .kpi-mini-trend{font-size:8px;color:#059669;font-weight:600;margin-top:3px}
 .kpi-mini-trend.down{color:#dc2626}
-.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 28px}
-.widget-card{border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.10),0 0 0 1px var(--border);display:flex;flex-direction:column}
-.widget-card-header{background:var(--blue);color:white;font-size:11px;font-weight:700;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;letter-spacing:.01em}
-.widget-card-header .h-tit{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.widget-card-header .h-badge{font-size:8px;color:rgba(255,255,255,.75);background:rgba(255,255,255,.15);padding:2px 8px;border-radius:10px;white-space:nowrap;margin-left:8px}
-.widget-card.teal .widget-card-header{background:var(--teal)}
-.widget-card.indigo .widget-card-header{background:#4f46e5}
-.widget-card.amber .widget-card-header{background:#d97706}
+.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 28px 20px}
+.wc{border-radius:6px;overflow:hidden;box-shadow:none;display:flex;flex-direction:column;background:#fff}
+.wc-head{display:flex;flex-direction:column;padding:14px 16px 10px;border-bottom:none;flex-shrink:0;background:#fff;position:relative; padding-left:0px !Important;}
+.wc-head-title{font-size:14px;color:#000;letter-spacing:.08em;text-transform:uppercase}
 .widget-card-body{flex:1;background:#fff;padding:10px;min-height:120px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px}
-.widget-card-side{}
-.wcs-body{display:flex;flex-direction:row;flex:1;min-height:180px}
-.wcs-img{flex:0 0 58%;overflow:hidden}
-.wcs-img img{display:block;width:100%;height:100%;object-fit:cover}
-.wcs-text{flex:1;padding:20px 18px;display:flex;flex-direction:column;justify-content:center;border-left:2px solid var(--border);background:#fafafa;outline:none;cursor:text}
-.wcs-label{font-size:7.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--blue);margin-bottom:10px;opacity:.85}
-.wcs-text p{font-size:10px;color:#374151;line-height:1.8;margin:0;outline:none}
-@media print{.wcs-text,.wcs-text p{outline:none!important}}
+.wc-body-bottom{display:flex;flex-direction:column;flex:1}
+.wc-body-bottom .wc-img{overflow:hidden}
+.wc-body-bottom .wc-img img{display:block;width:100%}
+.wc-note{padding:10px 14px;font-size:10px;color:#374151;line-height:1.75;border-top:1px solid var(--border);background:#fafafa}
+.wc-body-right{display:flex;flex-direction:row;flex:1;min-height:190px}
+.wc-body-right .wc-img{flex:0 0 60%;overflow:hidden}
+.wc-body-right .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wc-aside{flex:1;padding:18px 16px;display:flex;flex-direction:column;justify-content:center;background:#fafafa}
+.wc-aside p{font-size:11px;color:#374151;line-height:1.8;margin:0}
+.wc-body-left{display:flex;flex-direction:row;flex:1;min-height:190px}
+.wc-body-left .wc-img{flex:0 0 60%;overflow:hidden;order:2}
+.wc-body-left .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wc-body-left .wc-aside{order:1;background:#fafafa}
 .kpi-value{font-size:30px;font-weight:800;color:var(--blue)}
 .kpi-label{font-size:9px;color:var(--mid);text-transform:uppercase;letter-spacing:.08em}
 .kpi-trend{display:flex;align-items:center;gap:3px;font-size:9px;color:#059669;font-weight:600}
 .kpi-trend.down{color:#dc2626}
-.table-section-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.table-section-banner .tit{font-size:13px;font-weight:700;color:white}
-.table-section-banner .cnt{font-size:9px;color:rgba(255,255,255,.7);background:rgba(255,255,255,.15);padding:3px 8px;border-radius:10px}
-.data-table-wrap{padding:12px 28px;overflow:hidden;flex:1}
-.data-table{width:100%;border-collapse:collapse;font-size:7.5px}
+.table-banner{background:var(--blue-dk);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.table-banner .tit{font-size:13px;font-weight:700;color:white;display:flex;align-items:center;gap:8px}
+.table-banner .cnt{font-size:8.5px;color:rgba(255,255,255,.65);background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px}
+.data-table-wrap{padding:0 28px 20px;overflow:hidden}
+.data-table{width:100%;border-collapse:collapse;font-size:8px}
 .data-table thead th{background:var(--blue);color:white;padding:6px 8px;text-align:left;font-weight:600;letter-spacing:.03em}
 .data-table tbody tr:nth-child(even) td{background:#f9fafb}
 .data-table tbody td{padding:5px 8px;color:var(--dark);border-bottom:1px solid var(--border)}
@@ -454,10 +474,8 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .page-footer .brand{font-size:7.5px;color:var(--mid);font-weight:600;letter-spacing:.05em}
 .page-footer .doc-title{font-size:7px;color:#9ca3af}
 .page-footer .pg{font-size:7.5px;color:var(--mid)}
-.widget-note{padding:8px 14px;font-size:9px;color:#374151;line-height:1.6;border-top:1px solid var(--border);outline:none;background:#fafafa;min-height:28px;font-family:inherit}
-.widget-note.table-note{margin:8px 28px;border:1px solid var(--border);border-radius:4px;border-top:1px solid var(--border)}
-.widget-note:empty::before{content:"Click to add notes\\2026";color:#9ca3af;font-style:italic;pointer-events:none}
-@media print{.widget-note:empty{display:none!important}.widget-note{background:none;border-color:transparent}}
+.table-insight{display:flex;align-items:flex-start;gap:10px;margin:14px 28px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:4px;background:#fafafa}
+.table-insight-text{font-size:9px;color:#374151;line-height:1.75}
 .print-bar{background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;width:100%;position:sticky;top:0;z-index:99}
 .print-bar-title{color:rgba(255,255,255,.65);font-size:12px}
 .print-btn{background:#2563eb;color:white;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em;font-family:inherit}
