@@ -48,7 +48,7 @@
 	<img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" />
     </a>
     <div class="topbar-actions">
-      <button onclick="generatePDF()" class="btn-icon" title="Export as PDF" style="margin-right:4px"><i class="ph ph-file-pdf"></i></button>
+      <button onclick="generatePDF()" class="btn-icon" title="Generate Report" style="margin-right:4px"><i class="ph ph-file-text"></i></button>
       <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
     </div>
   </header>
@@ -315,7 +315,6 @@
         const kpiCols        = Math.min(Math.max(kpiItems.length, 1), 4);
         const widgetPageHtml = gridItems.length > 0 ? `<div class="page">
           <div class="page-header">
-            <div class="page-header-accent"></div>
             <div class="page-header-title">Dashboard Overview</div>
             <div class="page-header-sub">${esc(printTitle)} &mdash; ${printDate}</div>
           </div>
@@ -355,10 +354,9 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .cover-dots{display:flex;gap:8px;margin-top:6px}
 .cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .cover-dots span:not(:first-child){opacity:.35}
-.page-header{padding:20px 28px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
-.page-header-accent{width:4px;height:20px;background:var(--blue);border-radius:2px;flex-shrink:0}
-.page-header-title{font-size:13px;font-weight:700;color:var(--dark)}
-.page-header-sub{font-size:9px;color:var(--mid);margin-left:auto}
+.page-header{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.page-header-title{font-size:13px;font-weight:700;color:white}
+.page-header-sub{font-size:9px;color:rgba(255,255,255,.7);background:rgba(255,255,255,.15);padding:3px 8px;border-radius:10px;white-space:nowrap}
 .kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
 .kpi-mini{background:var(--light);border-radius:6px;padding:10px 12px;border-left:3px solid var(--blue)}
 .kpi-mini.teal{border-color:var(--teal)}.kpi-mini.indigo{border-color:#4f46e5}.kpi-mini.amber{border-color:#d97706}
