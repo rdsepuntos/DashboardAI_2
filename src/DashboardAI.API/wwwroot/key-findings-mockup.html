@@ -184,11 +184,11 @@
 
   /* Card grid */
   .kf-grid {
-    padding: 20px 28px;
+    padding: 14px 28px 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    flex: 1;
+    gap: 10px;
+    flex-shrink: 0;
     align-content: start;
   }
   .kf-card {
@@ -213,21 +213,21 @@
   .kf-card-accent.c-rose   { background: var(--rose); }
 
   .kf-card-body {
-    padding: 14px 16px 16px;
+    padding: 10px 12px 12px;
     display: flex;
-    gap: 14px;
+    gap: 12px;
     align-items: flex-start;
     flex: 1;
   }
   .kf-num {
     flex-shrink: 0;
-    font-size: 28px;
+    font-size: 24px;
     font-weight: 900;
     line-height: 1;
     color: var(--blue);
     opacity: .18;
     letter-spacing: -.02em;
-    min-width: 32px;
+    min-width: 28px;
     margin-top: -2px;
   }
   .kf-num.c-teal   { color: var(--teal); }
@@ -273,6 +273,193 @@
     font-weight: 600;
   }
 
+  /* ── D: Report Scope box ───────────────────────────────────────────── */
+  .kf-scope {
+    margin: 0 28px 0;
+    padding: 8px 14px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 6px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px 12px;
+    flex-shrink: 0;
+  }
+  .kf-scope-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .kf-scope-lbl {
+    font-size: 7px;
+    color: #0369a1;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .kf-scope-val {
+    font-size: 8px;
+    color: #374151;
+  }
+
+  /* ── E: AI Recommendations ─────────────────────────────────────────── */
+  .kf-recs {
+    margin: 14px 28px 0;
+    flex-shrink: 0;
+  }
+  .kf-recs-header {
+    font-size: 8.5px;
+    font-weight: 700;
+    color: #92400e;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .kf-recs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+  .kf-rec-card {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    padding: 10px 12px;
+    border-top: 3px solid var(--amber);
+  }
+  .kf-rec-card p {
+    font-size: 8.5px;
+    color: #374151;
+    line-height: 1.7;
+    margin: 0;
+  }
+
+  /* ── B: Executive Summary ───────────────────────────────────────────── */
+  .kf-exec-summary {
+    margin: 14px 28px 0;
+    padding: 12px 16px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .kf-exec-label {
+    font-size: 7.5px;
+    font-weight: 700;
+    color: var(--blue-dk);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    margin-bottom: 5px;
+  }
+  .kf-exec-summary p {
+    font-size: 9px;
+    color: #374151;
+    line-height: 1.75;
+    margin: 0;
+  }
+
+  /* ── C: Actions Required ────────────────────────────────────────────── */
+  .kf-actions {
+    margin: 14px 28px 0;
+    flex-shrink: 0;
+  }
+  .kf-actions-header {
+    font-size: 8.5px;
+    font-weight: 700;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .kf-actions-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8px;
+    color: #374151;
+  }
+  .kf-actions-table th {
+    background: #f3f4f6;
+    padding: 5px 8px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 7.5px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #6b7280;
+    border: 1px solid var(--border);
+  }
+  .kf-actions-table td {
+    padding: 7px 8px;
+    border: 1px solid var(--border);
+    height: 20px;
+  }
+  .kf-actions-table tr:nth-child(even) td { background: #fafafa; }
+
+  /* ── Sign-Off ────────────────────────────────────────────────────────── */
+  .kf-signoff {
+    margin: 14px 28px 0;
+    flex-shrink: 0;
+  }
+  .kf-signoff-header {
+    font-size: 8.5px;
+    font-weight: 700;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .kf-signoff-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .kf-signoff-block {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .kf-signoff-block-header {
+    background: #f3f4f6;
+    padding: 5px 10px;
+    font-size: 7.5px;
+    font-weight: 700;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    border-bottom: 1px solid var(--border);
+  }
+  .kf-signoff-fields {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .kf-signoff-field {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .kf-signoff-field-label {
+    font-size: 7px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .kf-signoff-field-line {
+    border-bottom: 1px solid #d1d5db;
+    height: 16px;
+  }
+
   /* Page footer */
   .page-footer {
     padding: 8px 28px;
@@ -283,6 +470,7 @@
     flex-shrink: 0;
     font-size: 8px;
     color: #9ca3af;
+    margin-top: 14px;
   }
 </style>
 </head>
@@ -401,15 +589,121 @@
 
   </div>
 
-  <!-- AI attribution -->
-  <div class="kf-attribution">
-    <div class="kf-attr-dot"></div>
-    <span>These findings were <strong>generated by AI (GPT-4o)</strong> based on live dashboard data and are intended to support — not replace — professional WHS judgement.</span>
+  <!-- D: Report Scope / Context box -->
+  <!-- E: AI Recommendations -->
+  <div class="kf-recs">
+    <div class="kf-recs-header">💡 Recommended Actions</div>
+    <div class="kf-recs-grid">
+      <div class="kf-rec-card">
+        <p>Conduct an urgent manual handling audit in the Warehouse department to address the 18% incident increase and update procedure documentation.</p>
+      </div>
+      <div class="kf-rec-card">
+        <p>Launch a near-miss reporting campaign with anonymous submission options to close the gap with industry benchmark rates.</p>
+      </div>
+      <div class="kf-rec-card">
+        <p>Assign a dedicated compliance officer to clear the 34 overdue corrective actions within 14 days to mitigate WHS Act Section 17 risk.</p>
+      </div>
+    </div>
   </div>
 
-  <div class="page-footer">
+  <div class="page-footer" style="margin-top:auto;">
     <span>WHS Incident Dashboard</span>
-    <span>Key Findings</span>
+    <span>Key Findings · Confidential</span>
+  </div>
+</div>
+
+<h2 class="label-after" style="margin-top:24px;">ACTIONS &amp; SIGN-OFF PAGE (last page)</h2>
+
+<div class="page">
+  <!-- Page header -->
+  <div class="kf-hero" style="padding:20px 32px 18px;">
+    <div class="kf-hero-eyebrow">WHS Incident Dashboard</div>
+    <div class="kf-hero-row">
+      <div class="kf-hero-title" style="font-size:20px;">
+        Actions &amp; Sign-Off
+        <span>Review, accountability &amp; authorisation</span>
+      </div>
+      <div class="kf-hero-badge">Confidential</div>
+    </div>
+  </div>
+
+  <!-- C: Actions Required -->
+  <div class="kf-actions" style="margin-top:20px;">
+    <div class="kf-actions-header">📝 Actions Required</div>
+    <table class="kf-actions-table">
+      <thead>
+        <tr>
+          <th style="width:40%">Action Item</th>
+          <th style="width:25%">Responsible Officer</th>
+          <th style="width:18%">Due Date</th>
+          <th style="width:17%">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Sign-Off -->
+  <div class="kf-signoff" style="margin-top:24px;">
+    <div class="kf-signoff-header">✍️ Sign-Off</div>
+    <div class="kf-signoff-grid">
+      <div class="kf-signoff-block">
+        <div class="kf-signoff-block-header">Prepared By</div>
+        <div class="kf-signoff-fields">
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Full Name</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Title / Role</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Signature</span>
+            <div class="kf-signoff-field-line" style="height:22px;"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Date</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+        </div>
+      </div>
+      <div class="kf-signoff-block">
+        <div class="kf-signoff-block-header">Reviewed &amp; Approved By</div>
+        <div class="kf-signoff-fields">
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Full Name</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Title / Role</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Signature</span>
+            <div class="kf-signoff-field-line" style="height:22px;"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Date</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-footer" style="margin-top:auto;">
+    <span>WHS Incident Dashboard</span>
+    <span>Actions &amp; Sign-Off · Confidential</span>
   </div>
 </div>
 

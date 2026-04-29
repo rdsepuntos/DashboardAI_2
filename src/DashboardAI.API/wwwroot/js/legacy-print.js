@@ -220,7 +220,7 @@
     }
 
     async function fetchReportInsights(dashboardTitle, widgets, activeFilters) {
-        const empty = { executiveSummary: '', keyFindings: [], descriptions: {} };
+        const empty = { executiveSummary: '', keyFindings: [], recommendations: [], descriptions: {} };
         const cacheKey = 'lgcy_rpt_' + _djb2(
             dashboardTitle + '|' +
             widgets.map(w => `${w.title}:${w.currentValue || ''}:${w.rowCount || ''}:${(w.seriesData || []).length}`).join('|')
@@ -241,6 +241,7 @@
             const result = {
                 executiveSummary: data.executiveSummary || '',
                 keyFindings: Array.isArray(data.keyFindings) ? data.keyFindings : [],
+                recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
                 descriptions: data.descriptions || {},
             };
             _setCachedInsights(cacheKey, result);
@@ -307,6 +308,8 @@
 
         try {
             const printDate = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' });
+            const _md = (() => { try { return JSON.parse(localStorage.getItem('jmemberData') || '{}'); } catch(e) { return {}; } })();
+            const preparedByName = [_md.FirstName, _md.Surname].filter(Boolean).join(' ') || '';
             var printTitle = CONFIG.reportTitle || document.title || 'WHS Dashboard Report';
             printTitle = $('#dashboardTitle span').html();
             // ── Brand colour — prefer __primaryColor.TertiaryColor, fall back to #navbar-left, then default blue ──
@@ -377,6 +380,7 @@
             let descriptions = {};
             let executiveSummary = '';
             let keyFindings = [];
+            let recommendations = [];
             if (aiMode) {
                 setProg('Generating AI insights…', 8);
                 const activeFilters = readActiveFilters();
@@ -402,6 +406,7 @@
                 descriptions = insights.descriptions;
                 executiveSummary = insights.executiveSummary;
                 keyFindings = insights.keyFindings || [];
+                recommendations = insights.recommendations || [];
             }
 
             // ── Build KPI mini strip from count widgets ───────────────────────────────
@@ -708,13 +713,13 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kf-subhead{background:var(--blue-lt);border-bottom:1px solid #dbeafe;padding:9px 32px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .kf-subhead-left{font-size:8.5px;color:var(--blue-dk);font-weight:600}
 .kf-subhead-right{font-size:8px;color:var(--mid)}
-.kf-grid{padding:20px 28px;display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;align-content:start}
+.kf-grid{padding:14px 28px 0;display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;align-content:start}
 .kf-card{background:#fff;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 4px rgba(0,0,0,.05)}
 .kf-card.full{grid-column:1 / -1}
 .kf-card-accent{height:3px;background:var(--blue);flex-shrink:0}
 .kf-card-accent.c-teal{background:var(--teal)}.kf-card-accent.c-indigo{background:var(--indigo)}.kf-card-accent.c-amber{background:var(--amber)}.kf-card-accent.c-rose{background:var(--rose)}
-.kf-card-body{padding:14px 16px 16px;display:flex;gap:14px;align-items:flex-start;flex:1}
-.kf-num{flex-shrink:0;font-size:28px;font-weight:900;line-height:1;color:var(--blue);opacity:.18;letter-spacing:-.02em;min-width:32px;margin-top:-2px}
+.kf-card-body{padding:10px 12px 12px;display:flex;gap:12px;align-items:flex-start;flex:1}
+.kf-num{flex-shrink:0;font-size:24px;font-weight:900;line-height:1;color:var(--blue);opacity:.18;letter-spacing:-.02em;min-width:28px;margin-top:-2px}
 .kf-num.c-teal{color:var(--teal)}.kf-num.c-indigo{color:var(--indigo)}.kf-num.c-amber{color:var(--amber)}.kf-num.c-rose{color:var(--rose)}
 .kf-text{flex:1}
 .kf-text p{font-size:9.5px;color:#374151;line-height:1.8;margin:0}
@@ -722,6 +727,29 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kf-attr-dot{width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0}
 .kf-attribution span{font-size:7.5px;color:var(--mid);letter-spacing:.02em}
 .kf-attribution strong{color:var(--blue);font-weight:600}
+/* ── Recommendations strip ──────────────────────────────── */
+.kf-recs{margin:14px 28px 0;flex-shrink:0}
+.kf-recs-header{font-size:8.5px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+.kf-recs-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.kf-rec-card{background:#fffbeb;border:1px solid #fde68a;border-top:3px solid var(--amber);border-radius:6px;padding:10px 12px}
+.kf-rec-card p{font-size:8.5px;color:#374151;line-height:1.7;margin:0}
+/* ── Actions Required & Sign-Off page ───────────────────── */
+.kf-section-header{font-size:8.5px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+.kf-actions{margin:20px 28px 0;flex-shrink:0}
+.kf-actions-table{width:100%;border-collapse:collapse;font-size:8px;color:#374151}
+.kf-actions-table th{background:#f3f4f6;padding:5px 8px;text-align:left;font-weight:700;font-size:7.5px;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;border:1px solid var(--border)}
+.kf-actions-table td{padding:7px 8px;border:1px solid var(--border);height:20px}
+.kf-actions-table tr:nth-child(even) td{background:#fafafa}
+.kf-signoff{margin:24px 28px 0;flex-shrink:0}
+.kf-signoff-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kf-signoff-block{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.kf-signoff-block-header{background:#f3f4f6;padding:5px 10px;font-size:7.5px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border)}
+.kf-signoff-fields{padding:8px 10px;display:flex;flex-direction:column;gap:7px}
+.kf-signoff-field{display:flex;flex-direction:column;gap:1px}
+.kf-signoff-field-label{font-size:7px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em}
+.kf-signoff-field-value{font-size:8.5px;color:#111827;font-weight:500;padding-bottom:1px;border-bottom:1px solid #d1d5db;min-height:15px}
+.kf-signoff-field-line{border-bottom:1px solid #d1d5db;min-height:15px}
+.kf-signoff-field-line.sig{min-height:22px}
 
 /* ── Table page ─────────────────────────────────────────── */
 .table-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -778,6 +806,9 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .kf-num{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-attr-dot{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-card{page-break-inside:avoid;break-inside:avoid}
+  .kf-rec-card{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kf-actions-table th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kf-signoff-block-header{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style>
 </head>
@@ -839,7 +870,12 @@ ${keyFindings.length ? `<div class="page">
     </div>`;
     }).join('')}
   </div>
- 
+  ${recommendations.length ? `<div class="kf-recs">
+    <div class="kf-recs-header">&#x1F4A1; Recommended Actions</div>
+    <div class="kf-recs-grid">
+      ${recommendations.map(r => `<div class="kf-rec-card"><p>${esc(r)}</p></div>`).join('')}
+    </div>
+  </div>` : ''}
   <div class="page-footer">
     <span class="doc-title">${esc(printTitle)}</span>
     <span class="pg">Key Findings</span>
@@ -863,6 +899,82 @@ ${keyFindings.length ? `<div class="page">
 </div>
 
 ${tablePagesHtml}
+
+${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ───────────────────────────── -->
+<div class="page">
+  <div class="kf-hero" style="padding:20px 32px 18px">
+    <div class="kf-hero-eyebrow">${esc(printTitle)}</div>
+    <div class="kf-hero-row">
+      <div class="kf-hero-title" style="font-size:20px">Actions &amp; Sign-Off<span>Review, accountability &amp; authorisation</span></div>
+      <div class="kf-hero-badge">Confidential</div>
+    </div>
+  </div>
+  <div class="kf-actions">
+    <div class="kf-section-header">&#x1F4DD; Actions Required</div>
+    <table class="kf-actions-table">
+      <thead><tr>
+        <th style="width:40%">Action Item</th>
+        <th style="width:25%">Responsible Officer</th>
+        <th style="width:18%">Due Date</th>
+        <th style="width:17%">Status</th>
+      </tr></thead>
+      <tbody>
+        ${'<tr><td></td><td></td><td></td><td></td></tr>'.repeat(8)}
+      </tbody>
+    </table>
+  </div>
+  <div class="kf-signoff">
+    <div class="kf-section-header">&#x270D;&#xFE0F; Sign-Off</div>
+    <div class="kf-signoff-grid">
+      <div class="kf-signoff-block">
+        <div class="kf-signoff-block-header">Prepared By</div>
+        <div class="kf-signoff-fields">
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Full Name</span>
+            <div class="kf-signoff-field-value">${esc(preparedByName)}</div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Title / Role</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Signature</span>
+            <div class="kf-signoff-field-line sig"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Date</span>
+            <div class="kf-signoff-field-value">${printDate}</div>
+          </div>
+        </div>
+      </div>
+      <div class="kf-signoff-block">
+        <div class="kf-signoff-block-header">Reviewed &amp; Approved By</div>
+        <div class="kf-signoff-fields">
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Full Name</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Title / Role</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Signature</span>
+            <div class="kf-signoff-field-line sig"></div>
+          </div>
+          <div class="kf-signoff-field">
+            <span class="kf-signoff-field-label">Date</span>
+            <div class="kf-signoff-field-line"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="page-footer">
+    <span class="doc-title">${esc(printTitle)}</span>
+    <span class="pg">Actions &amp; Sign-Off</span>
+  </div>
+</div>` : ''}
 
 </body>
 </html>`;
