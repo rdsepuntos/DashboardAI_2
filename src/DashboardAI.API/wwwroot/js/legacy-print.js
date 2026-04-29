@@ -311,6 +311,18 @@
             const printDate = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' });
             const _md = (() => { try { return JSON.parse(localStorage.getItem('jmemberData') || '{}'); } catch(e) { return {}; } })();
             const preparedByName = [_md.FirstName, _md.Surname].filter(Boolean).join(' ') || '';
+            // ── Send-report API context ────────────────────────────────────────────────
+            const srStoreId = (window.SESSION && window.SESSION.storeId) || _md.StoreID || 0;
+            const srUserId  = (window.SESSION && window.SESSION.userId)  || _md.MemberID || 0;
+            let srAshxBase, srAsmxBase;
+            try {
+                const _u = new URL(CONFIG.aiApiUrl);
+                srAshxBase = `${_u.protocol}//${_u.host}/App/NetServices`;
+                srAsmxBase = `${_u.protocol}//${_u.host}/NetServices/POSTDynamicChecklist.asmx`;
+            } catch (_) {
+                srAshxBase = '/App/NetServices';
+                srAsmxBase = '/NetServices/POSTDynamicChecklist.asmx';
+            }
             var printTitle = CONFIG.reportTitle || document.title || 'WHS Dashboard Report';
             printTitle = $('#dashboardTitle span').html();
             // ── Brand colour — prefer __primaryColor.TertiaryColor, fall back to #navbar-left, then default blue ──
@@ -782,12 +794,91 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   letter-spacing:.02em;font-family:inherit
 }
 .print-btn:hover{background:#1d4ed8}
+.send-btn{
+  background:#16a34a;color:white;border:none;border-radius:6px;
+  padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;
+  letter-spacing:.02em;font-family:inherit;margin-right:8px
+}
+.send-btn:hover{background:#15803d}
+/* ── Send Report modal (screen only) ─────────────────────── */
+.sr-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:24px;z-index:1000}
+.sr-backdrop.open{display:flex}
+.sr-modal{background:#fff;border-radius:12px;width:100%;max-width:680px;box-shadow:0 24px 60px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:92vh;overflow:hidden;font-family:Segoe UI,Arial,sans-serif}
+.sr-hdr{background:#3B98F1;padding:20px 24px 18px;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0}
+.sr-hdr-left{display:flex;flex-direction:column;gap:4px}
+.sr-eyebrow{font-size:9px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.14em}
+.sr-title{font-size:20px;font-weight:800;color:#fff;line-height:1.1}
+.sr-close{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:16px;flex-shrink:0;margin-top:2px}
+.sr-close:hover{background:rgba(255,255,255,.25)}
+.sr-pill{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin:16px 24px 0;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.sr-pill-icon{font-size:18px;flex-shrink:0}
+.sr-pill-info{flex:1;min-width:0}
+.sr-pill-name{font-size:11px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-pill-meta{font-size:9px;color:#6b7280;margin-top:1px}
+.sr-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+.sr-sec-lbl{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.sr-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.sr-tab{font-size:11px;font-weight:600;padding:5px 12px;border-radius:20px;border:1.5px solid #e5e7eb;color:#6b7280;cursor:pointer;transition:all .15s;background:#fff;user-select:none}
+.sr-tab:hover{border-color:#3B98F1;color:#3B98F1}
+.sr-tab.active{background:#3B98F1;color:#fff;border-color:#3B98F1}
+.sr-tab .sr-tab-cnt{display:inline-block;background:rgba(255,255,255,.3);border-radius:8px;font-size:9px;padding:0 5px;margin-left:4px;font-weight:700}
+.sr-tab:not(.active) .sr-tab-cnt{background:#f3f4f6;color:#6b7280}
+.sr-panel{display:none}
+.sr-panel.visible{display:block}
+.sr-ms-wrap{border:1.5px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff}
+.sr-ms-wrap:focus-within{border-color:#3B98F1;box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+.sr-search-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#fafafa}
+.sr-search-row input{border:none;background:transparent;outline:none;font-size:11px;color:#111827;width:100%;font-family:inherit}
+.sr-search-row input::placeholder{color:#9ca3af}
+.sr-sel-all-row{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb}
+.sr-sel-all-btn{font-size:10px;color:#3B98F1;cursor:pointer;font-weight:600}
+.sr-sel-all-btn:hover{text-decoration:underline}
+.sr-sel-count{font-size:10px;color:#6b7280}
+.sr-list{max-height:160px;overflow-y:auto}
+.sr-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background .1s;user-select:none}
+.sr-item:hover{background:#f9fafb}
+.sr-item.selected{background:#eff6ff}
+.sr-item-cb{width:15px;height:15px;border:1.5px solid #e5e7eb;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.sr-item.selected .sr-item-cb{background:#3B98F1;border-color:#3B98F1}
+.sr-item.selected .sr-item-cb::after{content:'✓';color:#fff;font-size:9px;font-weight:700}
+.sr-item-label{font-size:11px;color:#111827;flex:1}
+.sr-item-sub{font-size:9px;color:#6b7280}
+.sr-item-av{width:22px;height:22px;border-radius:50%;background:#3B98F1;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sr-item-av.t{background:#0d9488}.sr-item-av.a{background:#d97706}.sr-item-av.r{background:#e11d48}.sr-item-av.i{background:#4f46e5}
+.sr-empty{padding:16px 12px;font-size:11px;color:#6b7280;text-align:center}
+.sr-loading{padding:14px 12px;font-size:11px;color:#6b7280;text-align:center}
+.sr-chips-wrap{display:flex;flex-wrap:wrap;gap:6px;min-height:22px;margin-top:10px}
+.sr-chip{display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:3px 10px 3px 8px;font-size:10px;color:#2563eb;font-weight:600}
+.sr-chip.div{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.sr-chip.dep{background:#fef3c7;border-color:#fde68a;color:#92400e}
+.sr-chip.rol{background:#f5f3ff;border-color:#ddd6fe;color:#5b21b6}
+.sr-chip-x{cursor:pointer;font-size:11px;opacity:.6;line-height:1}
+.sr-chip-x:hover{opacity:1}
+.sr-summary-row{display:flex;align-items:center;gap:6px;padding:8px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-top:8px}
+.sr-summary-dot{width:7px;height:7px;border-radius:50%;background:#3B98F1;flex-shrink:0}
+.sr-summary-text{font-size:10px;color:#6b7280;flex:1}
+.sr-summary-count{font-size:11px;font-weight:700;color:#3B98F1}
+.sr-field{display:flex;flex-direction:column;gap:5px}
+.sr-field label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.07em}
+.sr-field input,.sr-field textarea{border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:12px;color:#111827;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s;resize:none}
+.sr-field input:focus,.sr-field textarea:focus{border-color:#3B98F1;box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+.sr-field textarea{min-height:72px}
+.sr-ftr{padding:14px 24px;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px;background:#fafafa}
+.sr-ftr-note{font-size:9.5px;color:#6b7280;display:flex;align-items:center;gap:5px}
+.sr-ftr-btns{display:flex;gap:8px}
+.sr-btn-ghost{background:transparent;border:1.5px solid #e5e7eb;color:#6b7280;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.sr-btn-ghost:hover{border-color:#9ca3af;color:#111827}
+.sr-btn-primary{background:#3B98F1;color:#fff;box-shadow:0 2px 8px rgba(59,152,241,.35);border:none;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.sr-btn-primary:hover{opacity:.88}
+.sr-btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.sr-user-search-hint{font-size:10px;color:#6b7280;padding:6px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-style:italic}
 
 /* ── Print media ─────────────────────────────────────────── */
 @page{size:A4 portrait;margin:0}
 @media print{
   body{background:white;padding:0;gap:0}
   .print-bar{display:none}
+  .sr-backdrop{display:none!important}
   .page{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;width:100%;min-height:100vh}
   .page:last-child{page-break-after:avoid;break-after:avoid}
   .cover-top{height:42vh;print-color-adjust:exact;-webkit-print-color-adjust:exact}
@@ -810,12 +901,220 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .kf-signoff-block-header{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style>
+<script>
+// ── Config (inlined at report-generation time) ────────────────
+var SR_STORE_ID  = ${srStoreId || 0};
+var SR_USER_ID   = ${srUserId  || 0};
+var SR_ASHX_BASE = ${JSON.stringify(srAshxBase)};
+var SR_ASMX_BASE = ${JSON.stringify(srAsmxBase)};
+// ── State ────────────────────────────────────────────────────
+var srSel    = { users:{}, division:{}, department:{}, role:{} };
+var srTotal  = { users:0, division:0, department:0, role:0 };
+var srLoaded = { division:false, department:false };
+var srSearchTimer = null;
+// ── Wire backdrop click-outside after DOM ready ───────────────
+document.addEventListener('DOMContentLoaded', function() {
+  var bd = document.getElementById('sr-backdrop');
+  if (bd) bd.addEventListener('click', function(e) { if (e.target === this) srClose(); });
+});
+// ── Open / Close ─────────────────────────────────────────────
+function srOpen() {
+  document.getElementById('sr-backdrop').classList.add('open');
+  srLoadDivisions();
+  srLoadDepartments();
+}
+function srClose() {
+  document.getElementById('sr-backdrop').classList.remove('open');
+}
+// ── Tab switch ───────────────────────────────────────────────
+function srTab(tab, el) {
+  document.querySelectorAll('.sr-tab').forEach(function(t){ t.classList.remove('active'); });
+  document.querySelectorAll('.sr-panel').forEach(function(p){ p.classList.remove('visible'); });
+  el.classList.add('active');
+  document.getElementById('sr-panel-'+tab).classList.add('visible');
+}
+// ── Load divisions ───────────────────────────────────────────
+function srLoadDivisions() {
+  if (srLoaded.division) return;
+  srLoaded.division = true;
+  fetch(SR_ASHX_BASE + '/GetDivision.ashx?storeId=' + SR_STORE_ID + '&memberId=' + SR_USER_ID)
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var items = (j.data || []);
+      srTotal.division = items.length;
+      var list = document.getElementById('sr-division-list');
+      if (!items.length) { list.innerHTML = '<div class="sr-empty">No divisions found</div>'; srUpdateSelCount('division'); return; }
+      list.innerHTML = items.map(function(x){
+        return '<div class="sr-item" data-group="division" data-id="'+x.IDNo+'" data-label="'+srEsc(x.RowDescription)+'" onclick="srToggle(this,\'division\')" >'
+          + '<div class="sr-item-cb"></div>'
+          + '<div class="sr-item-label">'+srEsc(x.RowDescription)+'</div>'
+          + '</div>';
+      }).join('');
+      srUpdateSelCount('division');
+    })
+    .catch(function(){ document.getElementById('sr-division-list').innerHTML = '<div class="sr-empty">Failed to load divisions</div>'; });
+}
+// ── Load departments ─────────────────────────────────────────
+function srLoadDepartments() {
+  if (srLoaded.department) return;
+  srLoaded.department = true;
+  fetch(SR_ASHX_BASE + '/GetDepartment.ashx?storeId=' + SR_STORE_ID + '&memberId=' + SR_USER_ID + '&parentId=0')
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var items = (j.data || []);
+      srTotal.department = items.length;
+      var list = document.getElementById('sr-department-list');
+      if (!items.length) { list.innerHTML = '<div class="sr-empty">No departments found</div>'; srUpdateSelCount('department'); return; }
+      list.innerHTML = items.map(function(x){
+        return '<div class="sr-item" data-group="department" data-id="'+x.IDNo+'" data-label="'+srEsc(x.RowDescription)+'" onclick="srToggle(this,\'department\')">'
+          + '<div class="sr-item-cb"></div>'
+          + '<div class="sr-item-label">'+srEsc(x.RowDescription)+'</div>'
+          + '</div>';
+      }).join('');
+      srUpdateSelCount('department');
+    })
+    .catch(function(){ document.getElementById('sr-department-list').innerHTML = '<div class="sr-empty">Failed to load departments</div>'; });
+}
+// ── Search users / roles ──────────────────────────────────────
+function srSearchUsers(query, tab) {
+  tab = tab || 'users';
+  var listId = tab === 'role' ? 'sr-role-list' : 'sr-users-list';
+  clearTimeout(srSearchTimer);
+  var q = (query || '').trim();
+  if (q.length < 2) {
+    document.getElementById(listId).innerHTML = '<div class="sr-empty">No results \u2014 type to search</div>';
+    return;
+  }
+  document.getElementById(listId).innerHTML = '<div class="sr-loading">Searching&#8230;</div>';
+  srSearchTimer = setTimeout(function(){
+    fetch(SR_ASMX_BASE + '/GetAuditedLimit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: { StoreID: SR_STORE_ID, LocType: 0, LocID: 0, MemberId: SR_USER_ID, Search: q } })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      var records = (j.d && j.d.recordList) ? j.d.recordList : [];
+      var list = document.getElementById(listId);
+      if (!records.length) { list.innerHTML = '<div class="sr-empty">No results found</div>'; return; }
+      var colors = ['','t','a','r','i'];
+      list.innerHTML = records.map(function(r, idx){
+        var initials = (r.RowDescription || '?').split(' ').slice(0,2).map(function(w){ return w[0]||''; }).join('').toUpperCase();
+        var col = colors[idx % colors.length];
+        return '<div class="sr-item" data-group="'+tab+'" data-id="'+r.IDNo+'" data-label="'+srEsc(r.RowDescription)+'" onclick="srToggle(this,\''+tab+'\')" >'
+          + '<div class="sr-item-cb"></div>'
+          + '<div class="sr-item-av '+(col||'')+'">'+initials+'</div>'
+          + '<div class="sr-item-label">'+srEsc(r.RowDescription)+'</div>'
+          + '</div>';
+      }).join('');
+      Object.keys(srSel[tab]).forEach(function(id){
+        var el = list.querySelector('[data-id="'+id+'"]');
+        if (el) el.classList.add('selected');
+      });
+    })
+    .catch(function(){ document.getElementById(listId).innerHTML = '<div class="sr-empty">Search failed</div>'; });
+  }, 300);
+}
+// ── Toggle item ──────────────────────────────────────────────
+function srToggle(el, group) {
+  var id    = el.dataset.id;
+  var label = el.dataset.label;
+  if (el.classList.contains('selected')) {
+    el.classList.remove('selected');
+    delete srSel[group][id];
+  } else {
+    el.classList.add('selected');
+    srSel[group][id] = label;
+  }
+  srUpdateUI(group);
+}
+// ── Select all ───────────────────────────────────────────────
+function srSelectAll(listId, group) {
+  var items = document.querySelectorAll('#'+listId+' .sr-item:not([style*="display:none"]):not([style*="display: none"])');
+  var allSel = Array.prototype.every.call(items, function(i){ return i.classList.contains('selected'); });
+  items.forEach(function(el){
+    var id = el.dataset.id; var label = el.dataset.label;
+    if (allSel) { el.classList.remove('selected'); delete srSel[group][id]; }
+    else        { el.classList.add('selected');    srSel[group][id] = label; }
+  });
+  srUpdateUI(group);
+}
+// ── Filter ───────────────────────────────────────────────────
+function srFilter(listId, query) {
+  var q = query.toLowerCase();
+  document.querySelectorAll('#'+listId+' .sr-item').forEach(function(el){
+    el.style.display = el.dataset.label.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+  });
+}
+// ── Update sel count ─────────────────────────────────────────
+function srUpdateSelCount(group) {
+  var el = document.getElementById('sr-selcount-'+group);
+  if (!el) return;
+  el.textContent = Object.keys(srSel[group]).length + ' of ' + srTotal[group] + ' selected';
+}
+// ── Update UI after selection change ─────────────────────────
+function srUpdateUI(group) {
+  var cnt = Object.keys(srSel[group]).length;
+  document.getElementById('sr-cnt-'+group).textContent = cnt;
+  srUpdateSelCount(group);
+  srRenderChips();
+  var total = Object.keys(srSel.users).length + Object.keys(srSel.division).length
+            + Object.keys(srSel.department).length + Object.keys(srSel.role).length;
+  document.getElementById('sr-total').textContent = total === 0 ? '0 selected' : total + ' recipient' + (total !== 1 ? 's' : '');
+  document.getElementById('sr-send-btn').disabled = total === 0;
+}
+// ── Render chips ─────────────────────────────────────────────
+function srRenderChips() {
+  var wrap = document.getElementById('sr-chips-wrap');
+  wrap.innerHTML = '';
+  function addChip(group, id, label, cls) {
+    var c = document.createElement('div');
+    c.className = 'sr-chip ' + (cls || '');
+    c.innerHTML = srEsc(label) + '<span class="sr-chip-x" onclick="srRemoveChip(\''+group+'\',\''+id+'\')">&times;</span>';
+    wrap.appendChild(c);
+  }
+  Object.keys(srSel.users).forEach(function(id){ addChip('users',id,srSel.users[id],''); });
+  Object.keys(srSel.division).forEach(function(id){ addChip('division',id,srSel.division[id],'div'); });
+  Object.keys(srSel.department).forEach(function(id){ addChip('department',id,srSel.department[id],'dep'); });
+  Object.keys(srSel.role).forEach(function(id){ addChip('role',id,srSel.role[id],'rol'); });
+}
+// ── Remove chip ──────────────────────────────────────────────
+function srRemoveChip(group, id) {
+  delete srSel[group][id];
+  var el = document.querySelector('[data-group="'+group+'"][data-id="'+id+'"]');
+  if (el) el.classList.remove('selected');
+  srUpdateUI(group);
+}
+// ── Send (stub) ──────────────────────────────────────────────
+function srHandleSend() {
+  var btn = document.getElementById('sr-send-btn');
+  btn.disabled = true;
+  btn.innerHTML = '&#8987;\u00a0 Sending\u2026';
+  setTimeout(function(){
+    btn.innerHTML = '&#10003;\u00a0 Sent!';
+    btn.style.background = '#16a34a';
+    setTimeout(function(){
+      srClose();
+      btn.innerHTML = '&#9993;\u00a0 Send Report';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 1400);
+  }, 1600);
+}
+// ── HTML escape ──────────────────────────────────────────────
+function srEsc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+<\/script>
 </head>
 <body>
 
 <div class="print-bar">
   <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
-  <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
+  <div style="display:flex;align-items:center;gap:0">
+    <button class="send-btn" onclick="srOpen()">&#9993;&nbsp; Send Report</button>
+    <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
+  </div>
 </div>
 
 <!-- ── Cover page ─────────────────────────────────────────────────────── -->
@@ -922,7 +1221,7 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
     </div>
   </div>
   <div class="kf-actions">
-    <div class="kf-section-header">&#x1F4DD; Actions Required</div>
+    <div class="kf-section-header">Actions Required</div>
     <table class="kf-actions-table">
       <thead><tr>
         <th style="width:40%">Action Item</th>
@@ -936,7 +1235,7 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
     </table>
   </div>
   <div class="kf-signoff">
-    <div class="kf-section-header">&#x270D;&#xFE0F; Sign-Off</div>
+    <div class="kf-section-header">Sign-Off</div>
     <div class="kf-signoff-grid">
       <div class="kf-signoff-block">
         <div class="kf-signoff-block-header">Prepared By</div>
@@ -987,6 +1286,113 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
     <span class="pg">Actions &amp; Sign-Off</span>
   </div>
 </div>` : ''}
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  SEND REPORT MODAL                                            -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="sr-backdrop" class="sr-backdrop" role="dialog" aria-modal="true" aria-labelledby="sr-title">
+  <div class="sr-modal">
+    <div class="sr-hdr">
+      <div class="sr-hdr-left">
+        <div class="sr-eyebrow">WHS Monitor</div>
+        <div class="sr-title" id="sr-title">&#9993;&nbsp; Send Report</div>
+      </div>
+      <div class="sr-close" onclick="srClose()" title="Close">&#10005;</div>
+    </div>
+    <div class="sr-pill">
+      <div class="sr-pill-icon">&#128196;</div>
+      <div class="sr-pill-info">
+        <div class="sr-pill-name">${esc(printTitle)} &mdash; ${printDate}</div>
+        <div class="sr-pill-meta">${aiMode ? 'AI-Annotated Report' : 'Dashboard Report'} &bull; Generated just now</div>
+      </div>
+      <div style="font-size:9px;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px;font-weight:600;flex-shrink:0">HTML</div>
+    </div>
+    <div class="sr-body">
+      <div>
+        <div class="sr-sec-lbl">Send To</div>
+        <div class="sr-tabs">
+          <div class="sr-tab active" data-tab="users" onclick="srTab('users',this)">Users <span class="sr-tab-cnt" id="sr-cnt-users">0</span></div>
+          <div class="sr-tab" data-tab="division" onclick="srTab('division',this)">Division <span class="sr-tab-cnt" id="sr-cnt-division">0</span></div>
+          <div class="sr-tab" data-tab="department" onclick="srTab('department',this)">Department <span class="sr-tab-cnt" id="sr-cnt-department">0</span></div>
+          <div class="sr-tab" data-tab="role" onclick="srTab('role',this)">Employee Role <span class="sr-tab-cnt" id="sr-cnt-role">0</span></div>
+        </div>
+        <!-- Users panel — search-as-you-type -->
+        <div id="sr-panel-users" class="sr-panel visible">
+          <div class="sr-ms-wrap">
+            <div class="sr-search-row">
+              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <input type="text" id="sr-user-search" placeholder="Type a name to search users&#8230;" oninput="srSearchUsers(this.value)" autocomplete="off"/>
+            </div>
+            <div class="sr-user-search-hint">Start typing to search members by name</div>
+            <div class="sr-list" id="sr-users-list"><div class="sr-empty">No results — type to search</div></div>
+          </div>
+        </div>
+        <!-- Division panel -->
+        <div id="sr-panel-division" class="sr-panel">
+          <div class="sr-ms-wrap">
+            <div class="sr-search-row">
+              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <input type="text" placeholder="Search divisions&#8230;" oninput="srFilter('sr-division-list',this.value)" autocomplete="off"/>
+            </div>
+            <div class="sr-sel-all-row">
+              <span class="sr-sel-all-btn" onclick="srSelectAll('sr-division-list','division')">Select all</span>
+              <span class="sr-sel-count" id="sr-selcount-division">Loading&#8230;</span>
+            </div>
+            <div class="sr-list" id="sr-division-list"><div class="sr-loading">Loading&#8230;</div></div>
+          </div>
+        </div>
+        <!-- Department panel -->
+        <div id="sr-panel-department" class="sr-panel">
+          <div class="sr-ms-wrap">
+            <div class="sr-search-row">
+              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <input type="text" placeholder="Search departments&#8230;" oninput="srFilter('sr-department-list',this.value)" autocomplete="off"/>
+            </div>
+            <div class="sr-sel-all-row">
+              <span class="sr-sel-all-btn" onclick="srSelectAll('sr-department-list','department')">Select all</span>
+              <span class="sr-sel-count" id="sr-selcount-department">Loading&#8230;</span>
+            </div>
+            <div class="sr-list" id="sr-department-list"><div class="sr-loading">Loading&#8230;</div></div>
+          </div>
+        </div>
+        <!-- Employee Role panel -->
+        <div id="sr-panel-role" class="sr-panel">
+          <div class="sr-ms-wrap">
+            <div class="sr-search-row">
+              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <input type="text" id="sr-role-search" placeholder="Type a name to search by role&#8230;" oninput="srSearchUsers(this.value,'role')" autocomplete="off"/>
+            </div>
+            <div class="sr-user-search-hint">Search members — select to add by employee role</div>
+            <div class="sr-list" id="sr-role-list"><div class="sr-empty">No results — type to search</div></div>
+          </div>
+        </div>
+        <!-- Chips -->
+        <div id="sr-chips-wrap" class="sr-chips-wrap"></div>
+        <div class="sr-summary-row">
+          <div class="sr-summary-dot"></div>
+          <span class="sr-summary-text">Total unique recipients</span>
+          <span class="sr-summary-count" id="sr-total">0 selected</span>
+        </div>
+      </div>
+      <div class="sr-field">
+        <label>Email Subject</label>
+        <input type="text" id="sr-subject" value="${esc(printTitle)} \u2014 ${printDate}"/>
+      </div>
+      <div class="sr-field">
+        <label>Message (optional)</label>
+        <textarea id="sr-message" placeholder="Add a personal message to accompany the report&#8230;"></textarea>
+      </div>
+    </div>
+    <div class="sr-ftr">
+      <div class="sr-ftr-note"><span>&#128274;</span> Report will be sent as an HTML attachment</div>
+      <div class="sr-ftr-btns">
+        <button class="sr-btn-ghost" onclick="srClose()">Cancel</button>
+        <button class="sr-btn-primary" id="sr-send-btn" disabled onclick="srHandleSend()">&#9993;&nbsp; Send Report</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 </body>
 </html>`;
