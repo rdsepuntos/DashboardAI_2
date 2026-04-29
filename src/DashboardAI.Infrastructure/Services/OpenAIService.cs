@@ -159,6 +159,96 @@ namespace DashboardAI.Infrastructure.Services
                    ?? new Dictionary<string, WidgetInsight>();
         }
 
+        // ────────────────────────────────────────────────────────────────────────
+        //  POST /api/report/insights — executive summary + per-widget insights
+        //  Accepts richer ReportWidgetItem descriptors (table columns, sample rows)
+        // ────────────────────────────────────────────────────────────────────────
+        public async Task<ReportInsightsResult> GenerateReportInsightsAsync(
+            string dashboardTitle,
+            IEnumerable<ReportWidgetItem> widgets)
+        {
+            var list = widgets?.ToList() ?? new List<ReportWidgetItem>();
+
+            // Build a rich, human-readable widget listing for the prompt
+            var sb = new StringBuilder();
+            for (int i = 0; i < list.Count; i++)
+            {
+                var w = list[i];
+                sb.Append($"{i + 1}. [{w.Type}] \"{w.Title}\"");
+                if (!string.IsNullOrWhiteSpace(w.CurrentValue))
+                    sb.Append($" — value: {w.CurrentValue}");
+                if (w.RowCount.HasValue)
+                    sb.Append($" — {w.RowCount} records");
+                if (w.Columns != null && w.Columns.Count > 0)
+                {
+                    sb.Append($"\n   Columns: {string.Join(", ", w.Columns)}");
+                    if (w.SampleRows != null && w.SampleRows.Count > 0)
+                    {
+                        sb.Append("\n   Sample rows:");
+                        foreach (var row in w.SampleRows.Take(5))
+                            sb.Append($"\n     - {string.Join(" | ", row)}");
+                    }
+                }
+                sb.AppendLine();
+            }
+
+            var systemMsg =
+                "You are a Workplace Health & Safety reporting analyst. " +
+                "Write concise, factual, professional insights suitable for printed WHS management reports. " +
+                "Return ONLY valid JSON — no markdown, no code fences.";
+
+            var userMsg =
+                $"Dashboard: \"{dashboardTitle}\"\n\n" +
+                "Generate an executive summary and individual widget insights for a professional printed WHS report.\n\n" +
+                $"Widgets:\n{sb}\n" +
+                "Return ONLY a JSON object with exactly two fields:\n" +
+                "1. \"executiveSummary\": a 2-3 sentence professional WHS executive summary that references the dashboard title, " +
+                "highlights key KPI values where present, and notes any notable trends or risk signals.\n" +
+                "2. \"descriptions\": an object where each key is exactly the widget title and each value has:\n" +
+                "   - \"description\": a 1-2 sentence WHS insight explaining what the widget shows and any safety observation.\n" +
+                "   - \"layout\": one of \"right\" (chart left, text right \u2014 bar/line trends), " +
+                "\"left\" (text left, chart right \u2014 summary-first), " +
+                "\"bottom\" (chart top, text below \u2014 donut/gauge), " +
+                "or \"full\" (chart only \u2014 tables, KPIs, heatmaps).";
+
+            var body = new
+            {
+                model    = "gpt-4o-mini",
+                messages = new object[]
+                {
+                    new { role = "system", content = systemMsg },
+                    new { role = "user",   content = userMsg   }
+                },
+                response_format = new { type = "json_object" }
+            };
+
+            var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/chat/completions")
+            {
+                Content = new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json")
+            };
+            req.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+            var response = await _http.SendAsync(req);
+            var json     = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"OpenAI error {(int)response.StatusCode}: {json}");
+
+            var parsed  = JObject.Parse(json);
+            var content = parsed["choices"]?[0]?["message"]?["content"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                throw new InvalidOperationException($"OpenAI returned empty content. Raw: {json}");
+
+            var root = JObject.Parse(content);
+            return new ReportInsightsResult
+            {
+                ExecutiveSummary = root["executiveSummary"]?.ToString() ?? "",
+                Descriptions     = root["descriptions"]?.ToObject<Dictionary<string, WidgetInsight>>()
+                                   ?? new Dictionary<string, WidgetInsight>()
+            };
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         //  OpenAI Responses API
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

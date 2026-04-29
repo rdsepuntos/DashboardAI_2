@@ -41,6 +41,9 @@
 
     // API endpoint for AI widget descriptions (mirrors /api/chat/describe in dashboard.html)
     aiApiUrl: 'https://beta.whsmonitor.com.au/dashboardv2/api/chat/describe',
+
+    // Richer AI endpoint: executive summary + structured widget insights for print reports
+    reportInsightsUrl: 'https://beta.whsmonitor.com.au/dashboardv2/api/report/insights',
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -116,24 +119,29 @@
   }
 
   /**
-   * Fetch AI widget descriptions from the describe endpoint.
-   * Returns a descriptions dict on success, or {} on failure (graceful degradation).
+   * Fetch AI report insights from POST /api/report/insights.
+   * Accepts richer widget data: table columns, sample rows, count values.
+   * Returns { executiveSummary, descriptions } — graceful degradation on failure.
    */
-  async function fetchDescriptions(dashboardTitle, widgets) {
+  async function fetchReportInsights(dashboardTitle, widgets) {
     const userId  = (window.SESSION && window.SESSION.userId)  || '';
     const storeId = (window.SESSION && window.SESSION.storeId) || '';
+    const empty   = { executiveSummary: '', descriptions: {} };
     try {
-      const res = await fetch(CONFIG.aiApiUrl, {
+      const res = await fetch(CONFIG.reportInsightsUrl, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ dashboardTitle, userId, storeId, widgets }),
       });
-      if (!res.ok) return {};
+      if (!res.ok) return empty;
       const data = await res.json();
-      return data.descriptions || {};
+      return {
+        executiveSummary: data.executiveSummary || '',
+        descriptions:     data.descriptions    || {},
+      };
     } catch (e) {
-      console.warn('[LegacyReport] AI describe failed:', e);
-      return {};
+      console.warn('[LegacyReport] AI insights failed:', e);
+      return empty;
     }
   }
 
@@ -252,19 +260,38 @@
 
       const ACCENT_COLORS = ['', 'teal', 'indigo', 'amber'];
 
-      // ── Fetch AI descriptions (aiMode only) ───────────────────────────────────
-      let descriptions = {};
+      // ── Extract all table data early — used both for AI context and for rendering ─────
+      const tableDataMap = new Map();
+      for (const tItem of tableItems) {
+        const td = extractTableData(tItem);
+        if (td) tableDataMap.set(tItem.title, td);
+      }
+
+      // ── Fetch AI insights (aiMode only) ──────────────────────────────────
+      let descriptions     = {};
+      let executiveSummary = '';
       if (aiMode) {
         setProg('Generating AI insights…', 8);
-        const allForDesc = [
+        const COUNT_SEL = '.progress-value .h2 div, .progress-value .h2, .h2 div, .dashboard-count div, .dashboard-count';
+        const allForInsights = [
           ...countItems.map(i => {
-            const valEl = i.el.querySelector('.progress-value .h2 div, .progress-value .h2, .h2 div, .dashboard-count div, .dashboard-count');
-            return { title: i.title, type: 'count', chartType: '', currentValue: (valEl ? valEl.textContent : '').trim() };
+            const valEl = i.el.querySelector(COUNT_SEL);
+            return { title: i.title, type: 'count', currentValue: (valEl ? valEl.textContent : '').trim() };
           }),
-          ...cardItems.map(i => ({ title: i.title, type: i.gridtype, chartType: '', currentValue: '' })),
-          ...tableItems.map(i => ({ title: i.title, type: 'table',  chartType: '', currentValue: '' })),
+          ...cardItems.map(i => ({ title: i.title, type: i.gridtype, currentValue: '' })),
+          ...tableItems.map(i => {
+            const td = tableDataMap.get(i.title);
+            return {
+              title: i.title, type: 'table', currentValue: '',
+              rowCount:   td ? td.rows.length      : null,
+              columns:    td ? td.cols              : [],
+              sampleRows: td ? td.rows.slice(0, 5) : [],
+            };
+          }),
         ];
-        descriptions = await fetchDescriptions(printTitle, allForDesc);
+        const insights   = await fetchReportInsights(printTitle, allForInsights);
+        descriptions     = insights.descriptions;
+        executiveSummary = insights.executiveSummary;
       }
 
       // ── Build KPI mini strip from count widgets ───────────────────────────────
@@ -420,8 +447,8 @@
 
       let tablePagesHtml = '';
       for (const tItem of tableItems) {
-        setProg(`Extracting table: ${tItem.title}…`, 87);
-        const td = extractTableData(tItem);
+        setProg(`Rendering table: ${tItem.title}…`, 87);
+        const td = tableDataMap.get(tItem.title);
         if (!td) continue;
 
         let bodyHtml;
@@ -518,6 +545,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .cover-dots{display:flex;gap:8px;margin-top:6px}
 .cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .cover-dots span:not(:first-child){opacity:.35}
+.cover-summary{font-size:9px;color:#374151;text-align:center;max-width:440px;line-height:1.75;background:rgba(255,255,255,.7);border-radius:6px;padding:10px 16px;margin-top:4px}
 
 /* ── Cards grid ─────────────────────────────────────────── */
 .cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 28px 20px}
@@ -640,6 +668,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
         <div class="lbl">Report Date</div>
       </div>
     </div>
+    ${executiveSummary ? `<div class="cover-summary">${esc(executiveSummary)}</div>` : ''}
     <div class="cover-dots"><span></span><span></span><span></span></div>
   </div>
   <div class="page-footer">

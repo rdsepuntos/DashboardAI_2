@@ -24,6 +24,27 @@ namespace DashboardAI.Application.Interfaces
         public string Layout      { get; set; }
     }
 
+    /// <summary>
+    /// Richer widget descriptor for POST /api/report/insights.
+    /// Includes table structure (columns + sample rows) so GPT can reason about actual content.
+    /// </summary>
+    public class ReportWidgetItem
+    {
+        public string             Title        { get; set; }
+        public string             Type         { get; set; }  // count | linechart | bar | table | etc.
+        public string             CurrentValue { get; set; }  // populated for count widgets
+        public int?               RowCount     { get; set; }  // total rows for table widgets
+        public List<string>       Columns      { get; set; }  // column headers for tables
+        public List<List<string>> SampleRows   { get; set; }  // first 5 rows for tables
+    }
+
+    /// <summary>Full report insights returned by GenerateReportInsightsAsync.</summary>
+    public class ReportInsightsResult
+    {
+        public string                            ExecutiveSummary { get; set; }
+        public Dictionary<string, WidgetInsight> Descriptions     { get; set; }
+    }
+
     public interface IOpenAIService
     {
         /// <summary>
@@ -53,5 +74,13 @@ namespace DashboardAI.Application.Interfaces
         Task<Dictionary<string, WidgetInsight>> DescribeWidgetsAsync(
             string dashboardTitle,
             IEnumerable<WidgetDescribeItem> widgets);
+
+        /// <summary>
+        /// Generates an executive summary and per-widget insights for a print report.
+        /// Accepts richer data than DescribeWidgetsAsync — table columns, sample rows, count values.
+        /// </summary>
+        Task<ReportInsightsResult> GenerateReportInsightsAsync(
+            string dashboardTitle,
+            IEnumerable<ReportWidgetItem> widgets);
     }
 }
