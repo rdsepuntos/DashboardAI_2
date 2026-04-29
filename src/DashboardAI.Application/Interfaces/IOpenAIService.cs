@@ -51,6 +51,7 @@ namespace DashboardAI.Application.Interfaces
     {
         public string                            ExecutiveSummary { get; set; }
         public List<string>                      KeyFindings      { get; set; }  // 3-5 bullet points
+        public List<string>                      Recommendations  { get; set; }  // 3-5 actionable items
         public Dictionary<string, WidgetInsight> Descriptions     { get; set; }
     }
 

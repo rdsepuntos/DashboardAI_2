@@ -63,6 +63,7 @@ namespace DashboardAI.API.Controllers
                 {
                     executiveSummary = result.ExecutiveSummary,
                     keyFindings      = result.KeyFindings ?? new List<string>(),
+                    recommendations  = result.Recommendations ?? new List<string>(),
                     descriptions     = result.Descriptions
                 });
             }

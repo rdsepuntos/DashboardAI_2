@@ -117,9 +117,10 @@
      */
     function extractCountValue(el) {
         const candidates = [
-            el.querySelector('.progress-value .h2 > div'),  // ring: innermost value div (direct child)
-            el.querySelector('.progress-value .h2'),         // ring: h2 wrapper fallback
-            el.querySelector('.dashboard-count > div'),      // large-number: direct child only
+            el.querySelector('.progress-value .h2 > div'),    // ring: innermost value div (direct child)
+            el.querySelector('.progress-value .h2'),           // ring: h2 wrapper fallback
+            el.querySelector('.dashboard-count .rounded > div'), // nested-card variant (value inside .rounded div)
+            el.querySelector('.dashboard-count > div'),         // large-number: direct child only
         ];
         for (const node of candidates) {
             if (!node) continue;

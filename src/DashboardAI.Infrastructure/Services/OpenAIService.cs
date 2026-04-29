@@ -219,12 +219,14 @@ namespace DashboardAI.Infrastructure.Services
                 filterContext +
                 "Generate an executive summary, key findings, and individual widget insights for a professional printed WHS report.\n\n" +
                 $"Widgets:\n{sb}\n" +
-                "Return ONLY a JSON object with exactly three fields:\n" +
+                "Return ONLY a JSON object with exactly four fields:\n" +
                 "1. \"executiveSummary\": a 2-3 sentence professional WHS executive summary that references the dashboard title, " +
                 "highlights key KPI values where present, and notes any notable trends or risk signals.\n" +
                 "2. \"keyFindings\": an array of 3-5 concise plain-text bullet strings (no markdown, no dashes) " +
                 "summarising the most important WHS observations across the whole dashboard.\n" +
-                "3. \"descriptions\": an object where each key is exactly the widget title and each value has:\n" +
+                "3. \"recommendations\": an array of 3-5 concise plain-text strings (no markdown, no dashes) " +
+                "representing specific actionable steps that management should take based on the dashboard data.\n" +
+                "4. \"descriptions\": an object where each key is exactly the widget title and each value has:\n" +
                 "   - \"description\": a 1-2 sentence WHS insight explaining what the widget shows and any safety observation.\n" +
                 "   - \"layout\": one of \"right\" (chart left, text right \u2014 bar/line trends), " +
                 "\"left\" (text left, chart right \u2014 summary-first), " +
@@ -265,6 +267,7 @@ namespace DashboardAI.Infrastructure.Services
             {
                 ExecutiveSummary = root["executiveSummary"]?.ToString() ?? "",
                 KeyFindings      = root["keyFindings"]?.ToObject<List<string>>() ?? new List<string>(),
+                Recommendations  = root["recommendations"]?.ToObject<List<string>>() ?? new List<string>(),
                 Descriptions     = root["descriptions"]?.ToObject<Dictionary<string, WidgetInsight>>()
                                    ?? new Dictionary<string, WidgetInsight>()
             };
