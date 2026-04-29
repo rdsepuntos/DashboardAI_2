@@ -110,6 +110,32 @@
         return { title: item.title, cols, rows, totalCount: rows.length };
     }
 
+    /**
+     * Extract the display value from a count widget.
+     * Probes selectors in specificity order and reads only direct text nodes
+     * to avoid accidentally capturing nested label/title text.
+     */
+    function extractCountValue(el) {
+        const candidates = [
+            el.querySelector('.progress-value .h2 > div'),  // ring: innermost value div (direct child)
+            el.querySelector('.progress-value .h2'),         // ring: h2 wrapper fallback
+            el.querySelector('.dashboard-count > div'),      // large-number: direct child only
+        ];
+        for (const node of candidates) {
+            if (!node) continue;
+            // Read only direct text nodes — ignores text from nested elements (labels, titles, etc.)
+            const direct = [...node.childNodes]
+                .filter(n => n.nodeType === Node.TEXT_NODE)
+                .map(n => n.textContent.trim())
+                .join('').trim();
+            if (direct && /\d/.test(direct)) return direct;
+            // Secondary fallback: full textContent only when it looks purely numeric (digits, commas, spaces)
+            const full = node.textContent.trim();
+            if (full && /^[\d,. ]+$/.test(full)) return full.trim();
+        }
+        return '';
+    }
+
     /** Dynamically load html2canvas from CDN if not already present, then resolve */
     function loadHtml2Canvas() {
         if (window.html2canvas) return Promise.resolve();
@@ -354,12 +380,10 @@
             if (aiMode) {
                 setProg('Generating AI insights…', 8);
                 const activeFilters = readActiveFilters();
-                const COUNT_SEL = '.progress-value .h2 div, .progress-value .h2, .h2 div, .dashboard-count div, .dashboard-count';
                 const allForInsights = [
-                    ...countItems.map(i => {
-                        const valEl = i.el.querySelector(COUNT_SEL);
-                        return { title: i.title, type: 'count', currentValue: (valEl ? valEl.textContent : '').trim() };
-                    }),
+                    ...countItems.map(i => ({
+                        title: i.title, type: 'count', currentValue: extractCountValue(i.el),
+                    })),
                     ...cardItems.map(i => ({
                         title: i.title, type: i.gridtype, currentValue: '',
                         seriesData: extractChartSeriesData(i),
@@ -381,20 +405,11 @@
             }
 
             // ── Build KPI mini strip from count widgets ───────────────────────────────
-            //    Design A: .progress-value .h2 div  (circular ring variant)
-            //    Design B: .dashboard-count div     (large-number variant)
-            const COUNT_VAL_SEL = '.progress-value .h2 div, .progress-value .h2, .h2 div, .dashboard-count div, .dashboard-count';
+            //    Design A: .progress-value .h2 > div  (circular ring variant)
+            //    Design B: .dashboard-count > div     (large-number variant)
             let kpiStripHtml = '';
             countItems.forEach((item, idx) => {
-                const valEl = item.el.querySelector(COUNT_VAL_SEL);
-                // Get raw text
-                let rawVal = (valEl ? valEl.textContent : '').trim();
-
-                // Keep numbers only
-                let numericVal = rawVal.replace(/\D/g, '');
-
-                // Fallback if empty
-                const val = esc(numericVal || '—');
+                const val = esc(extractCountValue(item.el) || '—');
                 const cc = ACCENT_COLORS[idx % ACCENT_COLORS.length];
                 const kpiNote = aiMode ? getInsight(descriptions, item.title) : null;
                 kpiStripHtml += `<div class="kpi-mini${cc ? ' ' + cc : ''}">
@@ -783,14 +798,6 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   </div>
   <div class="cover-bottom">
     <div class="cover-meta-row">
-      <div class="cover-meta-item">
-        <div class="val">${chartCount}</div>
-        <div class="lbl">Charts</div>
-      </div>
-      <div class="cover-meta-item">
-        <div class="val">${sectionCount}</div>
-        <div class="lbl">Sections</div>
-      </div>
       <div class="cover-meta-item">
         <div class="val" style="font-size:14px;color:var(--indigo)">${printDate}</div>
         <div class="lbl">Report Date</div>
