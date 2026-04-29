@@ -28,7 +28,7 @@
     gridSelector: '#statement',
 
     // Candidates for the organisation logo — first matching <img> wins
-    logoSelector: 'img.navbar-brand, .navbar-brand img, .topbar-logo img, header img.logo, .site-logo img',
+    logoSelector: '#logo-cu, img.navbar-brand, .navbar-brand img, .topbar-logo img, header img.logo, .site-logo img',
 
     // Report title — falls back to document.title
     reportTitle: null,   // e.g. 'WHS Incident Dashboard'  — null = use document.title
@@ -38,6 +38,9 @@
 
     // ID given to the injected floating button (used to prevent double-injection)
     buttonId: 'legacyReportBtn',
+
+    // API endpoint for AI widget descriptions (mirrors /api/chat/describe in dashboard.html)
+    aiApiUrl: 'https://beta.whsmonitor.com.au/dashboardv2/api/chat/describe',
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,12 +115,52 @@
     });
   }
 
-  // ── Core report generator ────────────────────────────────────────────────────
-  async function generateReport() {
+  /**
+   * Fetch AI widget descriptions from the describe endpoint.
+   * Returns a descriptions dict on success, or {} on failure (graceful degradation).
+   */
+  async function fetchDescriptions(dashboardTitle, widgets) {
+    const userId  = (window.SESSION && window.SESSION.userId)  || '';
+    const storeId = (window.SESSION && window.SESSION.storeId) || '';
+    try {
+      const res = await fetch(CONFIG.aiApiUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ dashboardTitle, userId, storeId, widgets }),
+      });
+      if (!res.ok) return {};
+      const data = await res.json();
+      return data.descriptions || {};
+    } catch (e) {
+      console.warn('[LegacyReport] AI describe failed:', e);
+      return {};
+    }
+  }
 
-    // Disable the trigger button while working
-    const triggerBtn = document.getElementById(CONFIG.buttonId);
-    if (triggerBtn) triggerBtn.disabled = true;
+  /**
+   * Case-insensitive lookup in the descriptions dict returned by the AI.
+   * Returns { description, layout } — never throws.
+   */
+  function getInsight(descriptions, title) {
+    if (!title || !descriptions) return { description: '', layout: 'full' };
+    let raw = descriptions[title];
+    if (!raw) {
+      const lower = title.toLowerCase();
+      const k = Object.keys(descriptions).find(k => k.toLowerCase() === lower);
+      raw = k ? descriptions[k] : null;
+    }
+    if (!raw) return { description: '', layout: 'full' };
+    if (typeof raw === 'string') return { description: raw, layout: 'full' };
+    return { description: raw.description || '', layout: raw.layout || 'full' };
+  }
+
+  // ── Core report generator ────────────────────────────────────────────────────
+  async function generateReport(aiMode = false) {
+
+    // Disable all trigger buttons while working
+    const btnGroup = document.getElementById('legacyReportBtnGroup');
+    const groupBtns = btnGroup ? [...btnGroup.querySelectorAll('button')] : [];
+    groupBtns.forEach(b => { b.disabled = true; });
 
     // ── Progress overlay ────────────────────────────────────────────────────────
     const overlay = document.createElement('div');
@@ -152,11 +195,25 @@
       const printDate  = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' });
       const printTitle = CONFIG.reportTitle || document.title || 'WHS Dashboard Report';
 
+      // ── Brand colour — read from #navbar-left background, fall back to default blue ──
+      const navbarEl   = document.querySelector('#navbar-left');
+      const navbarBg   = navbarEl ? getComputedStyle(navbarEl).backgroundColor : '';
+      const toHex = rgb => {
+        const m = rgb.match(/\d+/g);
+        if (!m || m.length < 3) return null;
+        return '#' + m.slice(0, 3).map(n => parseInt(n).toString(16).padStart(2, '0')).join('');
+      };
+      const brandColor = toHex(navbarBg) || '#3B98F1';
+      const hexToRgb   = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+      const [br, bg, bb] = hexToRgb(brandColor);
+      const brandLt    = `rgb(${Math.round(br * .15 + 255 * .85)},${Math.round(bg * .15 + 255 * .85)},${Math.round(bb * .15 + 255 * .85)})`;
+      const brandDk    = `rgb(${Math.round(br * .65)},${Math.round(bg * .65)},${Math.round(bb * .65)})`;
+
       // ── Logo ──────────────────────────────────────────────────────────────────
       const logoEl   = document.querySelector(CONFIG.logoSelector);
       const logoSrc  = logoEl ? logoEl.src : '';
       const logoHtml = logoSrc
-        ? `<img src="${logoSrc}" crossorigin="anonymous" style="max-height:24px;width:auto" />`
+        ? `<img src="${logoSrc}" crossorigin="anonymous" style="max-height:55px;width:auto" />`
         : esc(printTitle);
 
       // ── Load html2canvas (needed for count/CSS widgets and as ECharts fallback) ────
@@ -187,9 +244,24 @@
       // ── Split items: counts → KPI strip, tables → own pages, rest → cards grid
       const tableItems = items.filter(i => i.gridtype === 'table');
       const countItems = items.filter(i => i.gridtype === 'count');
-      const cardItems  = items.filter(i => i.gridtype !== 'table' && i.gridtype !== 'count');
+      const cardItems  = items.filter(i => i.gridtype !== 'table' && i.gridtype !== 'count' && i.gridtype !== 'quicklinks');
 
       const ACCENT_COLORS = ['', 'teal', 'indigo', 'amber'];
+
+      // ── Fetch AI descriptions (aiMode only) ───────────────────────────────────
+      let descriptions = {};
+      if (aiMode) {
+        setProg('Generating AI insights…', 8);
+        const allForDesc = [
+          ...countItems.map(i => {
+            const valEl = i.el.querySelector('.progress-value .h2 div, .progress-value .h2, .h2 div');
+            return { title: i.title, type: 'count', chartType: '', currentValue: (valEl ? valEl.textContent : '').trim() };
+          }),
+          ...cardItems.map(i => ({ title: i.title, type: i.gridtype, chartType: '', currentValue: '' })),
+          ...tableItems.map(i => ({ title: i.title, type: 'table',  chartType: '', currentValue: '' })),
+        ];
+        descriptions = await fetchDescriptions(printTitle, allForDesc);
+      }
 
       // ── Build KPI mini strip from count widgets ───────────────────────────────
       //    The numeric value lives in .progress-value .h2 div (the circular ring content)
@@ -207,19 +279,11 @@
       // ── Capture each non-table widget ─────────────────────────────────────────
       let cardsHtml = '';
       let chartIndex = 0;
+      let lastSideLayout = 'left';
 
       for (let i = 0; i < cardItems.length; i++) {
         const item = cardItems[i];
         setProg(`Capturing widget ${i + 1} of ${cardItems.length}…`, 10 + Math.round(((i + 1) / cardItems.length) * 75));
-
-        // ── Section heading (quicklinks) → full-width banner ─────────────────────
-        if (item.gridtype === 'quicklinks') {
-          cardsHtml += `
-            <div class="section-banner" style="grid-column:1/-1">
-              <div class="section-banner-text">${esc(item.title)}</div>
-            </div>`;
-          continue;
-        }
 
         // ── Capture widget ────────────────────────────────────────────────────────
         //
@@ -263,28 +327,64 @@
           }
         }
 
-        const cc       = ACCENT_COLORS[chartIndex % ACCENT_COLORS.length];
-        const spanFull = item.gsW >= 10 ? ' style="grid-column:1/-1"' : '';
+        const cc      = ACCENT_COLORS[chartIndex % ACCENT_COLORS.length];
+        const insight = aiMode ? getInsight(descriptions, item.title) : null;
 
-        if (img) {
+        // Layout rules mirror dashboard.html:
+        //   full-width widget  → bottom (text below chart)
+        //   partial-width      → alternate right / left
+        //   no AI / no desc    → full (chart only)
+        let layout;
+        if (!aiMode || !insight?.description) {
+          layout = 'full';
+        } else if (item.gsW >= 10) {
+          layout = 'bottom';
+        } else {
+          lastSideLayout = lastSideLayout === 'right' ? 'left' : 'right';
+          layout = lastSideLayout;
+        }
+
+        // Side layouts span the full grid width so both columns are used
+        const spanFull = (item.gsW >= 10 || layout === 'right' || layout === 'left')
+          ? ' style="grid-column:1/-1"' : '';
+
+        const imgTag = img ? `<img src="${img}" style="width:100%;display:block" />` : '';
+        const noCapture = `<div style="padding:20px;color:#6b7280;font-size:11px;text-align:center;background:#f9fafb">Chart could not be captured</div>`;
+
+        if (layout === 'right') {
           cardsHtml += `
             <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
-              <div class="wc-head">
-                <span class="wc-head-title">${esc(item.title) || 'Chart'}</span>
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
+              <div class="wc-body-right">
+                <div class="wc-img">${img ? imgTag : noCapture}</div>
+                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
               </div>
+            </div>`;
+        } else if (layout === 'left') {
+          cardsHtml += `
+            <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
+              <div class="wc-body-left">
+                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+                <div class="wc-img">${img ? imgTag : noCapture}</div>
+              </div>
+            </div>`;
+        } else if (layout === 'bottom') {
+          cardsHtml += `
+            <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
               <div class="wc-body-bottom">
-                <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
+                <div class="wc-img">${img ? imgTag : noCapture}</div>
+                ${insight?.description ? `<div class="wc-note">${esc(insight.description)}</div>` : ''}
               </div>
             </div>`;
         } else {
+          // full — no text
           cardsHtml += `
             <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
-              <div class="wc-head">
-                <span class="wc-head-title">${esc(item.title) || 'Chart'}</span>
-              </div>
-              <div class="wc-body-bottom"
-                   style="padding:20px;color:#6b7280;font-size:11px;text-align:center;background:#f9fafb">
-                Chart could not be captured
+              <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
+              <div class="wc-body-bottom">
+                <div class="wc-img">${img ? imgTag : noCapture}</div>
               </div>
             </div>`;
         }
@@ -336,12 +436,18 @@
           </table></div>`;
         }
 
+        const tableInsight = aiMode ? getInsight(descriptions, tItem.title) : null;
+        const tableNote    = tableInsight && tableInsight.description
+          ? `<div class="table-insight"><div class="table-insight-text">${esc(tableInsight.description)}</div></div>`
+          : '';
+
         tablePagesHtml += `<div class="page">
   <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
   <div class="table-banner">
     <span class="tit">&#128203; ${esc(td.title)}</span>
     ${td.rows.length ? `<span class="cnt">${td.rows.length} records &middot; ${printDate}</span>` : ''}
   </div>
+  ${tableNote}
   ${bodyHtml}
   <div class="page-footer">
     <span class="doc-title">${esc(printTitle)}</span>
@@ -350,8 +456,8 @@
 </div>`;
       }
 
-      const chartCount   = cardItems.filter(i => i.gridtype !== 'quicklinks').length;
-      const sectionCount = cardItems.filter(i => i.gridtype === 'quicklinks').length;
+      const chartCount   = cardItems.length;
+      const sectionCount = 0;
 
       // ── Assemble full HTML document ────────────────────────────────────────────
       setProg('Building report…', 90);
@@ -365,7 +471,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
 :root{
-  --blue:#3B98F1;--blue-lt:#dbeafe;--blue-dk:#1e40af;
+  --blue:${brandColor};--blue-lt:${brandLt};--blue-dk:${brandDk};
   --teal:#0d9488;--amber:#d97706;--indigo:#4f46e5;
   --dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb
 }
@@ -424,6 +530,20 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .wc-body-bottom{display:flex;flex-direction:column;flex:1}
 .wc-body-bottom .wc-img{overflow:hidden}
 .wc-body-bottom .wc-img img{display:block;width:100%}
+.wc-note{padding:10px 14px;background:#fafafa;border-top:1px solid var(--border);font-size:9px;color:#374151;line-height:1.8}
+.wc-body-right{display:flex;flex-direction:row;flex:1}
+.wc-body-right .wc-img{flex:1.6;overflow:hidden}
+.wc-body-right .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wc-body-left{display:flex;flex-direction:row;flex:1}
+.wc-body-left .wc-img{flex:1.6;overflow:hidden}
+.wc-body-left .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.wc-aside{flex:1;padding:14px 12px;display:flex;flex-direction:column;justify-content:center;background:#fafafa}
+.wc-body-left .wc-aside{background:#fafafa}
+.wc-aside p{font-size:9px;color:#374151;line-height:1.8;margin:0}
+
+/* ── AI table insight callout ───────────────────────────── */
+.table-insight{display:flex;align-items:flex-start;margin:14px 28px 0;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:4px;background:#fafafa}
+.table-insight-text{font-size:9px;color:#374151;line-height:1.75}
 
 /* ── Section banner (replaces quicklinks heading) ───────── */
 .section-banner{
@@ -489,6 +609,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .data-table thead th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .data-table tbody tr{page-break-inside:avoid;break-inside:avoid}
+  .table-insight{page-break-inside:avoid;break-inside:avoid}
   .run-header{display:flex !important}
 }
 </style>
@@ -496,7 +617,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 <body>
 
 <div class="print-bar">
-  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}</span>
+  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
   <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
 </div>
 
@@ -533,6 +654,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 
 <!-- ── Dashboard charts page ─────────────────────────────────────────── -->
 <div class="page">
+  <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
   ${countItems.length ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${Math.min(countItems.length,4)},1fr)">${kpiStripHtml}</div>` : ''}
   <div class="cards-grid">
     ${cardsHtml}
@@ -548,11 +670,17 @@ ${tablePagesHtml}
 </body>
 </html>`;
 
-      // ── Open report in new tab using a Blob URL (avoids popup blockers) ────────
+      // ── Open report in a centred popup window ─────────────────────────────────
       setProg('Opening report…', 100);
       const blob = new Blob([html], { type: 'text/html' });
       const url  = URL.createObjectURL(blob);
-      const win  = window.open(url, '_blank');
+      const pw   = Math.min(900, screen.availWidth  - 40);
+      const ph   = Math.min(960, screen.availHeight - 40);
+      const pl   = Math.round((screen.availWidth  - pw) / 2) + (screen.availLeft || 0);
+      const pt   = Math.round((screen.availHeight - ph) / 2) + (screen.availTop  || 0);
+      const win  = window.open(url, 'legacyReport',
+        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no`
+      );
       if (!win) {
         alert('Popup blocked — please allow popups for this page and try again.');
       }
@@ -564,29 +692,50 @@ ${tablePagesHtml}
       alert('Report generation failed: ' + err.message);
     } finally {
       overlay.remove();
-      const btn2 = document.getElementById(CONFIG.buttonId);
-      if (btn2) btn2.disabled = false;
+      const btnGroup2 = document.getElementById('legacyReportBtnGroup');
+      if (btnGroup2) btnGroup2.querySelectorAll('button').forEach(b => { b.disabled = false; });
     }
   }
 
-  // ── Inject floating trigger button ────────────────────────────────────────────
+  // ── Inject floating trigger buttons ──────────────────────────────────────────
   function injectButton() {
-    if (document.getElementById(CONFIG.buttonId)) return; // already present
+    if (document.getElementById('legacyReportBtnGroup')) return; // already present
+
+    const wrap = document.createElement('div');
+    wrap.id = 'legacyReportBtnGroup';
+    wrap.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:8000;display:flex;flex-direction:column;gap:8px;align-items:flex-end';
+
+    // Standard report button
     const btn = document.createElement('button');
     btn.id          = CONFIG.buttonId;
     btn.innerHTML   = '&#128247;&nbsp; Generate Report';
     btn.style.cssText = [
-      'position:fixed;bottom:24px;right:24px;z-index:8000;',
       'background:#3B98F1;color:white;border:none;border-radius:8px;',
       'padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;',
       'box-shadow:0 4px 14px rgba(59,152,241,.5);',
-      'font-family:Segoe UI,Arial,sans-serif;',
-      'transition:opacity .2s',
+      'font-family:Segoe UI,Arial,sans-serif;transition:opacity .2s',
     ].join('');
     btn.onmouseenter = () => { btn.style.opacity = '.85'; };
     btn.onmouseleave = () => { btn.style.opacity = '1'; };
-    btn.onclick      = generateReport;
-    document.body.appendChild(btn);
+    btn.onclick      = () => generateReport(false);
+
+    // AI-annotated report button
+    const aiBtn = document.createElement('button');
+    aiBtn.id          = 'legacyAIReportBtn';
+    aiBtn.innerHTML   = '&#10024;&nbsp; AI Report';
+    aiBtn.style.cssText = [
+      'background:#7c3aed;color:white;border:none;border-radius:8px;',
+      'padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;',
+      'box-shadow:0 4px 14px rgba(124,58,237,.45);',
+      'font-family:Segoe UI,Arial,sans-serif;transition:opacity .2s',
+    ].join('');
+    aiBtn.onmouseenter = () => { aiBtn.style.opacity = '.85'; };
+    aiBtn.onmouseleave = () => { aiBtn.style.opacity = '1'; };
+    aiBtn.onclick      = () => generateReport(true);
+
+    wrap.appendChild(aiBtn);
+    wrap.appendChild(btn);
+    document.body.appendChild(wrap);
   }
 
   // Expose globally so any existing button can call it
