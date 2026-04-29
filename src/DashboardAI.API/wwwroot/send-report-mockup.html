@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Send Report — Mockup</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#e8eaed;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px}
+
+:root{
+  --blue:#3B98F1;--blue-lt:#eff6ff;--blue-dk:rgb(37,99,181);
+  --amber:#d97706;--teal:#0d9488;--rose:#e11d48;--indigo:#4f46e5;
+  --dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;
+  --green:#16a34a
+}
+
+/* ── backdrop ── */
+.backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:24px;z-index:100}
+
+/* ── modal shell ── */
+.modal{background:#fff;border-radius:12px;width:100%;max-width:680px;box-shadow:0 24px 60px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:92vh;overflow:hidden}
+
+/* ── modal header ── */
+.modal-hdr{background:var(--blue);padding:20px 24px 18px;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0}
+.modal-hdr-left{display:flex;flex-direction:column;gap:4px}
+.modal-eyebrow{font-size:9px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.14em}
+.modal-title{font-size:20px;font-weight:800;color:#fff;line-height:1.1}
+.modal-close{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:16px;flex-shrink:0;margin-top:2px}
+.modal-close:hover{background:rgba(255,255,255,.25)}
+
+/* ── report pill ── */
+.report-pill{background:var(--blue-lt);border:1px solid #bfdbfe;border-radius:8px;margin:16px 24px 0;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.report-pill-icon{font-size:18px;flex-shrink:0}
+.report-pill-info{flex:1;min-width:0}
+.report-pill-name{font-size:11px;font-weight:700;color:var(--dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.report-pill-meta{font-size:9px;color:var(--mid);margin-top:1px}
+.report-pill-size{font-size:9px;color:var(--blue);background:#dbeafe;border-radius:10px;padding:2px 8px;font-weight:600;flex-shrink:0}
+
+/* ── scroll body ── */
+.modal-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+
+/* ── section label ── */
+.section-lbl{font-size:10px;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+
+/* ── recipient tabs ── */
+.recip-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.recip-tab{font-size:11px;font-weight:600;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);color:var(--mid);cursor:pointer;transition:all .15s;background:#fff;user-select:none}
+.recip-tab:hover{border-color:var(--blue);color:var(--blue)}
+.recip-tab.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.recip-tab .tab-cnt{display:inline-block;background:rgba(255,255,255,.3);border-radius:8px;font-size:9px;padding:0 5px;margin-left:4px;font-weight:700}
+.recip-tab:not(.active) .tab-cnt{background:#f3f4f6;color:var(--mid)}
+
+/* ── selector panel ── */
+.selector-panel{display:none}
+.selector-panel.visible{display:block}
+
+/* ── searchable multi-select ── */
+.ms-wrap{border:1.5px solid var(--border);border-radius:8px;overflow:hidden;background:#fff}
+.ms-wrap:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+.ms-search{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:#fafafa}
+.ms-search-icon{color:var(--mid);font-size:13px;flex-shrink:0}
+.ms-search input{border:none;background:transparent;outline:none;font-size:11px;color:var(--dark);width:100%;font-family:inherit}
+.ms-search input::placeholder{color:#9ca3af}
+.ms-list{max-height:160px;overflow-y:auto}
+.ms-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background .1s;user-select:none}
+.ms-item:hover{background:#f9fafb}
+.ms-item.selected{background:#eff6ff}
+.ms-item-cb{width:15px;height:15px;border:1.5px solid var(--border);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.ms-item.selected .ms-item-cb{background:var(--blue);border-color:var(--blue)}
+.ms-item.selected .ms-item-cb::after{content:'✓';color:#fff;font-size:9px;font-weight:700}
+.ms-item-label{font-size:11px;color:var(--dark);flex:1}
+.ms-item-sub{font-size:9px;color:var(--mid)}
+.ms-item-avatar{width:22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ms-item-avatar.teal{background:var(--teal)}.ms-item-avatar.amber{background:var(--amber)}.ms-item-avatar.rose{background:var(--rose)}.ms-item-avatar.indigo{background:var(--indigo)}
+.ms-empty{padding:16px 12px;font-size:11px;color:var(--mid);text-align:center}
+
+/* ── selected chips ── */
+.chips-wrap{display:flex;flex-wrap:wrap;gap:6px;min-height:22px}
+.chip{display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:3px 10px 3px 8px;font-size:10px;color:var(--blue);font-weight:600}
+.chip.division{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.chip.dept{background:#fef3c7;border-color:#fde68a;color:#92400e}
+.chip.role{background:#f5f3ff;border-color:#ddd6fe;color:#5b21b6}
+.chip-x{cursor:pointer;font-size:11px;opacity:.6;line-height:1}
+.chip-x:hover{opacity:1}
+
+/* ── summary row ── */
+.summary-row{display:flex;align-items:center;gap:6px;padding:8px 12px;background:#f8fafc;border:1px solid var(--border);border-radius:8px}
+.summary-dot{width:7px;height:7px;border-radius:50%;background:var(--blue);flex-shrink:0}
+.summary-text{font-size:10px;color:var(--mid);flex:1}
+.summary-count{font-size:11px;font-weight:700;color:var(--blue)}
+
+/* ── input fields ── */
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:10px;font-weight:700;color:var(--mid);text-transform:uppercase;letter-spacing:.07em}
+.field input,.field textarea{border:1.5px solid var(--border);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--dark);font-family:inherit;outline:none;transition:border .15s,box-shadow .15s;resize:none}
+.field input:focus,.field textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+.field textarea{min-height:72px}
+
+/* ── footer ── */
+.modal-ftr{padding:14px 24px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px;background:#fafafa}
+.ftr-note{font-size:9.5px;color:var(--mid);display:flex;align-items:center;gap:5px}
+.ftr-btns{display:flex;gap:8px}
+.btn{border:none;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;letter-spacing:.01em;transition:opacity .15s}
+.btn-ghost{background:transparent;border:1.5px solid var(--border);color:var(--mid)}
+.btn-ghost:hover{border-color:#9ca3af;color:var(--dark)}
+.btn-primary{background:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(59,152,241,.35)}
+.btn-primary:hover{opacity:.88}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── select-all row ── */
+.sel-all-row{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:1px solid var(--border);background:#f9fafb}
+.sel-all-btn{font-size:10px;color:var(--blue);cursor:pointer;font-weight:600}
+.sel-all-btn:hover{text-decoration:underline}
+.sel-count{font-size:10px;color:var(--mid)}
+
+/* ── page chrome (demo only) ── */
+.demo-bar{background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;width:100%;border-radius:8px 8px 0 0;margin-bottom:0}
+.demo-bar-title{color:rgba(255,255,255,.65);font-size:12px}
+.demo-bar-badge{background:#7c3aed;color:white;padding:2px 10px;border-radius:10px;font-size:10px;font-weight:600}
+.demo-page{background:#fff;width:100%;max-width:740px;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.18);overflow:hidden;margin-bottom:24px}
+.demo-page-body{padding:40px 48px;text-align:center;background:#f1f5f9;border-top:1px solid var(--border)}
+.demo-page-body p{color:var(--mid);font-size:13px;margin-bottom:16px}
+.btn-send-demo{background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 2px 8px rgba(22,163,74,.3)}
+.btn-send-demo:hover{opacity:.88}
+</style>
+</head>
+<body>
+
+<!-- ── Demo chrome — simulates the report page behind the modal ── -->
+<div class="demo-page" style="max-width:740px;width:100%">
+  <div class="demo-bar">
+    <span class="demo-bar-title">WHS Incident Dashboard &mdash; 29 April 2026</span>
+    <span class="demo-bar-badge">AI Annotated</span>
+  </div>
+  <div class="demo-page-body">
+    <p>Generated report is open. Click the button below to open the <strong>Send Report</strong> dialog.</p>
+    <button class="btn-send-demo" onclick="document.getElementById('modal-backdrop').style.display='flex'">
+      &#9993;&nbsp; Send Report via Email
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  SEND REPORT MODAL                                            -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="modal-backdrop" class="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+
+    <!-- Header -->
+    <div class="modal-hdr">
+      <div class="modal-hdr-left">
+        <div class="modal-eyebrow">WHS Monitor</div>
+        <div class="modal-title" id="modal-title">&#9993;&nbsp; Send Report</div>
+      </div>
+      <div class="modal-close" onclick="document.getElementById('modal-backdrop').style.display='none'" title="Close">&#10005;</div>
+    </div>
+
+    <!-- Report pill -->
+    <div class="report-pill">
+      <div class="report-pill-icon">&#128196;</div>
+      <div class="report-pill-info">
+        <div class="report-pill-name">WHS Incident Dashboard — 29 April 2026.html</div>
+        <div class="report-pill-meta">AI-Annotated Report &bull; Generated just now</div>
+      </div>
+      <div class="report-pill-size">HTML</div>
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="modal-body">
+
+      <!-- ── 1. Recipients ── -->
+      <div>
+        <div class="section-lbl">Send To</div>
+
+        <!-- Tab switcher -->
+        <div class="recip-tabs">
+          <div class="recip-tab active" data-tab="users" onclick="switchTab('users',this)">
+            Users <span class="tab-cnt" id="cnt-users">0</span>
+          </div>
+          <div class="recip-tab" data-tab="division" onclick="switchTab('division',this)">
+            Division <span class="tab-cnt" id="cnt-division">0</span>
+          </div>
+          <div class="recip-tab" data-tab="department" onclick="switchTab('department',this)">
+            Department <span class="tab-cnt" id="cnt-department">0</span>
+          </div>
+          <div class="recip-tab" data-tab="role" onclick="switchTab('role',this)">
+            Employee Role <span class="tab-cnt" id="cnt-role">0</span>
+          </div>
+        </div>
+
+        <!-- Users panel -->
+        <div id="panel-users" class="selector-panel visible">
+          <div class="ms-wrap">
+            <div class="ms-search">
+              <span class="ms-search-icon">&#128269;</span>
+              <input type="text" placeholder="Search users…" oninput="filterList('users-list',this.value)"/>
+            </div>
+            <div class="sel-all-row">
+              <span class="sel-all-btn" onclick="selectAll('users-list','users')">Select all</span>
+              <span class="sel-count" id="sel-count-users">0 of 8 selected</span>
+            </div>
+            <div class="ms-list" id="users-list">
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar">JM</div><div class="ms-item-label">James Mitchell<div class="ms-item-sub">james.mitchell@company.com &bull; Safety Manager</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar teal">SR</div><div class="ms-item-label">Sarah Reynolds<div class="ms-item-sub">s.reynolds@company.com &bull; WHS Coordinator</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar amber">TN</div><div class="ms-item-label">Tom Nguyen<div class="ms-item-sub">t.nguyen@company.com &bull; Site Supervisor</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar rose">AC</div><div class="ms-item-label">Aisha Clarke<div class="ms-item-sub">a.clarke@company.com &bull; HR Manager</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar indigo">PW</div><div class="ms-item-label">Peter Walsh<div class="ms-item-sub">p.walsh@company.com &bull; Operations Director</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar">LK</div><div class="ms-item-label">Lisa Kim<div class="ms-item-sub">l.kim@company.com &bull; Risk Analyst</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar teal">BJ</div><div class="ms-item-label">Ben Johnson<div class="ms-item-sub">b.johnson@company.com &bull; Safety Officer</div></div></div>
+              <div class="ms-item" data-group="users" onclick="toggleItem(this,'users')"><div class="ms-item-cb"></div><div class="ms-item-avatar amber">MO</div><div class="ms-item-label">Maria O'Brien<div class="ms-item-sub">m.obrien@company.com &bull; Compliance Lead</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Division panel -->
+        <div id="panel-division" class="selector-panel">
+          <div class="ms-wrap">
+            <div class="ms-search">
+              <span class="ms-search-icon">&#128269;</span>
+              <input type="text" placeholder="Search divisions…" oninput="filterList('division-list',this.value)"/>
+            </div>
+            <div class="sel-all-row">
+              <span class="sel-all-btn" onclick="selectAll('division-list','division')">Select all</span>
+              <span class="sel-count" id="sel-count-division">0 of 5 selected</span>
+            </div>
+            <div class="ms-list" id="division-list">
+              <div class="ms-item" data-group="division" onclick="toggleItem(this,'division')"><div class="ms-item-cb"></div><div class="ms-item-label">Operations<div class="ms-item-sub">42 employees</div></div></div>
+              <div class="ms-item" data-group="division" onclick="toggleItem(this,'division')"><div class="ms-item-cb"></div><div class="ms-item-label">Construction<div class="ms-item-sub">38 employees</div></div></div>
+              <div class="ms-item" data-group="division" onclick="toggleItem(this,'division')"><div class="ms-item-cb"></div><div class="ms-item-label">Logistics<div class="ms-item-sub">27 employees</div></div></div>
+              <div class="ms-item" data-group="division" onclick="toggleItem(this,'division')"><div class="ms-item-cb"></div><div class="ms-item-label">Administration<div class="ms-item-sub">15 employees</div></div></div>
+              <div class="ms-item" data-group="division" onclick="toggleItem(this,'division')"><div class="ms-item-cb"></div><div class="ms-item-label">Maintenance<div class="ms-item-sub">19 employees</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Department panel -->
+        <div id="panel-department" class="selector-panel">
+          <div class="ms-wrap">
+            <div class="ms-search">
+              <span class="ms-search-icon">&#128269;</span>
+              <input type="text" placeholder="Search departments…" oninput="filterList('department-list',this.value)"/>
+            </div>
+            <div class="sel-all-row">
+              <span class="sel-all-btn" onclick="selectAll('department-list','department')">Select all</span>
+              <span class="sel-count" id="sel-count-department">0 of 6 selected</span>
+            </div>
+            <div class="ms-list" id="department-list">
+              <div class="ms-item" data-group="department" onclick="toggleItem(this,'department')"><div class="ms-item-cb"></div><div class="ms-item-label">Workplace Health &amp; Safety<div class="ms-item-sub">8 employees</div></div></div>
+              <div class="ms-item" data-group="department" onclick="toggleItem(this,'department')"><div class="ms-item-cb"></div><div class="ms-item-label">Human Resources<div class="ms-item-sub">6 employees</div></div></div>
+              <div class="ms-item" data-group="department" onclick="toggleItem(this,'department')"><div class="ms-item-cb"></div><div class="ms-item-label">Site Management<div class="ms-item-sub">12 employees</div></div></div>
+              <div class="ms-item" data-group="department" onclick="toggleItem(this,'department')"><div class="ms-item-cb"></div><div class="ms-item-label">Risk &amp; Compliance<div class="ms-item-sub">5 employees</div></div></div>
+              <div class="ms-item" data-group="department" onclick="toggleItem(this,'department')"><div class="ms-item-cb"></div><div class="ms-item-label">Executive &amp; Leadership<div class="ms-item-sub">4 employees</div></div></div>
+              <div class="ms-item" data-group="department" onclick="toggleItem(this,'department')"><div class="ms-item-cb"></div><div class="ms-item-label">Facilities<div class="ms-item-sub">9 employees</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Role panel -->
+        <div id="panel-role" class="selector-panel">
+          <div class="ms-wrap">
+            <div class="ms-search">
+              <span class="ms-search-icon">&#128269;</span>
+              <input type="text" placeholder="Search roles…" oninput="filterList('role-list',this.value)"/>
+            </div>
+            <div class="sel-all-row">
+              <span class="sel-all-btn" onclick="selectAll('role-list','role')">Select all</span>
+              <span class="sel-count" id="sel-count-role">0 of 6 selected</span>
+            </div>
+            <div class="ms-list" id="role-list">
+              <div class="ms-item" data-group="role" onclick="toggleItem(this,'role')"><div class="ms-item-cb"></div><div class="ms-item-label">Safety Manager</div></div>
+              <div class="ms-item" data-group="role" onclick="toggleItem(this,'role')"><div class="ms-item-cb"></div><div class="ms-item-label">WHS Coordinator</div></div>
+              <div class="ms-item" data-group="role" onclick="toggleItem(this,'role')"><div class="ms-item-cb"></div><div class="ms-item-label">Site Supervisor</div></div>
+              <div class="ms-item" data-group="role" onclick="toggleItem(this,'role')"><div class="ms-item-cb"></div><div class="ms-item-label">Safety Officer</div></div>
+              <div class="ms-item" data-group="role" onclick="toggleItem(this,'role')"><div class="ms-item-cb"></div><div class="ms-item-label">Operations Director</div></div>
+              <div class="ms-item" data-group="role" onclick="toggleItem(this,'role')"><div class="ms-item-cb"></div><div class="ms-item-label">Compliance Lead</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Selected chips -->
+        <div id="chips-area" style="margin-top:10px">
+          <div id="chips-wrap" class="chips-wrap"></div>
+        </div>
+
+        <!-- Recipients summary -->
+        <div class="summary-row" style="margin-top:8px">
+          <div class="summary-dot"></div>
+          <span class="summary-text">Total unique recipients</span>
+          <span class="summary-count" id="total-count">0 selected</span>
+        </div>
+      </div>
+
+      <!-- ── 2. Subject ── -->
+      <div class="field">
+        <label>Email Subject</label>
+        <input type="text" id="email-subject" value="WHS Incident Dashboard — Report for 29 April 2026"/>
+      </div>
+
+      <!-- ── 3. Message ── -->
+      <div class="field">
+        <label>Message (optional)</label>
+        <textarea id="email-message" placeholder="Add a personal message to accompany the report…"></textarea>
+      </div>
+
+    </div><!-- /modal-body -->
+
+    <!-- Footer -->
+    <div class="modal-ftr">
+      <div class="ftr-note">
+        <span>&#128274;</span>
+        Report will be sent as an HTML attachment
+      </div>
+      <div class="ftr-btns">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-backdrop').style.display='none'">Cancel</button>
+        <button class="btn btn-primary" id="send-btn" disabled onclick="handleSend()">&#9993;&nbsp; Send Report</button>
+      </div>
+    </div>
+
+  </div><!-- /modal -->
+</div><!-- /backdrop -->
+
+<script>
+// ── State ────────────────────────────────────────────────────────
+const selections = { users: new Set(), division: new Set(), department: new Set(), role: new Set() };
+const chipClass  = { users: '', division: 'division', department: 'dept', role: 'role' };
+const totalOf    = { users: 8, division: 5, department: 6, role: 6 };
+
+// ── Tab switching ─────────────────────────────────────────────────
+function switchTab(tab, el) {
+  document.querySelectorAll('.recip-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.selector-panel').forEach(p => p.classList.remove('visible'));
+  el.classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('visible');
+}
+
+// ── Toggle item ───────────────────────────────────────────────────
+function toggleItem(el, group) {
+  const label = el.querySelector('.ms-item-label').childNodes[0].textContent.trim();
+  if (el.classList.contains('selected')) {
+    el.classList.remove('selected');
+    selections[group].delete(label);
+  } else {
+    el.classList.add('selected');
+    selections[group].add(label);
+  }
+  updateUI(group);
+}
+
+// ── Select all ────────────────────────────────────────────────────
+function selectAll(listId, group) {
+  const items = document.querySelectorAll(`#${listId} .ms-item:not([style*="display:none"]):not([style*="display: none"])`);
+  const allSelected = [...items].every(i => i.classList.contains('selected'));
+  items.forEach(el => {
+    const label = el.querySelector('.ms-item-label').childNodes[0].textContent.trim();
+    if (allSelected) { el.classList.remove('selected'); selections[group].delete(label); }
+    else             { el.classList.add('selected');    selections[group].add(label);    }
+  });
+  updateUI(group);
+}
+
+// ── Filter ────────────────────────────────────────────────────────
+function filterList(listId, query) {
+  const q = query.toLowerCase();
+  document.querySelectorAll(`#${listId} .ms-item`).forEach(el => {
+    const text = el.querySelector('.ms-item-label').textContent.toLowerCase();
+    el.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+// ── Update UI ─────────────────────────────────────────────────────
+function updateUI(group) {
+  // tab count badge
+  document.getElementById('cnt-' + group).textContent = selections[group].size;
+  // sel count label
+  const selEl = document.getElementById('sel-count-' + group);
+  if (selEl) selEl.textContent = `${selections[group].size} of ${totalOf[group]} selected`;
+  // chips
+  renderChips();
+  // total
+  const total = new Set([
+    ...[...selections.users],
+    ...[...selections.division].map(d => '÷' + d),
+    ...[...selections.department].map(d => '§' + d),
+    ...[...selections.role].map(r => '®' + r),
+  ]).size;
+  // count per group as rough total
+  const cnt = selections.users.size + selections.division.size + selections.department.size + selections.role.size;
+  document.getElementById('total-count').textContent = cnt === 0 ? '0 selected' : `${cnt} recipient${cnt !== 1 ? 's' : ''}`;
+  document.getElementById('send-btn').disabled = cnt === 0;
+}
+
+function renderChips() {
+  const wrap = document.getElementById('chips-wrap');
+  wrap.innerHTML = '';
+  const add = (group, label) => {
+    const c = document.createElement('div');
+    c.className = 'chip ' + (chipClass[group] || '');
+    c.innerHTML = `${label}<span class="chip-x" onclick="removeChip('${group}','${label.replace(/'/g,"\\'")}')">&#10005;</span>`;
+    wrap.appendChild(c);
+  };
+  selections.users.forEach(l => add('users', l));
+  selections.division.forEach(l => add('division', l));
+  selections.department.forEach(l => add('department', l));
+  selections.role.forEach(l => add('role', l));
+}
+
+function removeChip(group, label) {
+  selections[group].delete(label);
+  // deselect the ms-item
+  document.querySelectorAll(`[data-group="${group}"] .ms-item-label`).forEach(el => {
+    if (el.childNodes[0].textContent.trim() === label)
+      el.closest('.ms-item').classList.remove('selected');
+  });
+  updateUI(group);
+}
+
+function handleSend() {
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  btn.innerHTML = '&#8987;&nbsp; Sending…';
+  setTimeout(() => {
+    btn.innerHTML = '&#10003;&nbsp; Sent!';
+    btn.style.background = '#16a34a';
+    setTimeout(() => {
+      document.getElementById('modal-backdrop').style.display = 'none';
+      btn.innerHTML = '&#9993;&nbsp; Send Report';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 1400);
+  }, 1600);
+}
+</script>
+</body>
+</html>
