@@ -68,20 +68,23 @@
 
     let rows = [];
 
-    // Use DataTables API to get ALL rows (ignores current page)
+    // Use DataTables API to get ALL rows (ignores current page).
+    // dt.cell().render('display') handles every DataTables data format:
+    // plain arrays, keyed objects, and orthogonal data ({display:…,_:…}).
     if (window.$ && $.fn && $.fn.dataTable && $.fn.dataTable.isDataTable(tableEl)) {
       try {
-        const dt     = $(tableEl).DataTable();
-        const dtData = dt.rows().data().toArray();
-        rows = dtData.map(row => {
-          return cols.map((_, i) => {
-            const cell = Array.isArray(row) ? row[i] : Object.values(row)[i];
-            // Strip any HTML tags the cell value may contain
-            const tmp = document.createElement('div');
-            tmp.innerHTML = String(cell ?? '');
-            return tmp.textContent.trim();
-          });
-        });
+        const dt         = $(tableEl).DataTable();
+        const rowIndexes = dt.rows().indexes().toArray();
+        rows = rowIndexes.map(rowIdx =>
+          cols.map((_, ci) => {
+            try {
+              const display = dt.cell(rowIdx, ci).render('display');
+              const tmp = document.createElement('div');
+              tmp.innerHTML = String(display ?? '');
+              return tmp.textContent.trim();
+            } catch (e) { return ''; }
+          })
+        );
       } catch (dtErr) {
         console.warn('[LegacyReport] DataTables API failed, falling back to DOM rows', dtErr);
       }
@@ -181,12 +184,27 @@
         // Sort top-to-bottom, then left-to-right (matches visual reading order)
         .sort((a, b) => a.gsY !== b.gsY ? a.gsY - b.gsY : a.gsX - b.gsX);
 
-      // ── Split items: tables get their own pages, everything else → cards grid ──
+      // ── Split items: counts → KPI strip, tables → own pages, rest → cards grid
       const tableItems = items.filter(i => i.gridtype === 'table');
-      const cardItems  = items.filter(i => i.gridtype !== 'table');
+      const countItems = items.filter(i => i.gridtype === 'count');
+      const cardItems  = items.filter(i => i.gridtype !== 'table' && i.gridtype !== 'count');
+
+      const ACCENT_COLORS = ['', 'teal', 'indigo', 'amber'];
+
+      // ── Build KPI mini strip from count widgets ───────────────────────────────
+      //    The numeric value lives in .progress-value .h2 div (the circular ring content)
+      let kpiStripHtml = '';
+      countItems.forEach((item, idx) => {
+        const valEl = item.el.querySelector('.progress-value .h2 div, .progress-value .h2, .h2 div');
+        const val   = esc((valEl ? valEl.textContent : '').trim() || '—');
+        const cc    = ACCENT_COLORS[idx % ACCENT_COLORS.length];
+        kpiStripHtml += `<div class="kpi-mini${cc ? ' ' + cc : ''}">
+          <div class="kpi-mini-val">${val}</div>
+          <div class="kpi-mini-lbl">${esc(item.title)}</div>
+        </div>`;
+      });
 
       // ── Capture each non-table widget ─────────────────────────────────────────
-      const ACCENT_COLORS = ['', 'teal', 'indigo', 'amber'];
       let cardsHtml = '';
       let chartIndex = 0;
 
@@ -393,7 +411,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 /* ── Running header (print only) ───────────────────────── */
 .run-header{
   display:none;align-items:center;justify-content:space-between;
-  padding:6px 28px;background:#f8fafc;border-bottom:1px solid var(--border);flex-shrink:0
+  padding:10px 28px;background:#f8fafc;border-bottom:1px solid var(--border);flex-shrink:0
 }
 .run-header .rh-title{font-size:8px;font-weight:700;color:var(--blue);letter-spacing:.06em;text-transform:uppercase}
 .run-header .rh-date{font-size:8px;color:var(--mid)}
@@ -415,15 +433,22 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .section-banner-text{font-size:10px;font-weight:700;color:#fff;
   text-transform:uppercase;letter-spacing:.07em}
 
+/* ── KPI mini strip ─────────────────────────────────────── */
+.kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
+.kpi-mini{background:var(--light);border-radius:6px;padding:10px 12px;border-left:3px solid var(--blue)}
+.kpi-mini.teal{border-color:var(--teal)}.kpi-mini.indigo{border-color:#4f46e5}.kpi-mini.amber{border-color:#d97706}
+.kpi-mini-val{font-size:18px;font-weight:800;color:var(--dark)}
+.kpi-mini-lbl{font-size:8px;color:var(--mid);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+
 /* ── Table page ─────────────────────────────────────────── */
 .table-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .table-banner .tit{font-size:13px;font-weight:700;color:white;display:flex;align-items:center;gap:8px}
 .table-banner .cnt{font-size:8.5px;color:rgba(255,255,255,.65);background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px}
-.data-table-wrap{padding:0 28px 20px;overflow:hidden}
+.data-table-wrap{padding:16px 28px 20px;overflow:hidden}
 .data-table{width:100%;border-collapse:collapse;font-size:8px}
-.data-table thead th{background:var(--blue);color:white;padding:6px 8px;text-align:left;font-weight:600;letter-spacing:.03em}
+.data-table thead th{background:var(--blue);color:white;padding:8px 12px;text-align:left;font-weight:600;letter-spacing:.03em}
 .data-table tbody tr:nth-child(even) td{background:#f9fafb}
-.data-table tbody td{padding:5px 8px;color:var(--dark);border-bottom:1px solid var(--border)}
+.data-table tbody td{padding:6px 12px;color:var(--dark);border-bottom:1px solid var(--border)}
 .badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:7px;font-weight:600}
 .badge.green{background:#d1fae5;color:#065f46}.badge.red{background:#fee2e2;color:#991b1b}.badge.amber{background:#fef3c7;color:#92400e}
 /* ── Page footer ────────────────────────────────────────── */
@@ -458,6 +483,8 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .cover-top{height:42vh;print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .cover-bottom{min-height:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .section-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kpi-mini{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kpi-summary-row{page-break-inside:avoid;break-inside:avoid}
   .wc{page-break-inside:avoid;break-inside:avoid}
   .data-table thead th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
@@ -506,10 +533,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 
 <!-- ── Dashboard charts page ─────────────────────────────────────────── -->
 <div class="page">
-  <div class="run-header">
-    <span class="rh-title">${esc(printTitle)}</span>
-    <span class="rh-date">${printDate}</span>
-  </div>
+  ${countItems.length ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${Math.min(countItems.length,4)},1fr)">${kpiStripHtml}</div>` : ''}
   <div class="cards-grid">
     ${cardsHtml}
   </div>
