@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Key Findings — Mockup</title>
+<style>
+  body {
+    background: #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 24px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    gap: 32px;
+  }
+
+  h2 {
+    font-size: 13px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    margin: 0;
+  }
+
+  /* ── BEFORE (current) ───────────────────────────────────────────────── */
+  .label-before { color: #dc2626; }
+  .label-after  { color: #059669; }
+
+  /* ── A4 shell ───────────────────────────────────────────────────────── */
+  .page {
+    width: 595px;
+    min-height: 842px;
+    background: #fff;
+    box-shadow: 0 4px 24px rgba(0,0,0,.18);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ─── CURRENT design ─────────────────────────────────────────────────── */
+  .table-banner {
+    background: #3B98F1;
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .table-banner .tit { font-size: 13px; font-weight: 700; color: white; }
+  .table-banner .cnt {
+    font-size: 8.5px; color: rgba(255,255,255,.65);
+    background: rgba(255,255,255,.15); padding: 3px 10px; border-radius: 8px;
+  }
+  .findings-body-old {
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    flex: 1;
+  }
+  .finding-item-old {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 12px 14px;
+    background: #f3f4f6;
+    border-radius: 6px;
+    border-left: 3px solid #3B98F1;
+  }
+  .finding-num-old {
+    flex-shrink: 0; width: 22px; height: 22px;
+    background: #3B98F1; color: white; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .finding-item-old p { font-size: 9.5px; color: #374151; line-height: 1.75; margin: 0; }
+  .page-footer-old {
+    padding: 8px 28px; background: #f9fafb;
+    border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between;
+    font-size: 8px; color: #9ca3af;
+  }
+
+  /* ─── NEW design ─────────────────────────────────────────────────────── */
+  :root {
+    --blue: #3B98F1;
+    --blue-lt: #eff6ff;
+    --blue-dk: #1d6ebe;
+    --teal: #0d9488;
+    --amber: #d97706;
+    --indigo: #4f46e5;
+    --rose: #e11d48;
+    --dark: #111827;
+    --mid: #6b7280;
+    --light: #f3f4f6;
+    --border: #e5e7eb;
+  }
+
+  /* Hero header — matches cover page energy */
+  .kf-hero {
+    background: var(--blue);
+    padding: 28px 32px 24px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .kf-hero::before {
+    content: '';
+    position: absolute;
+    width: 260px; height: 260px;
+    border-radius: 50%;
+    border: 44px solid rgba(255,255,255,.07);
+    top: -80px; right: -60px;
+  }
+  .kf-hero::after {
+    content: '';
+    position: absolute;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    border: 24px solid rgba(255,255,255,.06);
+    bottom: -30px; left: 40px;
+  }
+  .kf-hero-eyebrow {
+    font-size: 8px;
+    font-weight: 700;
+    color: rgba(255,255,255,.55);
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    margin-bottom: 8px;
+    position: relative; z-index: 1;
+  }
+  .kf-hero-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    position: relative; z-index: 1;
+  }
+  .kf-hero-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.1;
+    letter-spacing: -.01em;
+  }
+  .kf-hero-title span {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+    color: rgba(255,255,255,.6);
+    letter-spacing: .04em;
+    margin-top: 4px;
+  }
+  .kf-hero-badge {
+    background: rgba(255,255,255,.15);
+    border: 1px solid rgba(255,255,255,.25);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 8.5px;
+    color: rgba(255,255,255,.85);
+    font-weight: 600;
+    letter-spacing: .04em;
+    white-space: nowrap;
+  }
+
+  /* Sub-header strip */
+  .kf-subhead {
+    background: var(--blue-lt);
+    border-bottom: 1px solid #dbeafe;
+    padding: 9px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .kf-subhead-left {
+    font-size: 8.5px;
+    color: var(--blue-dk);
+    font-weight: 600;
+  }
+  .kf-subhead-right {
+    font-size: 8px;
+    color: var(--mid);
+  }
+
+  /* Card grid */
+  .kf-grid {
+    padding: 20px 28px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    flex: 1;
+    align-content: start;
+  }
+  .kf-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
+  }
+  .kf-card.full { grid-column: 1 / -1; }
+
+  .kf-card-accent {
+    height: 3px;
+    background: var(--blue);
+    flex-shrink: 0;
+  }
+  .kf-card-accent.c-teal   { background: var(--teal); }
+  .kf-card-accent.c-indigo { background: var(--indigo); }
+  .kf-card-accent.c-amber  { background: var(--amber); }
+  .kf-card-accent.c-rose   { background: var(--rose); }
+
+  .kf-card-body {
+    padding: 14px 16px 16px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    flex: 1;
+  }
+  .kf-num {
+    flex-shrink: 0;
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--blue);
+    opacity: .18;
+    letter-spacing: -.02em;
+    min-width: 32px;
+    margin-top: -2px;
+  }
+  .kf-num.c-teal   { color: var(--teal); }
+  .kf-num.c-indigo { color: var(--indigo); }
+  .kf-num.c-amber  { color: var(--amber); }
+  .kf-num.c-rose   { color: var(--rose); }
+
+  .kf-text {
+    flex: 1;
+  }
+  .kf-text p {
+    font-size: 9.5px;
+    color: #374151;
+    line-height: 1.8;
+    margin: 0;
+  }
+
+  /* AI attribution footer */
+  .kf-attribution {
+    margin: 0 28px 20px;
+    padding: 8px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .kf-attr-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--blue);
+    flex-shrink: 0;
+  }
+  .kf-attribution span {
+    font-size: 7.5px;
+    color: var(--mid);
+    letter-spacing: .02em;
+  }
+  .kf-attribution strong {
+    color: var(--blue);
+    font-weight: 600;
+  }
+
+  /* Page footer */
+  .page-footer {
+    padding: 8px 28px;
+    background: #f9fafb;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    flex-shrink: 0;
+    font-size: 8px;
+    color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<h2 class="label-before">CURRENT</h2>
+
+<div class="page">
+  <!-- Current: flat blue banner -->
+  <div class="table-banner">
+    <span class="tit">🔍 Key Findings</span>
+    <span class="cnt">WHS Incident Dashboard</span>
+  </div>
+  <div class="findings-body-old">
+    <div class="finding-item-old">
+      <span class="finding-num-old">1</span>
+      <p>Total reported incidents have increased by 18% compared to the same period last year, with the majority concentrated in the Warehouse department — immediate review of manual handling procedures is recommended.</p>
+    </div>
+    <div class="finding-item-old">
+      <span class="finding-num-old">2</span>
+      <p>Near-miss reporting rates are below the industry benchmark. Encouraging a stronger safety reporting culture could improve early hazard identification and prevent future incidents.</p>
+    </div>
+    <div class="finding-item-old">
+      <span class="finding-num-old">3</span>
+      <p>Corrective actions for 34 open hazards remain overdue by more than 30 days, posing a potential compliance risk under WHS Act Section 17.</p>
+    </div>
+    <div class="finding-item-old">
+      <span class="finding-num-old">4</span>
+      <p>Monthly safety inspections achieved a 92% completion rate this quarter, indicating strong compliance by site supervisors — a notable improvement from 74% last quarter.</p>
+    </div>
+    <div class="finding-item-old">
+      <span class="finding-num-old">5</span>
+      <p>Lost Time Injury Frequency Rate (LTIFR) stands at 4.2 per million hours worked, which is above the sector average — targeted return-to-work planning is advised for recurring claim types.</p>
+    </div>
+  </div>
+  <div class="page-footer-old">
+    <span>WHS Incident Dashboard</span>
+    <span>Key Findings</span>
+  </div>
+</div>
+
+<h2 class="label-after">PROPOSED</h2>
+
+<div class="page">
+  <!-- Hero header — matches cover page energy -->
+  <div class="kf-hero">
+    <div class="kf-hero-eyebrow">AI-Generated Report Insights</div>
+    <div class="kf-hero-row">
+      <div class="kf-hero-title">
+        Key Findings
+        <span>WHS Incident Dashboard</span>
+      </div>
+      <div class="kf-hero-badge">5 observations</div>
+    </div>
+  </div>
+
+  <!-- Sub-header strip -->
+  <div class="kf-subhead">
+    <span class="kf-subhead-left">Critical observations across all dashboard widgets</span>
+    <span class="kf-subhead-right">Generated 29 Apr 2026</span>
+  </div>
+
+  <!-- 2-column card grid -->
+  <div class="kf-grid">
+
+    <div class="kf-card">
+      <div class="kf-card-accent"></div><!-- blue -->
+      <div class="kf-card-body">
+        <div class="kf-num">01</div>
+        <div class="kf-text">
+          <p>Total reported incidents have increased by 18% compared to the same period last year, with the majority concentrated in the Warehouse department — immediate review of manual handling procedures is recommended.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="kf-card">
+      <div class="kf-card-accent c-teal"></div>
+      <div class="kf-card-body">
+        <div class="kf-num c-teal">02</div>
+        <div class="kf-text">
+          <p>Near-miss reporting rates are below the industry benchmark. Encouraging a stronger safety reporting culture could improve early hazard identification and prevent future incidents.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="kf-card">
+      <div class="kf-card-accent c-rose"></div>
+      <div class="kf-card-body">
+        <div class="kf-num c-rose">03</div>
+        <div class="kf-text">
+          <p>Corrective actions for 34 open hazards remain overdue by more than 30 days, posing a potential compliance risk under WHS Act Section 17.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="kf-card">
+      <div class="kf-card-accent c-indigo"></div>
+      <div class="kf-card-body">
+        <div class="kf-num c-indigo">04</div>
+        <div class="kf-text">
+          <p>Monthly safety inspections achieved a 92% completion rate this quarter, indicating strong compliance by site supervisors — a notable improvement from 74% last quarter.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5th finding spans full width -->
+    <div class="kf-card full">
+      <div class="kf-card-accent c-amber"></div>
+      <div class="kf-card-body">
+        <div class="kf-num c-amber">05</div>
+        <div class="kf-text">
+          <p>Lost Time Injury Frequency Rate (LTIFR) stands at 4.2 per million hours worked, which is above the sector average — targeted return-to-work planning is advised for recurring claim types.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- AI attribution -->
+  <div class="kf-attribution">
+    <div class="kf-attr-dot"></div>
+    <span>These findings were <strong>generated by AI (GPT-4o)</strong> based on live dashboard data and are intended to support — not replace — professional WHS judgement.</span>
+  </div>
+
+  <div class="page-footer">
+    <span>WHS Incident Dashboard</span>
+    <span>Key Findings</span>
+  </div>
+</div>
+
+</body>
+</html>

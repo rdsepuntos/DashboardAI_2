@@ -12,7 +12,8 @@ namespace DashboardAI.API.Controllers
         public string DashboardTitle { get; set; }
         public string UserId         { get; set; }
         public int    StoreId        { get; set; }
-        public List<ReportWidgetItem> Widgets { get; set; }
+        public List<ReportWidgetItem>     Widgets       { get; set; }
+        public Dictionary<string, string> ActiveFilters { get; set; }
     }
 
     [Route("api/report")]
@@ -55,11 +56,13 @@ namespace DashboardAI.API.Controllers
             {
                 var result = await _aiService.GenerateReportInsightsAsync(
                     request.DashboardTitle ?? "Dashboard",
-                    request.Widgets);
+                    request.Widgets,
+                    request.ActiveFilters);
 
                 return Ok(new
                 {
                     executiveSummary = result.ExecutiveSummary,
+                    keyFindings      = result.KeyFindings ?? new List<string>(),
                     descriptions     = result.Descriptions
                 });
             }

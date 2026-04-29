@@ -28,20 +28,29 @@ namespace DashboardAI.Application.Interfaces
     /// Richer widget descriptor for POST /api/report/insights.
     /// Includes table structure (columns + sample rows) so GPT can reason about actual content.
     /// </summary>
+    public class ChartSeriesData
+    {
+        public string       SeriesName { get; set; }
+        public List<string> Labels     { get; set; }  // x-axis labels (max 20)
+        public List<string> Values     { get; set; }  // corresponding values (max 20)
+    }
+
     public class ReportWidgetItem
     {
-        public string             Title        { get; set; }
-        public string             Type         { get; set; }  // count | linechart | bar | table | etc.
-        public string             CurrentValue { get; set; }  // populated for count widgets
-        public int?               RowCount     { get; set; }  // total rows for table widgets
-        public List<string>       Columns      { get; set; }  // column headers for tables
-        public List<List<string>> SampleRows   { get; set; }  // first 5 rows for tables
+        public string                  Title        { get; set; }
+        public string                  Type         { get; set; }  // count | linechart | bar | table | etc.
+        public string                  CurrentValue { get; set; }  // populated for count widgets
+        public int?                    RowCount     { get; set; }  // total rows for table widgets
+        public List<string>            Columns      { get; set; }  // column headers for tables
+        public List<List<string>>      SampleRows   { get; set; }  // first 5 rows for tables
+        public List<ChartSeriesData>   SeriesData   { get; set; }  // ECharts series (max 3 series)
     }
 
     /// <summary>Full report insights returned by GenerateReportInsightsAsync.</summary>
     public class ReportInsightsResult
     {
         public string                            ExecutiveSummary { get; set; }
+        public List<string>                      KeyFindings      { get; set; }  // 3-5 bullet points
         public Dictionary<string, WidgetInsight> Descriptions     { get; set; }
     }
 
@@ -81,6 +90,7 @@ namespace DashboardAI.Application.Interfaces
         /// </summary>
         Task<ReportInsightsResult> GenerateReportInsightsAsync(
             string dashboardTitle,
-            IEnumerable<ReportWidgetItem> widgets);
+            IEnumerable<ReportWidgetItem> widgets,
+            Dictionary<string, string> activeFilters = null);
     }
 }

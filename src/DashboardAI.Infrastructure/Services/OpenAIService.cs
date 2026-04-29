@@ -165,7 +165,8 @@ namespace DashboardAI.Infrastructure.Services
         // ────────────────────────────────────────────────────────────────────────
         public async Task<ReportInsightsResult> GenerateReportInsightsAsync(
             string dashboardTitle,
-            IEnumerable<ReportWidgetItem> widgets)
+            IEnumerable<ReportWidgetItem> widgets,
+            Dictionary<string, string> activeFilters = null)
         {
             var list = widgets?.ToList() ?? new List<ReportWidgetItem>();
 
@@ -189,8 +190,24 @@ namespace DashboardAI.Infrastructure.Services
                             sb.Append($"\n     - {string.Join(" | ", row)}");
                     }
                 }
+                if (w.SeriesData != null && w.SeriesData.Count > 0)
+                {
+                    foreach (var series in w.SeriesData.Take(3))
+                    {
+                        var sname = string.IsNullOrWhiteSpace(series.SeriesName) ? "Series" : series.SeriesName;
+                        var pts   = (series.Labels ?? new List<string>())
+                                    .Zip(series.Values ?? new List<string>(), (l, v) => $"{l}={v}")
+                                    .Take(10);
+                        sb.Append($"\n   {sname}: {string.Join(", ", pts)}");
+                    }
+                }
                 sb.AppendLine();
             }
+
+            // Active filter context sent to GPT as additional framing
+            var filterContext = (activeFilters != null && activeFilters.Count > 0)
+                ? "Active filters: " + string.Join(", ", activeFilters.Select(kv => $"{kv.Key}: {kv.Value}")) + "\n\n"
+                : "";
 
             var systemMsg =
                 "You are a Workplace Health & Safety reporting analyst. " +
@@ -199,12 +216,15 @@ namespace DashboardAI.Infrastructure.Services
 
             var userMsg =
                 $"Dashboard: \"{dashboardTitle}\"\n\n" +
-                "Generate an executive summary and individual widget insights for a professional printed WHS report.\n\n" +
+                filterContext +
+                "Generate an executive summary, key findings, and individual widget insights for a professional printed WHS report.\n\n" +
                 $"Widgets:\n{sb}\n" +
-                "Return ONLY a JSON object with exactly two fields:\n" +
+                "Return ONLY a JSON object with exactly three fields:\n" +
                 "1. \"executiveSummary\": a 2-3 sentence professional WHS executive summary that references the dashboard title, " +
                 "highlights key KPI values where present, and notes any notable trends or risk signals.\n" +
-                "2. \"descriptions\": an object where each key is exactly the widget title and each value has:\n" +
+                "2. \"keyFindings\": an array of 3-5 concise plain-text bullet strings (no markdown, no dashes) " +
+                "summarising the most important WHS observations across the whole dashboard.\n" +
+                "3. \"descriptions\": an object where each key is exactly the widget title and each value has:\n" +
                 "   - \"description\": a 1-2 sentence WHS insight explaining what the widget shows and any safety observation.\n" +
                 "   - \"layout\": one of \"right\" (chart left, text right \u2014 bar/line trends), " +
                 "\"left\" (text left, chart right \u2014 summary-first), " +
@@ -244,6 +264,7 @@ namespace DashboardAI.Infrastructure.Services
             return new ReportInsightsResult
             {
                 ExecutiveSummary = root["executiveSummary"]?.ToString() ?? "",
+                KeyFindings      = root["keyFindings"]?.ToObject<List<string>>() ?? new List<string>(),
                 Descriptions     = root["descriptions"]?.ToObject<Dictionary<string, WidgetInsight>>()
                                    ?? new Dictionary<string, WidgetInsight>()
             };
