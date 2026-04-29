@@ -1108,7 +1108,14 @@ function srHandleSend() {
     roleIds:       Object.keys(srSel.role).map(Number),
     subject:       document.getElementById('sr-subject').value,
     message:       document.getElementById('sr-message').value,
-    reportHtml:    document.documentElement.outerHTML
+    reportHtml:    (function(){
+      var clone = document.documentElement.cloneNode(true);
+      // remove the send-email modal entirely
+      var bd = clone.querySelector('#sr-backdrop'); if (bd) bd.parentNode.removeChild(bd);
+      // remove only the Send Report button from the print bar (keep Save as PDF)
+      var sb = clone.querySelector('.send-btn'); if (sb) sb.parentNode.removeChild(sb);
+      return clone.outerHTML;
+    })()
   };
 
   fetch(SR_SEND_URL, {
@@ -1149,7 +1156,7 @@ function srEsc(s) {
   <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
   <div style="display:flex;align-items:center;gap:0">
     <button class="send-btn" onclick="srOpen()"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
-    <button class="print-btn" onclick="window.print()"><i class="ph ph-printer"></i>&nbsp; Print / Save as PDF</button>
+    <button class="print-btn" onclick="window.print()"><i class="ph ph-printer"></i>&nbsp; Save as PDF</button>
   </div>
 </div>
 

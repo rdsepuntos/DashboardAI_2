@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Mail;
+using System.Net.Mime;
 using System.Threading.Tasks;
 using DashboardAI.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
@@ -28,15 +30,22 @@ namespace DashboardAI.Infrastructure.Services
             _password  = configuration["Email:Password"] ?? string.Empty;
         }
 
-        public async Task SendAsync(string toAddress, string toName, string subject, string htmlBody, string[] bccAddresses = null)
+        public async Task SendAsync(
+            string toAddress,
+            string toName,
+            string subject,
+            string htmlBody,
+            string[] bccAddresses = null,
+            byte[] attachmentData = null,
+            string attachmentName = null)
         {
             using (var message = new MailMessage())
             {
-                message.From = new MailAddress(_from);
+                message.From       = new MailAddress(_from);
                 message.To.Add(new MailAddress(toAddress, toName));
                 message.Subject    = subject;
                 message.Body       = htmlBody;
-                message.IsBodyHtml = true;
+                message.IsBodyHtml = !string.IsNullOrWhiteSpace(htmlBody) && htmlBody.TrimStart().StartsWith("<");
 
                 if (bccAddresses != null)
                 {
@@ -46,6 +55,15 @@ namespace DashboardAI.Infrastructure.Services
                         if (!string.IsNullOrEmpty(trimmed))
                             message.Bcc.Add(new MailAddress(trimmed));
                     }
+                }
+
+                if (attachmentData != null && attachmentData.Length > 0)
+                {
+                    var fileName = string.IsNullOrWhiteSpace(attachmentName) ? "report.html" : attachmentName;
+                    var stream   = new MemoryStream(attachmentData);
+                    var att      = new Attachment(stream, fileName, "text/html");
+                    att.ContentDisposition.Inline = false;
+                    message.Attachments.Add(att);
                 }
 
                 using (var client = new SmtpClient(_host, _port))

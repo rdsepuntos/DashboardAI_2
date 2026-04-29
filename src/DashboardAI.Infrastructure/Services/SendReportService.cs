@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Dapper;
 using DashboardAI.Application.Interfaces;
@@ -37,19 +38,30 @@ namespace DashboardAI.Infrastructure.Services
             if (recipients.Count == 0)
                 return new SendReportResult { Sent = 0, Recipients = new List<string>() };
 
-            var subject  = string.IsNullOrWhiteSpace(request.Subject) ? _defaultSubject : request.Subject;
-            var htmlBody = BuildEmailBody(request.Message, request.ReportHtml);
+            var subject        = string.IsNullOrWhiteSpace(request.Subject) ? _defaultSubject : request.Subject;
+            var bodyHtml       = BuildMessageBody(request.Message);
+            var attachmentData = string.IsNullOrWhiteSpace(request.ReportHtml)
+                                    ? null
+                                    : System.Text.Encoding.UTF8.GetBytes(request.ReportHtml);
+            var attachmentName = SanitizeFilename(subject) + ".html";
 
             // Send to first recipient with BCC; send individually to all remaining
             // (avoids large To: list leakage — each person only sees themselves)
-            var sentCount    = 0;
-            var sentEmails   = new List<string>();
+            var sentCount  = 0;
+            var sentEmails = new List<string>();
 
             foreach (var r in recipients)
             {
                 // Only send BCC on the first email to avoid duplicate BCC deliveries
                 var bcc = sentCount == 0 ? _bccAddresses : null;
-                await _emailService.SendAsync(r.EmailAddress, $"{r.FirstName} {r.LastName}".Trim(), subject, htmlBody, bcc);
+                await _emailService.SendAsync(
+                    r.EmailAddress,
+                    $"{r.FirstName} {r.LastName}".Trim(),
+                    subject,
+                    bodyHtml,
+                    bcc,
+                    attachmentData,
+                    attachmentName);
                 sentEmails.Add(r.EmailAddress);
                 sentCount++;
             }
@@ -143,24 +155,22 @@ namespace DashboardAI.Infrastructure.Services
             new { Ids = ids }
         );
 
-        // ── Email body builder ────────────────────────────────────────────────
+        // ── Email body builder (message only — report goes as attachment) ─────
 
-        private static string BuildEmailBody(string personalMessage, string reportHtml)
+        private static string BuildMessageBody(string personalMessage)
         {
-            var sb = new StringBuilder();
+            if (string.IsNullOrWhiteSpace(personalMessage))
+                return "Please find the WHS report attached.";
 
-            if (!string.IsNullOrWhiteSpace(personalMessage))
-            {
-                sb.AppendLine("<div style=\"font-family:sans-serif;font-size:14px;margin-bottom:24px;\">");
-                sb.AppendLine(System.Net.WebUtility.HtmlEncode(personalMessage).Replace("\n", "<br>"));
-                sb.AppendLine("</div>");
-                sb.AppendLine("<hr style=\"border:none;border-top:1px solid #e5e7eb;margin-bottom:24px;\">");
-            }
+            var encoded = System.Net.WebUtility.HtmlEncode(personalMessage).Replace("\n", "<br>");
+            return $"<div style=\"font-family:sans-serif;font-size:14px;\">{encoded}</div>";
+        }
 
-            if (!string.IsNullOrWhiteSpace(reportHtml))
-                sb.AppendLine(reportHtml);
-
-            return sb.ToString();
+        private static string SanitizeFilename(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "report";
+            var safe = Regex.Replace(name, @"[\\/:*?""<>|]", "-").Trim();
+            return safe.Length > 80 ? safe.Substring(0, 80) : safe;
         }
 
         // ── DTO ───────────────────────────────────────────────────────────────
