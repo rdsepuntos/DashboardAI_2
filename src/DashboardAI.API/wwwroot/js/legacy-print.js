@@ -627,6 +627,7 @@
 <head>
 <meta charset="UTF-8"/>
 <title>${esc(printTitle)} — Report</title>
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
@@ -800,6 +801,10 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   letter-spacing:.02em;font-family:inherit;margin-right:8px
 }
 .send-btn:hover{background:#15803d}
+/* ── Phosphor icon alignment ──────────────────────────────── */
+.ph{vertical-align:-0.125em;font-size:1em}
+@keyframes sr-spin{to{transform:rotate(360deg)}}
+.ph-spin{display:inline-block;animation:sr-spin .8s linear infinite}
 /* ── Send Report modal (screen only) ─────────────────────── */
 .sr-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:24px;z-index:1000}
 .sr-backdrop.open{display:flex}
@@ -1070,7 +1075,7 @@ function srRenderChips() {
   function addChip(group, id, label, cls) {
     var c = document.createElement('div');
     c.className = 'sr-chip ' + (cls || '');
-    c.innerHTML = srEsc(label) + '<span class="sr-chip-x" onclick="srRemoveChip(\''+group+'\',\''+id+'\')">&times;</span>';
+    c.innerHTML = srEsc(label) + '<span class="sr-chip-x" onclick="srRemoveChip(\\''+group+'\\',\\''+id+'\\')" ><i class="ph ph-x"></i></span>';
     wrap.appendChild(c);
   }
   Object.keys(srSel.users).forEach(function(id){ addChip('users',id,srSel.users[id],''); });
@@ -1089,13 +1094,13 @@ function srRemoveChip(group, id) {
 function srHandleSend() {
   var btn = document.getElementById('sr-send-btn');
   btn.disabled = true;
-  btn.innerHTML = '&#8987;\u00a0 Sending\u2026';
+  btn.innerHTML = '<i class="ph ph-circle-notch ph-spin"></i>\u00a0 Sending\u2026';
   setTimeout(function(){
-    btn.innerHTML = '&#10003;\u00a0 Sent!';
+    btn.innerHTML = '<i class="ph ph-check"></i>\u00a0 Sent!';
     btn.style.background = '#16a34a';
     setTimeout(function(){
       srClose();
-      btn.innerHTML = '&#9993;\u00a0 Send Report';
+      btn.innerHTML = '<i class="ph ph-paper-plane-tilt"></i>\u00a0 Send Report';
       btn.style.background = '';
       btn.disabled = false;
     }, 1400);
@@ -1112,8 +1117,8 @@ function srEsc(s) {
 <div class="print-bar">
   <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
   <div style="display:flex;align-items:center;gap:0">
-    <button class="send-btn" onclick="srOpen()">&#9993;&nbsp; Send Report</button>
-    <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
+    <button class="send-btn" onclick="srOpen()"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
+    <button class="print-btn" onclick="window.print()"><i class="ph ph-printer"></i>&nbsp; Print / Save as PDF</button>
   </div>
 </div>
 
@@ -1295,9 +1300,9 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
     <div class="sr-hdr">
       <div class="sr-hdr-left">
         <div class="sr-eyebrow">WHS Monitor</div>
-        <div class="sr-title" id="sr-title">&#9993;&nbsp; Send Report</div>
+        <div class="sr-title" id="sr-title"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</div>
       </div>
-      <div class="sr-close" onclick="srClose()" title="Close">&#10005;</div>
+      <div class="sr-close" onclick="srClose()" title="Close"><i class="ph ph-x"></i></div>
     </div>
     <div class="sr-pill">
       <div class="sr-pill-icon">&#128196;</div>
@@ -1320,7 +1325,7 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
         <div id="sr-panel-users" class="sr-panel visible">
           <div class="sr-ms-wrap">
             <div class="sr-search-row">
-              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
               <input type="text" id="sr-user-search" placeholder="Type a name to search users&#8230;" oninput="srSearchUsers(this.value)" autocomplete="off"/>
             </div>
             <div class="sr-user-search-hint">Start typing to search members by name</div>
@@ -1331,7 +1336,7 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
         <div id="sr-panel-division" class="sr-panel">
           <div class="sr-ms-wrap">
             <div class="sr-search-row">
-              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
               <input type="text" placeholder="Search divisions&#8230;" oninput="srFilter('sr-division-list',this.value)" autocomplete="off"/>
             </div>
             <div class="sr-sel-all-row">
@@ -1345,7 +1350,7 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
         <div id="sr-panel-department" class="sr-panel">
           <div class="sr-ms-wrap">
             <div class="sr-search-row">
-              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
               <input type="text" placeholder="Search departments&#8230;" oninput="srFilter('sr-department-list',this.value)" autocomplete="off"/>
             </div>
             <div class="sr-sel-all-row">
@@ -1359,7 +1364,7 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
         <div id="sr-panel-role" class="sr-panel">
           <div class="sr-ms-wrap">
             <div class="sr-search-row">
-              <span style="color:#6b7280;font-size:13px">&#128269;</span>
+              <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
               <input type="text" id="sr-role-search" placeholder="Type a name to search by role&#8230;" oninput="srSearchUsers(this.value,'role')" autocomplete="off"/>
             </div>
             <div class="sr-user-search-hint">Search members — select to add by employee role</div>
@@ -1384,10 +1389,10 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
       </div>
     </div>
     <div class="sr-ftr">
-      <div class="sr-ftr-note"><span>&#128274;</span> Report will be sent as an HTML attachment</div>
+      <div class="sr-ftr-note"><i class="ph ph-lock-simple"></i> Report will be sent as an HTML attachment</div>
       <div class="sr-ftr-btns">
         <button class="sr-btn-ghost" onclick="srClose()">Cancel</button>
-        <button class="sr-btn-primary" id="sr-send-btn" disabled onclick="srHandleSend()">&#9993;&nbsp; Send Report</button>
+        <button class="sr-btn-primary" id="sr-send-btn" disabled onclick="srHandleSend()"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
       </div>
     </div>
   </div>
