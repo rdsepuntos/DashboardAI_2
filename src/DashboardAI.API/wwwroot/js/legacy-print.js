@@ -728,12 +728,10 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kf-attr-dot{width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0}
 .kf-attribution span{font-size:7.5px;color:var(--mid);letter-spacing:.02em}
 .kf-attribution strong{color:var(--blue);font-weight:600}
-/* ── Recommendations strip ──────────────────────────────── */
-.kf-recs{margin:14px 28px 0;flex-shrink:0}
-.kf-recs-header{font-size:8.5px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
-.kf-recs-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.kf-rec-card{background:#fffbeb;border:1px solid #fde68a;border-top:3px solid var(--amber);border-radius:6px;padding:10px 12px}
-.kf-rec-card p{font-size:8.5px;color:#374151;line-height:1.7;margin:0}
+/* ── Recommendations subhead (amber tint) ──────────────── */
+.kf-rec-subhead{background:#fffbeb;border-top:1px solid #fde68a;border-bottom:1px solid #fde68a;padding:9px 32px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-top:14px}
+.kf-rec-subhead-left{font-size:8.5px;color:#92400e;font-weight:600}
+.kf-rec-subhead-right{font-size:8px;color:var(--mid)}
 /* ── Actions Required & Sign-Off page ───────────────────── */
 .kf-section-header{font-size:8.5px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;display:flex;align-items:center;gap:5px}
 .kf-actions{margin:20px 28px 0;flex-shrink:0}
@@ -807,7 +805,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .kf-num{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-attr-dot{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-card{page-break-inside:avoid;break-inside:avoid}
-  .kf-rec-card{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kf-rec-subhead{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-actions-table th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-signoff-block-header{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
@@ -871,11 +869,24 @@ ${keyFindings.length ? `<div class="page">
     </div>`;
     }).join('')}
   </div>
-  ${recommendations.length ? `<div class="kf-recs">
-    <div class="kf-recs-header">&#x1F4A1; Recommended Actions</div>
-    <div class="kf-recs-grid">
-      ${recommendations.map(r => `<div class="kf-rec-card"><p>${esc(r)}</p></div>`).join('')}
-    </div>
+  ${recommendations.length ? `<div class="kf-rec-subhead">
+    <span class="kf-rec-subhead-left">&#x1F4A1; Recommended Actions</span>
+    <span class="kf-rec-subhead-right">${recommendations.length} recommendation${recommendations.length !== 1 ? 's' : ''}</span>
+  </div>
+  <div class="kf-grid" style="padding-top:12px">
+    ${recommendations.map((r, idx) => {
+      const REC_ACCENTS = ['c-amber', 'c-rose', 'c-teal', 'c-indigo', ''];
+      const ac     = REC_ACCENTS[idx % REC_ACCENTS.length];
+      const isFull = idx === recommendations.length - 1 && recommendations.length % 2 !== 0;
+      const num    = String(idx + 1).padStart(2, '0');
+      return `<div class="kf-card${isFull ? ' full' : ''}">
+      <div class="kf-card-accent${ac ? ' ' + ac : ''}"></div>
+      <div class="kf-card-body">
+        <div class="kf-num${ac ? ' ' + ac : ''}">${num}</div>
+        <div class="kf-text"><p>${esc(r)}</p></div>
+      </div>
+    </div>`;
+    }).join('')}
   </div>` : ''}
   <div class="page-footer">
     <span class="doc-title">${esc(printTitle)}</span>
