@@ -16,35 +16,34 @@ namespace DashboardAI.API.Controllers
         public Dictionary<string, string> ActiveFilters { get; set; }
     }
 
+    public class SendReportEmailRequest
+    {
+        public int         StoreId       { get; set; }
+        public int         UserId        { get; set; }
+        public List<int>   UserIds       { get; set; } = new List<int>();
+        public List<int>   DivisionIds   { get; set; } = new List<int>();
+        public List<int>   DepartmentIds { get; set; } = new List<int>();
+        public List<int>   RoleIds       { get; set; } = new List<int>();
+        public string      Subject       { get; set; }
+        public string      Message       { get; set; }
+        public string      ReportHtml    { get; set; }
+    }
+
     [Route("api/report")]
     [ApiController]
     public class ReportController : ControllerBase
     {
-        private readonly IOpenAIService _aiService;
+        private readonly IOpenAIService      _aiService;
+        private readonly ISendReportService  _sendReportService;
 
-        public ReportController(IOpenAIService aiService)
+        public ReportController(IOpenAIService aiService, ISendReportService sendReportService)
         {
-            _aiService = aiService ?? throw new ArgumentNullException(nameof(aiService));
+            _aiService         = aiService         ?? throw new ArgumentNullException(nameof(aiService));
+            _sendReportService = sendReportService ?? throw new ArgumentNullException(nameof(sendReportService));
         }
 
         // ──────────────────────────────────────────────────────────────────────
         // POST /api/report/insights
-        // Body: {
-        //   "dashboardTitle": "WHS Incident Dashboard",
-        //   "userId": "u123",
-        //   "storeId": 5,
-        //   "widgets": [
-        //     { "title": "Open Incidents",    "type": "count",  "currentValue": "42" },
-        //     { "title": "Incidents by Month","type": "linechart" },
-        //     { "title": "Recent Incidents",  "type": "table",  "rowCount": 248,
-        //       "columns": ["Date","Type","Status"],
-        //       "sampleRows": [["29/04/2026","Slip/Fall","Open"]] }
-        //   ]
-        // }
-        // Returns: {
-        //   "executiveSummary": "...",
-        //   "descriptions": { "Widget Title": { "description": "...", "layout": "right|left|bottom|full" } }
-        // }
         // ──────────────────────────────────────────────────────────────────────
         [HttpPost("insights")]
         public async Task<IActionResult> Insights([FromBody] GenerateReportInsightsRequest request)
@@ -72,5 +71,54 @@ namespace DashboardAI.API.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // POST /api/report/send-email
+        // Body: {
+        //   "storeId": 5, "userId": 123,
+        //   "userIds": [1,2], "divisionIds": [], "departmentIds": [], "roleIds": [],
+        //   "subject": "Monthly WHS Report",
+        //   "message": "Please find the report attached.",
+        //   "reportHtml": "<html>...</html>"
+        // }
+        // Returns: { "sent": 3, "recipients": ["a@b.com", ...] }
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpPost("send-email")]
+        public async Task<IActionResult> SendEmail([FromBody] SendReportEmailRequest request)
+        {
+            if (request == null)
+                return BadRequest(new { error = "Request body is required." });
+
+            var hasRecipients = (request.UserIds?.Count       > 0) ||
+                                (request.DivisionIds?.Count   > 0) ||
+                                (request.DepartmentIds?.Count > 0) ||
+                                (request.RoleIds?.Count       > 0);
+
+            if (!hasRecipients)
+                return BadRequest(new { error = "At least one recipient (user, division, department, or role) is required." });
+
+            try
+            {
+                var result = await _sendReportService.SendAsync(new SendReportRequest
+                {
+                    StoreId       = request.StoreId,
+                    UserId        = request.UserId,
+                    UserIds       = request.UserIds       ?? new List<int>(),
+                    DivisionIds   = request.DivisionIds   ?? new List<int>(),
+                    DepartmentIds = request.DepartmentIds ?? new List<int>(),
+                    RoleIds       = request.RoleIds       ?? new List<int>(),
+                    Subject       = request.Subject,
+                    Message       = request.Message,
+                    ReportHtml    = request.ReportHtml
+                });
+
+                return Ok(new { sent = result.Sent, recipients = result.Recipients });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
     }
 }
+

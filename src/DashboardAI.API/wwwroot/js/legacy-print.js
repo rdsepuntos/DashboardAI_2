@@ -314,14 +314,16 @@
             // ── Send-report API context ────────────────────────────────────────────────
             const srStoreId = (window.SESSION && window.SESSION.storeId) || _md.StoreID || 0;
             const srUserId  = (window.SESSION && window.SESSION.userId)  || _md.MemberID || 0;
-            let srAshxBase, srAsmxBase;
+            let srAshxBase, srAsmxBase, srSendUrl;
             try {
                 const _u = new URL(CONFIG.aiApiUrl);
                 srAshxBase = `${_u.protocol}//${_u.host}/App/NetServices`;
                 srAsmxBase = `${_u.protocol}//${_u.host}/NetServices/POSTDynamicChecklist.asmx`;
+                srSendUrl  = `${_u.protocol}//${_u.host}${_u.pathname.replace(/\/api\/.*$/, '')}/api/report/send-email`;
             } catch (_) {
                 srAshxBase = '/App/NetServices';
                 srAsmxBase = '/NetServices/POSTDynamicChecklist.asmx';
+                srSendUrl  = '/api/report/send-email';
             }
             var printTitle = CONFIG.reportTitle || document.title || 'WHS Dashboard Report';
             printTitle = $('#dashboardTitle span').html();
@@ -912,6 +914,7 @@ var SR_STORE_ID  = ${srStoreId || 0};
 var SR_USER_ID   = ${srUserId  || 0};
 var SR_ASHX_BASE = ${JSON.stringify(srAshxBase)};
 var SR_ASMX_BASE = ${JSON.stringify(srAsmxBase)};
+var SR_SEND_URL  = ${JSON.stringify(srSendUrl)};
 // ── State ────────────────────────────────────────────────────
 var srSel    = { users:{}, division:{}, department:{}, role:{} };
 var srTotal  = { users:0, division:0, department:0, role:0 };
@@ -950,7 +953,7 @@ function srLoadDivisions() {
       var list = document.getElementById('sr-division-list');
       if (!items.length) { list.innerHTML = '<div class="sr-empty">No divisions found</div>'; srUpdateSelCount('division'); return; }
       list.innerHTML = items.map(function(x){
-        return '<div class="sr-item" data-group="division" data-id="'+x.IDNo+'" data-label="'+srEsc(x.RowDescription)+'" onclick="srToggle(this,\'division\')" >'
+        return '<div class="sr-item" data-group="division" data-id="'+x.IDNo+'" data-label="'+srEsc(x.RowDescription)+'" onclick="srToggle(this,\\'division\\')" >'
           + '<div class="sr-item-cb"></div>'
           + '<div class="sr-item-label">'+srEsc(x.RowDescription)+'</div>'
           + '</div>';
@@ -971,10 +974,10 @@ function srLoadDepartments() {
       var list = document.getElementById('sr-department-list');
       if (!items.length) { list.innerHTML = '<div class="sr-empty">No departments found</div>'; srUpdateSelCount('department'); return; }
       list.innerHTML = items.map(function(x){
-        return '<div class="sr-item" data-group="department" data-id="'+x.IDNo+'" data-label="'+srEsc(x.RowDescription)+'" onclick="srToggle(this,\'department\')">'
+        return '<div class="sr-item" data-group="department" data-id="'+x.IDNo+'" data-label="'+srEsc(x.RowDescription)+'" onclick="srToggle(this,\\'department\\')">'  
           + '<div class="sr-item-cb"></div>'
           + '<div class="sr-item-label">'+srEsc(x.RowDescription)+'</div>'
-          + '</div>';
+          + '</div>'
       }).join('');
       srUpdateSelCount('department');
     })
@@ -1006,7 +1009,7 @@ function srSearchUsers(query, tab) {
       list.innerHTML = records.map(function(r, idx){
         var initials = (r.RowDescription || '?').split(' ').slice(0,2).map(function(w){ return w[0]||''; }).join('').toUpperCase();
         var col = colors[idx % colors.length];
-        return '<div class="sr-item" data-group="'+tab+'" data-id="'+r.IDNo+'" data-label="'+srEsc(r.RowDescription)+'" onclick="srToggle(this,\''+tab+'\')" >'
+        return '<div class="sr-item" data-group="'+tab+'" data-id="'+r.IDNo+'" data-label="'+srEsc(r.RowDescription)+'" onclick="srToggle(this,\\''+tab+'\\')"> '
           + '<div class="sr-item-cb"></div>'
           + '<div class="sr-item-av '+(col||'')+'">'+initials+'</div>'
           + '<div class="sr-item-label">'+srEsc(r.RowDescription)+'</div>'
@@ -1090,21 +1093,49 @@ function srRemoveChip(group, id) {
   if (el) el.classList.remove('selected');
   srUpdateUI(group);
 }
-// ── Send (stub) ──────────────────────────────────────────────
+// ── Send ─────────────────────────────────────────────────────
 function srHandleSend() {
   var btn = document.getElementById('sr-send-btn');
   btn.disabled = true;
   btn.innerHTML = '<i class="ph ph-circle-notch ph-spin"></i>\u00a0 Sending\u2026';
-  setTimeout(function(){
-    btn.innerHTML = '<i class="ph ph-check"></i>\u00a0 Sent!';
+
+  var payload = {
+    storeId:       SR_STORE_ID,
+    userId:        SR_USER_ID,
+    userIds:       Object.keys(srSel.users).map(Number),
+    divisionIds:   Object.keys(srSel.division).map(Number),
+    departmentIds: Object.keys(srSel.department).map(Number),
+    roleIds:       Object.keys(srSel.role).map(Number),
+    subject:       document.getElementById('sr-subject').value,
+    message:       document.getElementById('sr-message').value,
+    reportHtml:    document.documentElement.outerHTML
+  };
+
+  fetch(SR_SEND_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload)
+  })
+  .then(function(r) { return r.ok ? r.json() : r.json().then(function(e){ throw new Error(e.error || 'Send failed'); }); })
+  .then(function(j) {
+    btn.innerHTML = '<i class="ph ph-check"></i>\u00a0 Sent to ' + j.sent + ' recipient' + (j.sent === 1 ? '' : 's') + '!';
     btn.style.background = '#16a34a';
     setTimeout(function(){
       srClose();
       btn.innerHTML = '<i class="ph ph-paper-plane-tilt"></i>\u00a0 Send Report';
       btn.style.background = '';
       btn.disabled = false;
-    }, 1400);
-  }, 1600);
+    }, 2000);
+  })
+  .catch(function(e) {
+    btn.innerHTML = '<i class="ph ph-warning"></i>\u00a0 Error: ' + e.message;
+    btn.style.background = '#dc2626';
+    setTimeout(function(){
+      btn.innerHTML = '<i class="ph ph-paper-plane-tilt"></i>\u00a0 Send Report';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 3000);
+  });
 }
 // ── HTML escape ──────────────────────────────────────────────
 function srEsc(s) {

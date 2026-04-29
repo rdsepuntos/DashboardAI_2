@@ -54,6 +54,15 @@ namespace DashboardAI.Infrastructure
                 chatPromptId,
                 chatPromptVersion));
 
+            services.AddScoped<IEmailService>(sp =>
+                new EmailService(configuration));
+
+            services.AddScoped<ISendReportService>(sp =>
+                new SendReportService(
+                    connString,
+                    sp.GetRequiredService<IEmailService>(),
+                    configuration));
+
             // ── Application Use Cases ─────────────────────────────────────────
             services.AddScoped<GenerateDashboardHandler>();
             services.AddScoped<SendChatMessageHandler>();
