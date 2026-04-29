@@ -514,13 +514,13 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .cover-dots span:not(:first-child){opacity:.35}
 
-/* ── Running header (print only) ───────────────────────── */
+/* ── Running header (all pages) ────────────────────────── */
 .run-header{
-  display:none;align-items:center;justify-content:space-between;
-  padding:10px 28px;background:#f8fafc;border-bottom:1px solid var(--border);flex-shrink:0
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 28px;background:var(--blue);border-bottom:1px solid var(--border);flex-shrink:0
 }
-.run-header .rh-title{font-size:8px;font-weight:700;color:var(--blue);letter-spacing:.06em;text-transform:uppercase}
-.run-header .rh-date{font-size:8px;color:var(--mid)}
+.run-header .rh-title{font-size:8px;font-weight:700;color:#fff;letter-spacing:.06em;text-transform:uppercase}
+.run-header .rh-date{font-size:8px;color:rgba(255,255,255,.7)}
 
 /* ── Cards grid ─────────────────────────────────────────── */
 .cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 28px 20px}
@@ -610,7 +610,7 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .data-table tbody tr{page-break-inside:avoid;break-inside:avoid}
   .table-insight{page-break-inside:avoid;break-inside:avoid}
-  .run-header{display:flex !important}
+  .run-header{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style>
 </head>
