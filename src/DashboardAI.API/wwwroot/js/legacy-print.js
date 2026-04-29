@@ -195,15 +195,19 @@
       const printDate  = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' });
       const printTitle = CONFIG.reportTitle || document.title || 'WHS Dashboard Report';
 
-      // ── Brand colour — read from #navbar-left background, fall back to default blue ──
-      const navbarEl   = document.querySelector('#navbar-left');
-      const navbarBg   = navbarEl ? getComputedStyle(navbarEl).backgroundColor : '';
+      // ── Brand colour — prefer __primaryColor.TertiaryColor, fall back to #navbar-left, then default blue ──
       const toHex = rgb => {
+        if (!rgb) return null;
+        // Already a hex value
+        if (/^#[0-9a-f]{3,6}$/i.test(rgb.trim())) return rgb.trim();
         const m = rgb.match(/\d+/g);
         if (!m || m.length < 3) return null;
         return '#' + m.slice(0, 3).map(n => parseInt(n).toString(16).padStart(2, '0')).join('');
       };
-      const brandColor = toHex(navbarBg) || '#3B98F1';
+      const palettColor = (window.__primaryColor && window.__primaryColor.TertiaryColor) || '';
+      const navbarEl    = document.querySelector('#navbar-left');
+      const navbarBg    = navbarEl ? getComputedStyle(navbarEl).backgroundColor : '';
+      const brandColor  = toHex(palettColor) || toHex(navbarBg) || '#3B98F1';
       const hexToRgb   = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
       const [br, bg, bb] = hexToRgb(brandColor);
       const brandLt    = `rgb(${Math.round(br * .15 + 255 * .85)},${Math.round(bg * .15 + 255 * .85)},${Math.round(bb * .15 + 255 * .85)})`;
@@ -254,7 +258,7 @@
         setProg('Generating AI insights…', 8);
         const allForDesc = [
           ...countItems.map(i => {
-            const valEl = i.el.querySelector('.progress-value .h2 div, .progress-value .h2, .h2 div');
+            const valEl = i.el.querySelector('.progress-value .h2 div, .progress-value .h2, .h2 div, .dashboard-count div, .dashboard-count');
             return { title: i.title, type: 'count', chartType: '', currentValue: (valEl ? valEl.textContent : '').trim() };
           }),
           ...cardItems.map(i => ({ title: i.title, type: i.gridtype, chartType: '', currentValue: '' })),
@@ -264,10 +268,12 @@
       }
 
       // ── Build KPI mini strip from count widgets ───────────────────────────────
-      //    The numeric value lives in .progress-value .h2 div (the circular ring content)
+      //    Design A: .progress-value .h2 div  (circular ring variant)
+      //    Design B: .dashboard-count div     (large-number variant)
+      const COUNT_VAL_SEL = '.progress-value .h2 div, .progress-value .h2, .h2 div, .dashboard-count div, .dashboard-count';
       let kpiStripHtml = '';
       countItems.forEach((item, idx) => {
-        const valEl = item.el.querySelector('.progress-value .h2 div, .progress-value .h2, .h2 div');
+        const valEl = item.el.querySelector(COUNT_VAL_SEL);
         const val   = esc((valEl ? valEl.textContent : '').trim() || '—');
         const cc    = ACCENT_COLORS[idx % ACCENT_COLORS.length];
         kpiStripHtml += `<div class="kpi-mini${cc ? ' ' + cc : ''}">
@@ -442,7 +448,6 @@
           : '';
 
         tablePagesHtml += `<div class="page">
-  <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
   <div class="table-banner">
     <span class="tit">&#128203; ${esc(td.title)}</span>
     ${td.rows.length ? `<span class="cnt">${td.rows.length} records &middot; ${printDate}</span>` : ''}
@@ -513,14 +518,6 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .cover-dots{display:flex;gap:8px;margin-top:6px}
 .cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .cover-dots span:not(:first-child){opacity:.35}
-
-/* ── Running header (all pages) ────────────────────────── */
-.run-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 28px;background:var(--blue);border-bottom:1px solid var(--border);flex-shrink:0
-}
-.run-header .rh-title{font-size:8px;font-weight:700;color:#fff;letter-spacing:.06em;text-transform:uppercase}
-.run-header .rh-date{font-size:8px;color:rgba(255,255,255,.7)}
 
 /* ── Cards grid ─────────────────────────────────────────── */
 .cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 28px 20px}
@@ -610,7 +607,6 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
   .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .data-table tbody tr{page-break-inside:avoid;break-inside:avoid}
   .table-insight{page-break-inside:avoid;break-inside:avoid}
-  .run-header{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style>
 </head>
@@ -654,7 +650,10 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 
 <!-- ── Dashboard charts page ─────────────────────────────────────────── -->
 <div class="page">
-  <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
+  <div class="table-banner">
+    <span class="tit">${esc(printTitle)}</span>
+    <span class="cnt">${printDate}</span>
+  </div>
   ${countItems.length ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${Math.min(countItems.length,4)},1fr)">${kpiStripHtml}</div>` : ''}
   <div class="cards-grid">
     ${cardsHtml}
