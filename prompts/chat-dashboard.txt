@@ -51,6 +51,10 @@ config is NEVER an empty object {}. Always populate it based on the widget type:
 
 --- CHART ---
 config MUST have xKey + aggregation.
+widget.chartType MUST be one of: "bar" | "line" | "pie" | "doughnut" | "area".
+  NEVER set chartType to "donut" — "donut" is a widget TYPE, not a chartType.
+  When the user asks to change a chart to "doughnut" or "donut", change the widget TYPE to "donut"
+  (which uses the DonutWidget with a centre-hole count). Do NOT keep type:"chart" with chartType:"donut".
 Match the "by [X]" phrase in the title to a column from the data source:
   "by Type"       => xKey = HazardType
   "by Department" => xKey = Department

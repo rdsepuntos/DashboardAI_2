@@ -150,7 +150,9 @@ const ChartWidget = (() => {
     const canvas = el.querySelector('canvas');
     const ctx    = canvas.getContext('2d');
 
-    const isPie  = chartType === 'pie' || chartType === 'doughnut';
+    // 'donut' is a widget type alias — map it to Chart.js 'doughnut' if it leaks into chartType
+    const isDoughnut = chartType === 'doughnut' || chartType === 'donut';
+    const isPie  = isDoughnut || chartType === 'pie';
     const isArea = chartType === 'area';
 
     const dataset = {
@@ -165,7 +167,7 @@ const ChartWidget = (() => {
     };
 
     _instances[widget.id] = new Chart(ctx, {
-      type: isPie ? 'pie' : (isArea ? 'line' : chartType),
+      type: isDoughnut ? 'doughnut' : (isPie ? 'pie' : (isArea ? 'line' : chartType)),
       data:    { labels, datasets: [dataset] },
       options: {
         responsive:          true,
