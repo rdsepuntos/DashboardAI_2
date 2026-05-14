@@ -12,10 +12,10 @@ const CONFIG = {
     userId: _jmember.MemberID || 20707,
     firstName: _jmember.FirstName || 'User',
     userName: _jmember.UserName || 'User',
-    elevenlabsApiKey: '',
+    elevenlabsApiKey: 'sk_7f1831767c31a0eb6a44da85883cdeede76ef428c30374c8',
     elevenlabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // Default voice (Sarah)
-    openaiApiKey: '',
-    googleMapsApiKey: '', // Google Maps API key for location fields,
+    openaiApiKey: 'REMOVED_OPENAI_KEY',
+    googleMapsApiKey: 'AIzaSyDx17vZ4ZTrcYxxbRds4HDOv3x5vG5d7Nk', // Google Maps API key for location fields,
     // Known profile facts from localStorage — sent with every message so AI never asks for things it already knows
     userProfile: {
         FullName:      [_jmember.FirstName, _jmember.Surname].filter(Boolean).join(' ') || null,
@@ -28,6 +28,20 @@ const CONFIG = {
     }
 };
 
+console.log('✅ chat.js loaded successfully - CONFIG:', CONFIG);
+console.log('🔍 Checking for openHistoryForm function:', typeof openHistoryForm);
+
+// Global click handler to log ALL button clicks
+document.addEventListener('click', (e) => {
+    if (e.target.tagName === 'BUTTON') {
+        console.log('🖱️  BUTTON CLICKED:', {
+            text: e.target.textContent,
+            class: e.target.className,
+            onclick: e.target.getAttribute('onclick')
+        });
+    }
+});
+
 // State
 let state = {
     sessionStarted: false,
@@ -36,13 +50,17 @@ let state = {
     templateName: '',
     moduleName: '',
     conversationHistory: [],
+    displayMessages: [],          // every {role,content} shown in the DOM — source of truth for save/restore
     extractedFieldsMap: new Map(),
     completionPercentage: 0,
     initialMessage: '',
     awaitingTemplateSelection: false,
     availableTemplates: [],
+    additionalTemplateChoices: [],
     currentFieldID: null,        // Current field being asked
     currentFieldType: null,      // e.g., "10013" for file upload
+    currentFieldDynamicFilter: null, // DynamicFilterCondn JSON for 10020/10037 dataset fields
+    currentSection: null,        // Current section/group being collected
     lastMapData: null,           // Last confirmed map data (for Yes/No confirmations)
     voiceMode: false,
     sttEngine: 'vad',  // 'webspeech' | 'vad'
@@ -56,7 +74,36 @@ let state = {
     sessionCompleted: false, // true once the session has been formally completed
     sessionCost: { totalUSD: 0 }, // accumulated AI spend
     smartFillTriggered: false, // true once Smart Fill has run for this session
-    _initialMessageBubbleShown: false // true when dashboard-intent path already added the user bubble
+    _initialMessageBubbleShown: false, // true when dashboard-intent path already added the user bubble
+    chatName: '',              // user-provided name for this session
+    awaitingChatName: false,   // true while waiting for user to confirm/type chat name
+    _pendingSessionData: null, // holds first startIntelligentSession response while naming
+    _chatCreatedAt: null,      // ISO timestamp when session was named/started
+    _replayMode: false,        // true when rendering a saved transcript (suppresses TTS/saving)
+    _serverMarkedComplete: false, // true once API indicates no more questions (even if pct < 100)
+    totalFieldCount: 0,        // askable fields count from server (dynamic, excludes headings/auto/unmet conditionals)
+    answeredFieldCount: 0,     // answered askable fields count from server
+    templateTypeId: null,      // TemplateTypeID from server — used to build correct Page= redirect URL
+    regTypeId: null,           // RegTypeID (module ID) — used for header combo lookups
+    pageId: null,              // PageId from TEMPLATE_TYPE_PAGE_MAP — drives GetDetailProperties
+    _headerData: null,         // collected header field values {fieldControlId: {value, displayText}}
+    _headerFields: null,       // header field schema from GetDetailProperties
+    _hdrAiQuestions: {},       // AI-rephrased questions keyed by FieldControlID
+    _collectingHeaderDetails: false, // true while header details wizard is active
+    _headerDetailsReadyForChecklist: false, // true only when details flow has fully completed/been intentionally skipped
+    _hdrLocTypeId: 4,          // currently selected location type (for location picker)
+    _hdrLocTypeName: 'Location', // display name for selected loc type
+    awaitingHeaderField: false, // true while waiting for user input during header collection
+    _headerFieldCallback: null, // callback(value, displayText, isSkip) for current header field
+    currentFieldRequired: true, // false when the next checklist field is optional (skip chip shown)
+    lastSuggestedQuestions: [], // most recent suggestion pills shown for a field
+    lastSuggestionFieldId: null, // fieldID associated with lastSuggestedQuestions
+    _chemicalMode: false,          // true when chemical SDS mode is locked
+    _policyMode: false,            // true when WHS policy mode is locked
+    _hazardMode: false,            // true when WHS hazard report mode is locked
+    chatConfirmedFieldIds: []  // field IDs explicitly answered by the user during THIS chat session
+                               // (not pre-filled defaults from SP); passed to the server on every call
+                               // so the AI knows which fields are truly answered vs need confirmation
 };
 
 // Voice APIs
@@ -104,6 +151,578 @@ function updateCostDisplay() {
     if (el) el.textContent = `$${state.sessionCost.totalUSD.toFixed(4)}`;
 }
 
+// ── Chemical mode helpers ────────────────────────────────────────────────────
+function enterChemicalMode() {
+    state._chemicalMode = true;
+    const banner = document.getElementById('chem-mode-banner');
+    if (banner) banner.classList.add('active');
+}
+
+function exitChemicalMode() {
+    state._chemicalMode = false;
+    const banner = document.getElementById('chem-mode-banner');
+    if (banner) banner.classList.remove('active');
+    if (typeof resetChemicalChatMemory === 'function') resetChemicalChatMemory();
+    addMessage('assistant', 'Chemical SDS mode ended. How else can I help you?');
+    scrollToBottom();
+}
+
+// ── Policy mode helpers ───────────────────────────────────────────────────────
+function enterPolicyMode() {
+    state._policyMode = true;
+    const banner = document.getElementById('policy-mode-banner');
+    if (banner) banner.classList.add('active');
+}
+
+function exitPolicyMode() {
+    state._policyMode = false;
+    const banner = document.getElementById('policy-mode-banner');
+    if (banner) banner.classList.remove('active');
+    if (typeof resetPolicyChatMemory === 'function') resetPolicyChatMemory();
+    addMessage('assistant', 'Policy mode ended. How else can I help you?');
+    scrollToBottom();
+}
+
+// ── Hazard mode helpers ───────────────────────────────────────────────────────
+function enterHazardMode() {
+    state._hazardMode = true;
+    const banner = document.getElementById('hazard-mode-banner');
+    if (banner) banner.classList.add('active');
+}
+
+function exitHazardMode() {
+    state._hazardMode = false;
+    const banner = document.getElementById('hazard-mode-banner');
+    if (banner) banner.classList.remove('active');
+    if (typeof resetHazardChatMemory === 'function') resetHazardChatMemory();
+    addMessage('assistant', 'Hazard report mode ended. How else can I help you?');
+    scrollToBottom();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TRANSCRIPT & SIDEBAR
+// ═══════════════════════════════════════════════════════════
+
+function getTranscriptKey(regOthId) {
+    return `whs_transcript_${CONFIG.userId}_${regOthId}`;
+}
+
+function getChatIndexKey() {
+    return `whs_chat_index_${CONFIG.userId}`;
+}
+
+function getHeaderDetailsDoneKey(regOthId) {
+    return `whs_header_done_${CONFIG.userId}_${regOthId}`;
+}
+
+function hasCompletedHeaderDetails(regOthId) {
+    if (!regOthId) return false;
+    return localStorage.getItem(getHeaderDetailsDoneKey(regOthId)) === '1';
+}
+
+function markHeaderDetailsCompleted(regOthId) {
+    if (!regOthId) return;
+    localStorage.setItem(getHeaderDetailsDoneKey(regOthId), '1');
+}
+
+/** Save the current conversation to localStorage AND to the database */
+function saveTranscript() {
+    if (!state.regOthId || state._replayMode) return;
+    const transcript = {
+        regOthId:            state.regOthId,
+        regTypeId:           state.regTypeId || null,  // SAVE regTypeId to localStorage
+        templateTypeId:      state.templateTypeId || null,
+        pageId:              state.pageId || null,
+        chatName:            state.chatName || state.templateName || 'Untitled Session',
+        templateName:        state.templateName,
+        internalNo:          state.internalNo,
+        messages:            state.displayMessages.length > 0
+                                 ? state.displayMessages
+                                 : state.conversationHistory.map(m => ({ role: m.role, content: m.content })),
+        createdAt:           state._chatCreatedAt || new Date().toISOString(),
+        isComplete:          state.sessionCompleted,
+        completionPercentage: state.completionPercentage || 0,
+        totalFieldCount:     state.totalFieldCount || 0,
+        answeredFieldCount:  state.answeredFieldCount || 0,
+        isDashboard:         state._isDashboardSession || false,
+        headerData:          state._headerData || null,
+        headerDetailsCompleted: hasCompletedHeaderDetails(state.regOthId)
+    };
+    _updateSidebarItem(transcript);
+    renderSidebarChats();
+    // Dashboard and form sessions both go to the DB.
+    // Dashboards use IsDashboard=true; the backend handles them via TranscriptID.
+    _saveTranscriptToDb(transcript);
+}
+
+// ── chatConfirmedFieldIds helpers ───────────────────────────────────────────
+/** Load confirmed field IDs for a session from localStorage. */
+function loadConfirmedFieldIds(regOthId) {
+    try {
+        const raw = localStorage.getItem(`chatConfirmedFieldIds_${regOthId}`);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+/** Persist confirmed field IDs for a session to localStorage. */
+function saveConfirmedFieldIds(regOthId, ids) {
+    try {
+        localStorage.setItem(`chatConfirmedFieldIds_${regOthId}`, JSON.stringify(ids));
+    } catch { /* quota or private mode */ }
+}
+/** Add newly saved field IDs (from data.extractedFields) to the confirmed set and persist. */
+function markFieldsConfirmed(extractedFields) {
+    if (!state.regOthId || !extractedFields || extractedFields.length === 0) return;
+    let changed = false;
+    extractedFields.forEach(f => {
+        const id = f.fieldID ?? f.fieldId;
+        if (id && !state.chatConfirmedFieldIds.includes(id)) {
+            state.chatConfirmedFieldIds.push(id);
+            changed = true;
+        }
+    });
+    if (changed) saveConfirmedFieldIds(state.regOthId, state.chatConfirmedFieldIds);
+}
+
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Save a transcript to the database (upsert via POST /api/chat-transcript).
+ * Returns the parsed response JSON (or null on failure).
+ * For dashboard first-saves, the response includes transcriptID which the caller uses to update state.regOthId.
+ */
+async function _saveTranscriptToDb(transcript) {
+    try {
+        const answeredCount = transcript.answeredFieldCount > 0
+            ? transcript.answeredFieldCount
+            : transcript.totalFieldCount > 0
+                ? Math.round((transcript.completionPercentage / 100) * transcript.totalFieldCount)
+                : (state.filledFields ? state.filledFields.length : 0);
+
+        const res = await fetch(TRANSCRIPT_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                regOthID:             transcript.regOthId,
+                userID:               CONFIG.userId,
+                storeID:              CONFIG.storeId,
+                chatName:             transcript.chatName,
+                templateName:         transcript.templateName,
+                internalNo:           transcript.internalNo,
+                messagesJson:         JSON.stringify(transcript.messages),
+                isComplete:           transcript.isComplete,
+                completionPercentage: transcript.completionPercentage,
+                totalFieldCount:      transcript.totalFieldCount,
+                answeredFieldCount:   answeredCount,
+                createdAt:            transcript.createdAt,
+                isDashboard:          transcript.isDashboard || false
+            })
+        });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch(e) {
+        console.warn('[Transcript] DB save failed:', e);
+        return null;
+    }
+}
+
+/**
+ * Load transcript index from the API and re-render sidebar.
+ * Called once on page load so the sidebar reflects DB state.
+ */
+async function _loadSidebarFromDb() {
+    try {
+        const url = `${TRANSCRIPT_API_URL}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success || !data.transcripts) return;
+
+        _sidebarItems = data.transcripts.map(t => ({
+            regOthId:            t.regOthID,
+            regTypeId:           t.regTypeID || t.regTypeId || t.RegTypeID || 0,
+            chatName:            t.chatName,
+            templateName:        t.templateName,
+            internalNo:          t.internalNo,
+            createdAt:           t.createdAt,
+            isComplete:          t.isComplete,
+            completionPercentage: t.completionPercentage,
+            totalFieldCount:     t.totalFieldCount,
+            isDashboard:         t.isDashboard || false
+        }));
+        renderSidebarChats();
+    } catch(e) {
+        console.warn('[Transcript] _loadSidebarFromDb failed:', e);
+    }
+}
+
+/**
+ * Load a full transcript from the DB and update the localStorage cache.
+ * Returns the transcript object { messages, completionPercentage, … }
+ * or null on failure (caller should fall back to localStorage).
+ */
+async function _loadTranscriptFromDb(regOthId) {
+    try {
+        const url = `${TRANSCRIPT_API_URL}/${regOthId}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data.success) return null;
+
+        let messages = [];
+        try { messages = JSON.parse(data.messagesJson || '[]'); } catch(e) {}
+
+        const dbTemplateTypeId = Number(data.templateTypeID || data.TemplateTypeID || data.templateTypeId || 0) || null;
+        const dbPageId = Number(data.pageId || data.PageId || data.pageID || data.PageID || 0) || null;
+
+        const transcript = {
+            regOthId:            data.regOthID,
+            regTypeId:           data.regTypeID || data.regTypeId || data.RegTypeID || 0,
+            templateTypeId:      dbTemplateTypeId || null,
+            pageId:              dbPageId || null,
+            chatName:            data.chatName,
+            templateName:        data.templateName,
+            internalNo:          data.internalNo,
+            messages,
+            createdAt:           data.createdAt,
+            isComplete:          data.isComplete,
+            completionPercentage: data.completionPercentage,
+            totalFieldCount:     data.totalFieldCount,
+            headerData:          null,
+            headerDetailsCompleted: false
+        };
+
+        return transcript;
+    } catch(e) {
+        console.warn('[Transcript] _loadTranscriptFromDb failed:', e);
+        return null;
+    }
+}
+
+function _updateSidebarItem(transcript) {
+    const entry = {
+        regOthId:            transcript.regOthId,
+        chatName:            transcript.chatName,
+        templateName:        transcript.templateName,
+        internalNo:          transcript.internalNo,
+        createdAt:           transcript.createdAt,
+        isComplete:          transcript.isComplete,
+        completionPercentage: transcript.completionPercentage,
+        isDashboard:         transcript.isDashboard || false
+    };
+    const i = _sidebarItems.findIndex(x => x.regOthId === transcript.regOthId);
+    if (i >= 0) _sidebarItems[i] = entry;
+    else _sidebarItems.unshift(entry);
+}
+
+function _markSessionCompleteLocally(regOthId) {
+    if (!regOthId) return;
+
+    const i = _sidebarItems.findIndex(x => String(x.regOthId) === String(regOthId));
+    if (i >= 0) {
+        _sidebarItems[i].isComplete = true;
+        _sidebarItems[i].completionPercentage = Math.max(100, Number(_sidebarItems[i].completionPercentage || 0));
+    }
+
+    if (Array.isArray(_historyState.items) && _historyState.items.length > 0) {
+        let changed = false;
+        _historyState.items.forEach(item => {
+            const itemId = item.regOthID || item.RegOthID;
+            if (String(itemId) === String(regOthId)) {
+                item.isInProgress = false;
+                item.IsInProgress = false;
+                changed = true;
+            }
+        });
+        if (changed) renderHistoryItems(_historyState.items);
+    }
+
+    renderSidebarChats();
+}
+
+function loadChatIndex() {
+    return _sidebarItems;
+}
+
+function loadTranscript(regOthId) {
+    return null; // Always load from API via _loadTranscriptFromDb
+}
+
+/** Render sidebar chat list from localStorage index */
+function renderSidebarChats(filterText = '') {
+    const listEl = document.getElementById('sidebarChatsList');
+    if (!listEl) return;
+
+    let chats = loadChatIndex();
+    if (filterText) {
+        const q = filterText.toLowerCase();
+        chats = chats.filter(c =>
+            (c.chatName || '').toLowerCase().includes(q) ||
+            (c.templateName || '').toLowerCase().includes(q)
+        );
+    }
+
+    if (chats.length === 0) {
+        listEl.innerHTML = '<div class="sidebar-empty">' + (filterText ? 'No matching chats' : 'No saved chats yet') + '</div>';
+        return;
+    }
+
+    // Group by date bucket
+    const today = _dateLabel(new Date());
+    const yesterday = _dateLabel(new Date(Date.now() - 86400000));
+    const groups = {};
+    chats.forEach(chat => {
+        const label = _chatDateGroup(chat.createdAt);
+        if (!groups[label]) groups[label] = [];
+        groups[label].push(chat);
+    });
+
+    let html = '';
+    for (const [label, items] of Object.entries(groups)) {
+        html += `<div class="sidebar-section-label">${label}</div>`;
+        items.forEach(chat => {
+            const isActive = String(chat.regOthId) === String(state.regOthId);
+            const isCompletedChat = !!chat.isComplete || Number(chat.completionPercentage || 0) >= 100;
+            const badgeClass = chat.isDashboard ? 'dashboard' : (isCompletedChat ? 'completed' : 'in-progress');
+            const badgeText  = chat.isDashboard ? 'Dashboard' : (isCompletedChat ? 'Done' : 'In Progress');
+            html += `
+                <div class="sidebar-chat-item ${isActive ? 'active' : ''}"
+                     onclick="openSavedChat(${chat.regOthId})" title="${escapeHtml(chat.chatName || chat.templateName || 'Untitled')}">
+                    <div class="sidebar-chat-name">${escapeHtml(chat.chatName || chat.templateName || 'Untitled')}</div>
+                    <div class="sidebar-chat-meta">
+                        <span class="sidebar-chat-badge ${badgeClass}">${badgeText}</span>
+                        <span>${_chatDateLabel(chat.createdAt)}</span>
+                    </div>
+                </div>`;
+        });
+    }
+    listEl.innerHTML = html;
+}
+
+function filterSidebarChats(val) {
+    renderSidebarChats(val);
+}
+
+function _dateLabel(d) {
+    return d.toISOString().substring(0, 10);
+}
+
+function _chatDateGroup(dateStr) {
+    if (!dateStr) return 'Earlier';
+    const d = new Date(dateStr);
+    const today = new Date();
+    const diffDays = Math.floor((today - d) / 86400000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return 'This Week';
+    if (diffDays < 30) return 'This Month';
+    return 'Earlier';
+}
+
+function _chatDateLabel(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const diffDays = Math.floor((Date.now() - d) / 86400000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' });
+}
+
+/** Open a saved chat from the sidebar */
+async function openSavedChat(regOthId) {
+    const chats = loadChatIndex();
+    const entry = chats.find(c => c.regOthId === regOthId);
+    if (!entry) return;
+
+    if (entry.isDashboard || regOthId < 0) {
+        // Chemical chat sessions are resumable despite using the dashboard ID scheme
+        if ((entry.chatName || '').startsWith('Chemical Chat') && typeof _resumeChemicalSession === 'function') {
+            _resumeChemicalSession(regOthId, entry);
+            return;
+        }
+        // Policy chat sessions are resumable despite using the dashboard ID scheme
+        if ((entry.chatName || '').startsWith('Policy Chat') && typeof _resumePolicySession === 'function') {
+            _resumePolicySession(regOthId, entry);
+            return;
+        }
+        // Hazard chat sessions are resumable despite using the dashboard ID scheme
+        if ((entry.chatName || '').startsWith('Hazard Chat') && typeof _resumeHazardSession === 'function') {
+            _resumeHazardSession(regOthId, entry);
+            return;
+        }
+        // Dashboard-only session — always read-only
+        _loadReadOnlyTranscript(regOthId, entry);
+    } else if (!entry.isComplete) {
+        // Resume the in-progress session via backend
+        await resumeSession(regOthId);
+        // Ensure chatName is set from the local index entry (server doesn't store it)
+        if (entry.chatName) {
+            state.chatName = entry.chatName;
+            // Re-render the link text now chatName is confirmed
+            const linkTextEl = document.getElementById('chatInlineProgressLinkText');
+            if (linkTextEl) linkTextEl.textContent = `View the ${entry.chatName}`;
+        }
+        state._chatCreatedAt = entry.createdAt;
+    } else {
+        // Load the full transcript as read-only
+        _loadReadOnlyTranscript(regOthId, entry);
+    }
+    renderSidebarChats();
+}
+
+function _loadReadOnlyTranscript(regOthId, entry) {
+    // Kick off DB load then render (async wrapper keeps caller-site simple)
+    _loadReadOnlyTranscriptAsync(regOthId, entry);
+}
+
+async function _loadReadOnlyTranscriptAsync(regOthId, entry) {
+    // Reset all mutable state without calling startNewSession (which clears localStorage)
+    if (state.voiceMode) stopVoiceMode();
+
+    state.sessionStarted   = true;
+    state.sessionCompleted = true;
+    state.regOthId         = regOthId;
+    state.internalNo       = entry.internalNo || '';
+    state.templateName     = entry.templateName || '';
+    state.chatName         = entry.chatName || entry.templateName || '';
+    state._chatCreatedAt   = entry.createdAt;
+    state._replayMode      = true;
+    state.conversationHistory = [];
+    state.displayMessages = [];
+    state.extractedFieldsMap.clear();
+    state.completionPercentage = 0;
+    state.awaitingChatName = false;
+    state._pendingSessionData = null;
+    state.awaitingTemplateSelection = false;
+    state.awaitingHeaderField = false;
+    state._headerFieldCallback = null;
+
+    // Restore progress widget — try DB first (handles both form and dashboard sessions)
+    const dbTranscript = await _loadTranscriptFromDb(regOthId);
+    let savedTranscript = dbTranscript || loadTranscript(regOthId);
+    // Restore regTypeId from saved transcript
+    if (savedTranscript && savedTranscript.regTypeId) {
+        state.regTypeId = savedTranscript.regTypeId;
+        console.log('✅ Restored state.regTypeId from savedTranscript:', state.regTypeId);
+    }
+    if (savedTranscript && savedTranscript.totalFieldCount) state.totalFieldCount = savedTranscript.totalFieldCount;
+    if (savedTranscript && savedTranscript.answeredFieldCount !== undefined) state.answeredFieldCount = savedTranscript.answeredFieldCount;
+    const roPct = savedTranscript?.completionPercentage > 0 ? savedTranscript.completionPercentage : 100;
+    const roWidget = document.getElementById('chatInlineProgress');
+    if (roWidget) {
+        state._replayMode = false; // temporarily lift so updateInlineChatProgress runs
+        updateInlineChatProgress(roPct);
+        state._replayMode = true;
+    }
+
+    // Reset UI
+    document.getElementById('messagesArea').innerHTML = '';
+    document.getElementById('messagesArea').classList.add('active');
+    document.getElementById('chatInputArea').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+    setChatInputState(true, 'This session is completed — read-only view.');
+
+    // Show read-only banner
+    const existing = document.getElementById('readonlyBanner');
+    if (existing) existing.remove();
+    const banner = document.createElement('div');
+    banner.id = 'readonlyBanner';
+    banner.className = 'readonly-banner';
+    banner.innerHTML = `<i class="ph-thin ph-lock-simple"></i> Read-only — this session is completed.
+        <button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:inherit;font-size:16px;">×</button>`;
+    document.querySelector('.main-content').insertBefore(banner, document.querySelector('.chat-container'));
+
+    // Update topbar title
+    setTopbarTitle(state.chatName || state.templateName || '');
+
+    // Render transcript messages — use already-loaded transcript (DB or localStorage)
+    const transcript = savedTranscript;
+    if (transcript && transcript.messages && transcript.messages.length > 0) {
+        transcript.messages
+            .filter(msg => !(msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.includes('typing-thinking-wrap')))
+            .filter(msg => !(msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.includes('sds-info-form')))
+            .forEach(msg => addMessage(msg.role, msg.content));
+    } else {
+        addMessage('assistant', `This is a completed session: **${entry.chatName || entry.templateName}**`);
+    }
+
+    // For dashboard sessions: extract the URL and reopen it in the parent frame
+    const isDash = entry.isDashboard || regOthId < 0;
+    if (isDash && transcript && transcript.messages) {
+        const dashMsg = transcript.messages.find(m =>
+            m.role === 'assistant' && m.content && m.content.includes('dashboardv2'));
+        if (dashMsg) {
+            const match = dashMsg.content.match(/\((https?:\/\/[^)]+)\)/);
+            if (match && typeof parent !== 'undefined' && parent.loadDashboardAI) {
+                parent.loadDashboardAI(match[1]);
+            }
+        }
+    }
+
+    // Show bottom action buttons
+    const messagesArea = document.getElementById('messagesArea');
+    const closingDiv = document.createElement('div');
+    closingDiv.className = 'message assistant';
+
+    if (isDash) {
+        // Dashboard session — offer to reopen dashboard or start new chat
+        const dashMsg2 = transcript && transcript.messages
+            ? transcript.messages.find(m => m.role === 'assistant' && m.content && m.content.includes('dashboardv2'))
+            : null;
+        const dashUrl = dashMsg2 ? (dashMsg2.content.match(/\((https?:\/\/[^)]+)\)/) || [])[1] : null;
+        closingDiv.innerHTML = `
+            <div class="message-icon"><i class="ph-thin ph-chart-bar" style="color:#6366f1"></i></div>
+            <div class="message-content">
+                <div style="font-weight:600;color:#6366f1;margin-bottom:8px;">Dashboard session</div>
+                <div class="suggestions row g-2 mt-2">
+                    ${dashUrl ? `<div class="col-12 col-sm-6"><button class="btn btn-primary w-100" onclick="if(parent.loadDashboardAI)parent.loadDashboardAI('${dashUrl}');else window.open('${dashUrl}','_blank')">
+                        <i class="ph-thin ph-arrow-counter-clockwise" style="margin-right:4px"></i>Reopen Dashboard
+                    </button></div>` : ''}
+                    <div class="col-12 col-sm-6"><button class="btn btn-outline-secondary w-100" onclick="newChatFromSidebar()">
+                        <i class="ph-thin ph-plus" style="margin-right:4px"></i>New Chat
+                    </button></div>
+                </div>
+            </div>`;
+    } else {
+        // Form session — offer to open form or start new chat
+        const formUrl = buildChecklistUrl(regOthId, state.templateName, state.moduleName);
+        closingDiv.innerHTML = `
+            <div class="message-icon"><i class="ph-thin ph-check-circle" style="color:#10b981"></i></div>
+            <div class="message-content">
+                <div style="font-weight:600;color:#059669;margin-bottom:8px;">Session completed</div>
+                <div class="suggestions row g-2 mt-2">
+                    <div class="col-12 col-sm-6"><button class="btn btn-primary w-100" onclick="window.open('${formUrl}','_blank')">
+                        <i class="ph-thin ph-arrow-square-out" style="margin-right:4px"></i>Open Form
+                    </button></div>
+                    <div class="col-12 col-sm-6"><button class="btn btn-outline-secondary w-100" onclick="newChatFromSidebar()">
+                        <i class="ph-thin ph-plus" style="margin-right:4px"></i>New Chat
+                    </button></div>
+                </div>
+            </div>`;
+    }
+    messagesArea.appendChild(closingDiv);
+    scrollToBottom();
+    state._replayMode = false;
+}
+
+/** Toggle the left sidebar open/closed */
+function toggleSidebar() {
+    const sidebar = document.getElementById('leftSidebar');
+    sidebar.classList.toggle('collapsed');
+}
+
+/** New chat button from sidebar */
+function newChatFromSidebar() {
+    // If there's an active session that isn't completed yet, confirm before wiping
+    if (state.sessionStarted && !state.sessionCompleted && state.conversationHistory.length > 0) {
+        const name = state.chatName || state.templateName || 'this session';
+        const confirmed = confirm(`You have an active session "${name}" in progress.\n\nAre you sure you want to start a new chat? Your progress is saved and you can resume it from the sidebar.`);
+        if (!confirmed) return;
+    }
+    startNewSession();
+    renderSidebarChats();
+}
+
 // Detect user's date format (MM/dd/yyyy vs dd/MM/yyyy)
 function getUserDateFormat() {
     try {
@@ -130,6 +749,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setGreeting();
     initializeQuill();
     initVoiceRecognition();
+
+    // Load sidebar chats from API
+    _loadSidebarFromDb();
 
     // Restore AI Memory confidence preference
     const savedConfidence = localStorage.getItem('memoryConfidence');
@@ -177,6 +799,56 @@ function saveMemoryConfidence(value) {
 function saveSmartFill(enabled) {
     localStorage.setItem('smartFill', enabled ? 'true' : 'false');
     applySmartFillStyle(enabled);
+}
+
+/** Set the topbar title text and toggle the edit button visibility. */
+function setTopbarTitle(name) {
+    const titleEl = document.getElementById('mainTopbarTitle');
+    const editBtn = document.getElementById('topbarEditBtn');
+    if (titleEl) {
+        titleEl.textContent = name || '';
+        titleEl.contentEditable = name ? 'plaintext-only' : 'false';
+    }
+    if (editBtn) editBtn.style.display = name ? 'flex' : 'none';
+}
+
+/** Focus the topbar title span and select all text for easy replacement. */
+function focusTopbarTitle() {
+    const el = document.getElementById('mainTopbarTitle');
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+}
+
+/** Save the topbar title after inline editing (called on blur). */
+function saveTopbarTitle() {
+    const el = document.getElementById('mainTopbarTitle');
+    if (!el) return;
+    const newName = el.textContent.trim();
+    if (!newName) {
+        el.textContent = state.chatName || state.templateName || 'Untitled Session';
+        return;
+    }
+    if (newName === state.chatName) return;
+    state.chatName = newName;
+    if (state.regOthId) {
+        fetch(`${CONFIG.apiUrl}/update-title`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                regOthID: state.regOthId,
+                storeID: CONFIG.storeId,
+                title: newName,
+                updatedByID: CONFIG.userId
+            })
+        }).catch(err => console.warn('Failed to update session title:', err));
+    }
+    saveTranscript();
+    renderSidebarChats();
 }
 
 function applySmartFillStyle(enabled) {
@@ -950,12 +1622,122 @@ function hideVoiceStatus() {
     statusDiv.classList.remove('show', 'listening', 'speaking');
 }
 
-function getFormUrl() {
-    if (!state.regOthId) return null;
-    // Check both the specific template name and the module name for 'incident'
-    const haystack = ((state.templateName || '') + ' ' + (state.moduleName || '')).toLowerCase();
+function getCurrentPageId() {
+    try {
+        return new URLSearchParams(window.location.search).get('Page') || '';
+    } catch {
+        return '';
+    }
+}
+
+function appendCurrentPageId(url) {
+    if (!url) return url;
+    const pageId = getCurrentPageId();
+    if (!pageId) return url;
+    if (/[?&]Page=/i.test(url)) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}Page=${encodeURIComponent(pageId)}`;
+}
+
+// TemplateTypeID → PageId lookup table (from ref_TemplateTypes / page=data.csv)
+// Only includes rows where PageId is known (non-null, non-zero)
+const TEMPLATE_TYPE_PAGE_MAP = {
+    121: 922, 122: 973, 128: 924, 129: 951, 130: 970, 131: 971, 132: 972,
+    143: 987, 145: 989, 146: 990, 147: 991, 148: 992, 149: 993, 150: 994,
+    614: 818, 1000: 974, 1001: 975,
+    1300: 1499, 1301: 1009, 1304: 1201, 1305: 1202, 1306: 1012, 1307: 1014,
+    1308: 871, 1309: 871, 1310: 871, 1311: 871, 1312: 871, 1313: 871,
+    1314: 871, 1315: 871, 1316: 871, 1317: 871, 1318: 871, 1319: 871,
+    1320: 871, 1321: 871, 1322: 871, 1323: 871, 1324: 871, 1325: 871,
+    1326: 871, 1327: 871, 1328: 871, 1329: 871, 1330: 871, 1331: 871,
+    1332: 871, 1333: 1054, 1334: 1060, 1335: 1061, 1337: 1064, 1338: 1066,
+    1339: 728, 1340: 871, 1341: 870, 1342: 731, 1343: 732
+};
+
+function buildChecklistUrl(regOthId, templateName = '', moduleName = '') {
+    if (!regOthId) return null;
+    const haystack = ((templateName || '') + ' ' + (moduleName || '')).toLowerCase();
     const g = haystack.includes('incident') ? 'INCIDENT' : '';
-    return `https://beta.whsmonitor.com.au/App/RiskAssessor/ChecklistV2.aspx?regothId=${state.regOthId}&IsEdit=1&g=${g}`;
+
+    // Append Page= from lookup table (preferred) or current URL
+    const pageId = state.templateTypeId && TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId]
+        ? TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId]
+        : getCurrentPageId();
+
+    const isComplete = state.sessionCompleted || Number(state.completionPercentage || 0) >= 100;
+    console.log('🏗️  buildChecklistUrl - state.regTypeId:', state.regTypeId, 'isComplete:', isComplete);
+    let url = isComplete
+        ? `https://beta.whsmonitor.com.au/App/Register/AddEditRegistOthV2.aspx?RegID=${encodeURIComponent(regOthId)}&gt=${encodeURIComponent(state.regTypeId || '')}`
+        : `https://beta.whsmonitor.com.au/App/RiskAssessor/ChecklistV2.aspx?regothId=${regOthId}&IsEdit=1&g=${g}&isBeta=1`;
+
+    if (pageId) url += `&Page=${encodeURIComponent(pageId)}`;
+    console.log('🏗️  buildChecklistUrl - Final URL:', url);
+    return url;
+}
+
+function buildCompleteUrl(regOthId, templateName = '', moduleName = '') {
+    if (!regOthId) return null;
+    const haystack = ((templateName || '') + ' ' + (moduleName || '')).toLowerCase();
+    const g = haystack.includes('incident') ? 'INCIDENT' : '';
+
+    let url = `https://beta.whsmonitor.com.au/App/RiskAssessor/Complete.aspx?rfid=${encodeURIComponent(regOthId)}&g=${encodeURIComponent(g)}`;
+
+    const pageId = getCurrentPageId() || state.pageId ||
+        (state.templateTypeId && TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId]
+            ? TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId]
+            : '');
+
+    if (pageId) url += `&Page=${encodeURIComponent(pageId)}`;
+    return url;
+}
+
+function getFormUrl() {
+    const url = buildChecklistUrl(state.regOthId, state.templateName, state.moduleName);
+    console.log('🔗 getFormUrl() called, state values:', { regOthId: state.regOthId, regTypeId: state.regTypeId, templateName: state.templateName });
+    console.log('🔗 Generated URL:', url);
+    return url;
+}
+
+async function registerOthHdrFinish() {
+    if (!state.regOthId) return null;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    try {
+        const response = await fetch(`${ASMX_BASE_URL}/RegisterOthHdrFinish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+                data: {
+                    RegOthId: state.regOthId,
+                    CreatedById: CONFIG.userId,
+                    CreatedByName: CONFIG.userProfile.FullName || CONFIG.userName || CONFIG.firstName
+                }
+            })
+        });
+
+        const text = await response.text();
+        let result = null;
+
+        try {
+            result = text ? JSON.parse(text) : null;
+        } catch {
+            result = text;
+        }
+
+        if (!response.ok) {
+            console.warn(`[Complete] RegisterOthHdrFinish failed (${response.status})`, result);
+            return null;
+        }
+
+        return result?.d ?? result;
+    } catch (error) {
+        console.warn('[Complete] RegisterOthHdrFinish skipped:', error);
+        return null;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 /**
@@ -1063,10 +1845,38 @@ async function checkAndHandleSuggestionsIntent(message) {
         const isIntent = intentData.choices?.[0]?.message?.content?.trim().toLowerCase() === 'yes';
         if (!isIntent) return false;
 
+        // Prefer current in-context options if available (better than generating generic AI suggestions)
+        const reusableSuggestions = Array.isArray(state.lastSuggestedQuestions)
+            ? state.lastSuggestedQuestions.filter(Boolean).slice(0, 8)
+            : [];
+        const sameFieldSuggestions = reusableSuggestions.length > 0
+            && String(state.lastSuggestionFieldId || '') === String(state.currentFieldID || '');
+
+        if (sameFieldSuggestions) {
+            addMessage('user', message);
+            addMessage('assistant', 'Here are the available options for this question:');
+            addSuggestions(reusableSuggestions);
+            if (state.voiceMode) speakText('Here are the available options for this question.');
+            return true;
+        }
+
         // Step 2 — generate contextual suggestions
         const recentHistory = state.conversationHistory.slice(-6)
             .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
             .join('\n');
+
+        const knownFieldFacts = Array.from(state.extractedFieldsMap.values())
+            .slice(-8)
+            .map(f => `${f.fieldName || f.fieldID || 'Field'}: ${f.extractedValue || f.value || ''}`)
+            .filter(Boolean)
+            .join('; ') || 'none yet';
+
+        const currentFieldContext = `Current field ID: ${state.currentFieldID || 'n/a'}; Type: ${state.currentFieldType || 'n/a'}; Required: ${state.currentFieldRequired === false ? 'no' : 'yes'}`;
+
+        const profileContext = Object.entries(CONFIG.userProfile || {})
+            .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('; ') || 'none';
 
         const ctrl2 = new AbortController();
         const t2 = setTimeout(() => ctrl2.abort(), 6000);
@@ -1084,10 +1894,15 @@ async function checkAndHandleSuggestionsIntent(message) {
                         role: 'system',
                         content: `You are a helpful assistant for a workplace health & safety app. ` +
                                  `The user is filling in a form called "${state.templateName || 'WHS form'}". ` +
+                                 `Use available context first (current field + known captured values) and avoid generic suggestions. ` +
+                                 `If clear options are implied by context, suggest those options directly. ` +
                                  `Based on the conversation below, suggest 3 short, specific things the user could say or answer next. ` +
                                  `Return ONLY a JSON array of 3 strings, no explanation. Example: ["Yes, I was injured", "No injuries occurred", "I need more information"]`
                     },
-                    { role: 'user', content: recentHistory }
+                    {
+                        role: 'user',
+                        content: `Conversation:\n${recentHistory}\n\n${currentFieldContext}\nKnown captured fields: ${knownFieldFacts}\nUser profile: ${profileContext}`
+                    }
                 ]
             })
         });
@@ -1110,35 +1925,9 @@ async function checkAndHandleSuggestionsIntent(message) {
 
         // Show as an AI message with pills
         addMessage('user', message);
-        const replyText = 'Here are some suggestions based on our conversation:';
-        const messagesArea = document.getElementById('messagesArea');
-
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message assistant';
-        const icon = document.createElement('div');
-        icon.className = 'message-icon';
-        icon.innerHTML = '<i class="ph-thin ph-chats-circle"></i>';
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
-        contentDiv.textContent = replyText;
-
-        const suggestionsDiv = document.createElement('div');
-        suggestionsDiv.className = 'suggestions';
-        suggestions.forEach(s => {
-            const pill = document.createElement('button');
-            pill.className = 'suggestion-pill';
-            // Display without brackets, but keep brackets in the value
-            pill.textContent = s.replace(/[\[\]]/g, '');
-            pill.onclick = () => selectSuggestion(s);
-            suggestionsDiv.appendChild(pill);
-        });
-        contentDiv.appendChild(suggestionsDiv);
-        messageDiv.appendChild(icon);
-        messageDiv.appendChild(contentDiv);
-        messagesArea.appendChild(messageDiv);
-        scrollToBottom();
-
-        if (state.voiceMode) speakText(replyText + ' ' + suggestions.join('. '));
+        addMessage('assistant', 'Here are some suggestions based on your current form context:');
+        addSuggestions(suggestions);
+        if (state.voiceMode) speakText('Here are some suggestions based on your current form context.');
 
         return true;
     } catch(e) {
@@ -1148,11 +1937,92 @@ async function checkAndHandleSuggestionsIntent(message) {
 }
 
 /**
+ * Executes the actual dashboard generation API call.
+ * Called either directly from checkAndHandleDashboardIntent (no match found)
+ * or from the "Create new" button after a duplicate suggestion is shown.
+ */
+async function _proceedCreateDashboard() {
+    const message = state._pendingDashboardMessage;
+    if (!message) return;
+    state._pendingDashboardMessage = null;
+
+    // Remove the choice-button row from the last assistant bubble
+    const lastBubble = document.querySelector('#messagesArea .message.assistant:last-of-type .suggestions');
+    if (lastBubble) lastBubble.remove();
+
+    showTypingIndicator(message);
+
+    const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
+    try {
+        const genRes = await fetch(dashBase + '/api/dashboard/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: message, storeId: CONFIG.storeId, userId: String(CONFIG.userId) })
+        });
+
+        removeTypingIndicator();
+
+        if (!genRes.ok) {
+            if (!state.sessionStarted) return;
+            const err = await genRes.json().catch(() => ({}));
+            addMessage('assistant', `Could not generate dashboard: ${err.error || 'Unknown error'}`);
+            return;
+        }
+
+        const result = await genRes.json();
+        const url = dashBase + result.redirectUrl;
+
+        addMessage('assistant', `✅ Dashboard created! [Click here to view it](${url})`);
+
+        if (!state.regOthId) {
+            // regOthId = 0 signals a brand-new dashboard — backend will INSERT and return TranscriptID
+            state.regOthId       = 0;
+            const generatedName  = await generateSessionName(message, 'Dashboard');
+            state.chatName       = state.chatName || generatedName;
+            state.templateName   = state.templateName || generatedName;
+            state._chatCreatedAt = state._chatCreatedAt || new Date().toISOString();
+            state.sessionStarted = true;
+        }
+        state._isDashboardSession = true;
+
+        // First save: await so we can capture the TranscriptID returned by the backend
+        const transcript = {
+            regOthId:            state.regOthId,   // 0 = new
+            chatName:            state.chatName,
+            templateName:        state.templateName,
+            internalNo:          state.internalNo || null,
+            messages:            state.displayMessages,
+            createdAt:           state._chatCreatedAt,
+            isComplete:          false,
+            completionPercentage: 0,
+            totalFieldCount:     0,
+            answeredFieldCount:  0,
+            isDashboard:         true
+        };
+        _updateSidebarItem(transcript);
+        renderSidebarChats();
+        const dbRes = await _saveTranscriptToDb(transcript);
+        if (dbRes && dbRes.transcriptID > 0) {
+            state.regOthId = -dbRes.transcriptID;  // negative = dashboard keyed on TranscriptID
+            _updateSidebarItem({ ...transcript, regOthId: state.regOthId });
+            renderSidebarChats();
+        }
+
+        state._initialMessageBubbleShown = false;
+        parent.loadDashboardAI(url);
+    } catch (err) {
+        removeTypingIndicator();
+        console.error('[_proceedCreateDashboard]', err);
+    }
+}
+
+/**
  * Uses OpenAI to decide if the user wants to create a dashboard or report.
  * If yes, calls the DashboardAI generate endpoint and shows a link to the result.
  * Returns true if handled so sendMessage can skip the normal pipeline.
  */
 async function checkAndHandleDashboardIntent(message) {
+    console.log('[Dashboard] checkAndHandleDashboardIntent called with:', message);
     if (!CONFIG.openaiApiKey) return false;
     try {
         const ctrl = new AbortController();
@@ -1184,45 +2054,251 @@ async function checkAndHandleDashboardIntent(message) {
         const answer = intentData.choices?.[0]?.message?.content?.trim().toLowerCase();
         if (answer !== 'yes') return false;
 
-        // Show user message then a typing indicator
-        addMessage('user', message);
-        state._initialMessageBubbleShown = true;
-        showTypingIndicator();
-
-        const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
-        const genRes = await fetch(dashBase + '/api/dashboard/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt:  message,
-                storeId: CONFIG.storeId,
-                userId:  String(CONFIG.userId)
-            })
-        });
-
-        removeTypingIndicator();
-
-        if (!genRes.ok) {
-            // If no session exists yet, fall through to the normal template-chat flow
-            // so the user's message still starts an intelligent session.
-            if (!state.sessionStarted) {
-                return false;
+        // Check if a similar dashboard already exists and offer to open it
+        const existingDashboards = _sidebarItems.filter(x => x.isDashboard);
+        if (existingDashboards.length > 0) {
+            try {
+                const nameList = existingDashboards
+                    .map((d, i) => `${i + 1}. ${d.chatName || d.templateName || 'Untitled Dashboard'}`)
+                    .join('\n');
+                const matchRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+                    signal: AbortSignal.timeout(4000),
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        max_tokens: 5,
+                        temperature: 0,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Dashboard matcher. Reply ONLY with the NUMBER of the best-matching dashboard ' +
+                                         'if the user request is clearly about the same topic as one of the listed dashboards. ' +
+                                         'Otherwise reply "0". Single number only, no other text.'
+                            },
+                            {
+                                role: 'user',
+                                content: `User request: "${message}"\n\nExisting dashboards:\n${nameList}\n\nMatch number (or 0):`
+                            }
+                        ]
+                    })
+                });
+                if (matchRes.ok) {
+                    const matchData = await matchRes.json();
+                    trackCost('gpt-4o-mini', matchData.usage);
+                    const matchIdx = parseInt((matchData.choices?.[0]?.message?.content || '0').trim(), 10) - 1;
+                    console.log('[Dashboard:Intent] AI match reply:', matchData.choices?.[0]?.message?.content, '→ matchIdx:', matchIdx);
+                    if (matchIdx >= 0 && matchIdx < existingDashboards.length) {
+                        const matched = existingDashboards[matchIdx];
+                        const matchedName = escapeHtml(matched.chatName || matched.templateName || 'Existing Dashboard');
+                        console.log('[Dashboard:Intent] AUTO-OPENING:', matchedName);
+                        addMessage('user', message);
+                        state._initialMessageBubbleShown = true;
+                        state._pendingDashboardMessage = message;
+                        addMessage('assistant',
+                            `<div>Opening <strong>${matchedName}</strong>&hellip;</div>` +
+                            `<div style="margin-top:8px">` +
+                            `<button class="btn btn-outline-secondary btn-sm" onclick="state._pendingDashboardMessage='${message.replace(/'/g, "\\'")}';\_proceedCreateDashboard()">` +
+                            `<i class="ph-thin ph-plus" style="margin-right:4px"></i>Create new dashboard instead</button>` +
+                            `</div>`
+                        );
+                        openSavedChat(matched.regOthId);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.warn('[DashboardIntent] similarity check failed, proceeding with create:', e);
             }
-            const err = await genRes.json().catch(() => ({}));
-            addMessage('assistant', `⚠ Could not generate dashboard: ${err.error || 'Unknown error'}`);
-            return true;
         }
 
-        const result = await genRes.json();
-        const url = dashBase + result.redirectUrl;
-
-        state._initialMessageBubbleShown = false; // reset so next message works correctly
-        parent.loadDashboardAI(url);
+        // No existing match — proceed straight to generation
+        addMessage('user', message);
+        state._initialMessageBubbleShown = true;
+        state._pendingDashboardMessage = message;
+        await _proceedCreateDashboard();
 
         return true;
     } catch (err) {
         if (err.name === 'AbortError') return false;
         console.error('[DashboardIntent]', err);
+        return false;
+    }
+}
+
+// =============================================================================
+// ACTION FUNCTIONS — called by chat-router.js ai-dispatch after classification.
+// These contain only the "do the thing" logic, with no internal AI classification.
+// =============================================================================
+
+/** Opens the existing form record in a new tab. */
+function _doFormOpenAction(message) {
+    const url = getFormUrl();
+    addMessage('user', message);
+    const reply = 'Opening the form for you now. It will load in a new tab.';
+    addMessage('assistant', reply);
+    if (state.voiceMode) speakText(reply);
+    window.open(url, '_blank');
+}
+
+/** Shows contextual suggestions — reuses cached pills or generates new ones. */
+async function _doSuggestionsAction(message) {
+    try {
+        // Prefer current in-context options if available (better than generating generic AI suggestions)
+        const reusableSuggestions = Array.isArray(state.lastSuggestedQuestions)
+            ? state.lastSuggestedQuestions.filter(Boolean).slice(0, 8)
+            : [];
+        const sameFieldSuggestions = reusableSuggestions.length > 0
+            && String(state.lastSuggestionFieldId || '') === String(state.currentFieldID || '');
+
+        if (sameFieldSuggestions) {
+            addMessage('user', message);
+            addMessage('assistant', 'Here are the available options for this question:');
+            addSuggestions(reusableSuggestions);
+            if (state.voiceMode) speakText('Here are the available options for this question.');
+            return true;
+        }
+
+        // Generate contextual suggestions via OpenAI
+        const recentHistory = state.conversationHistory.slice(-6)
+            .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+            .join('\n');
+
+        const knownFieldFacts = Array.from(state.extractedFieldsMap.values())
+            .slice(-8)
+            .map(f => `${f.fieldName || f.fieldID || 'Field'}: ${f.extractedValue || f.value || ''}`)
+            .filter(Boolean)
+            .join('; ') || 'none yet';
+
+        const currentFieldContext = `Current field ID: ${state.currentFieldID || 'n/a'}; Type: ${state.currentFieldType || 'n/a'}; Required: ${state.currentFieldRequired === false ? 'no' : 'yes'}`;
+
+        const profileContext = Object.entries(CONFIG.userProfile || {})
+            .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('; ') || 'none';
+
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 6000);
+
+        const suggRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 120,
+                temperature: 0.7,
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are a helpful assistant for a workplace health & safety app. ` +
+                                 `The user is filling in a form called "${state.templateName || 'WHS form'}". ` +
+                                 `Use available context first (current field + known captured values) and avoid generic suggestions. ` +
+                                 `If clear options are implied by context, suggest those options directly. ` +
+                                 `Based on the conversation below, suggest 3 short, specific things the user could say or answer next. ` +
+                                 `Return ONLY a JSON array of 3 strings, no explanation. Example: ["Yes, I was injured", "No injuries occurred", "I need more information"]`
+                    },
+                    {
+                        role: 'user',
+                        content: `Conversation:\n${recentHistory}\n\n${currentFieldContext}\nKnown captured fields: ${knownFieldFacts}\nUser profile: ${profileContext}`
+                    }
+                ]
+            })
+        });
+        clearTimeout(t);
+
+        if (!suggRes.ok) return false;
+        const suggData = await suggRes.json();
+        trackCost('gpt-4o-mini', suggData.usage);
+        const raw = suggData.choices?.[0]?.message?.content?.trim();
+
+        let suggestions;
+        try {
+            suggestions = JSON.parse(raw);
+        } catch(e) {
+            const match = raw?.match(/\[.*\]/s);
+            suggestions = match ? JSON.parse(match[0]) : null;
+        }
+
+        if (!Array.isArray(suggestions) || suggestions.length === 0) return false;
+
+        addMessage('user', message);
+        addMessage('assistant', 'Here are some suggestions based on your current form context:');
+        addSuggestions(suggestions);
+        if (state.voiceMode) speakText('Here are some suggestions based on your current form context.');
+        return true;
+    } catch(e) {
+        return false;
+    }
+}
+
+/** Checks for an existing similar dashboard, offers to open it or creates a new one. */
+async function _doDashboardAction(message) {
+    console.log('[Dashboard] _doDashboardAction called with:', message);
+    try {
+        const existingDashboards = _sidebarItems.filter(x => x.isDashboard);
+        console.log('[Dashboard] existing dashboards:', existingDashboards.map(d => d.chatName || d.templateName));
+        if (existingDashboards.length > 0) {
+            try {
+                const nameList = existingDashboards
+                    .map((d, i) => `${i + 1}. ${d.chatName || d.templateName || 'Untitled Dashboard'}`)
+                    .join('\n');
+                const matchRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+                    signal: AbortSignal.timeout(4000),
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        max_tokens: 5,
+                        temperature: 0,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Dashboard matcher. Reply ONLY with the NUMBER of the best-matching dashboard ' +
+                                         'if the user request is clearly about the same topic as one of the listed dashboards. ' +
+                                         'Otherwise reply "0". Single number only, no other text.'
+                            },
+                            {
+                                role: 'user',
+                                content: `User request: "${message}"\n\nExisting dashboards:\n${nameList}\n\nMatch number (or 0):`
+                            }
+                        ]
+                    })
+                });
+                if (matchRes.ok) {
+                    const matchData = await matchRes.json();
+                    trackCost('gpt-4o-mini', matchData.usage);
+                    const matchIdx = parseInt((matchData.choices?.[0]?.message?.content || '0').trim(), 10) - 1;
+                    console.log('[Dashboard:Action] AI match reply:', matchData.choices?.[0]?.message?.content, '→ matchIdx:', matchIdx);
+                    if (matchIdx >= 0 && matchIdx < existingDashboards.length) {
+                        const matched = existingDashboards[matchIdx];
+                        const matchedName = escapeHtml(matched.chatName || matched.templateName || 'Existing Dashboard');
+                        console.log('[Dashboard:Action] AUTO-OPENING:', matchedName);
+                        addMessage('user', message);
+                        state._initialMessageBubbleShown = true;
+                        state._pendingDashboardMessage = message;
+                        addMessage('assistant',
+                            `<div>Opening <strong>${matchedName}</strong>&hellip;</div>` +
+                            `<div style="margin-top:8px">` +
+                            `<button class="btn btn-outline-secondary btn-sm" onclick="state._pendingDashboardMessage='${message.replace(/'/g, "\\'")}';\_proceedCreateDashboard()">` +
+                            `<i class="ph-thin ph-plus" style="margin-right:4px"></i>Create new dashboard instead</button>` +
+                            `</div>`
+                        );
+                        openSavedChat(matched.regOthId);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.warn('[DashboardAction] similarity check failed, proceeding with create:', e);
+            }
+        }
+
+        addMessage('user', message);
+        state._initialMessageBubbleShown = true;
+        state._pendingDashboardMessage = message;
+        await _proceedCreateDashboard();
+        return true;
+    } catch (err) {
+        console.error('[DashboardAction]', err);
         return false;
     }
 }
@@ -1238,155 +2314,60 @@ async function sendMessage() {
     // Mark as processing so voice loop doesn't restart during API call
     state.isProcessing = true;
 
-    // Check if awaiting template selection and try to match voice input
-    if (state.awaitingTemplateSelection && state.availableTemplates.length > 0) {
-        const matchedTemplate = matchVoiceToTemplate(message);
-        if (matchedTemplate) {
-            // Clear input first
-            activeInput.value = '';
-            activeInput.style.height = 'auto';
-            if (state.voiceMode) {
-                finalTranscript = '';
-            }
-
-            // Select the template
-            await selectTemplate(matchedTemplate.templateID, matchedTemplate.templateName);
-            state.isProcessing = false;
-            return;
-        }
-    }
-
-    // Hide empty state and show chat input
+    // Show UI containers (safe to run early — idempotent)
     document.getElementById('emptyState').style.display = 'none';
     document.getElementById('messagesArea').classList.add('active');
     document.getElementById('chatInputArea').style.display = 'block';
 
-    // Check if the user is asking to open/view the form (only once a session exists)
-    if (state.sessionStarted && state.regOthId) {
-        const formHandled = await checkAndHandleFormIntent(message);
-        if (formHandled) {
-            activeInput.value = '';
-            activeInput.style.height = 'auto';
-            if (state.voiceMode) finalTranscript = '';
-            state.isProcessing = false;
-            return;
-        }
-    }
+    // ── Route through all registered process handlers (see chat-router.js) ──
+    const routedTo = await ChatRouter.route(message);
 
-    // Check if the user is asking for suggestions
-    if (state.sessionStarted) {
-        const suggestionsHandled = await checkAndHandleSuggestionsIntent(message);
-        if (suggestionsHandled) {
-            activeInput.value = '';
-            activeInput.style.height = 'auto';
-            if (state.voiceMode) finalTranscript = '';
-            state.isProcessing = false;
-            if (state.voiceMode && !state.isSpeaking && !state.isListening) {
-                setTimeout(() => startListening(), 600);
-            }
-            return;
-        }
-    }
+    if (!routedTo) {
+        // ── Fallthrough: form filling ──────────────────────────────────────────
+        // No handler claimed the message — treat it as a form field answer
+        // (or the very first message that starts a new intelligent session).
+        if (!state.sessionStarted) {
+            await startIntelligentSession(message);
+        } else {
+            // Special handling for map fields — map must always be confirmed via
+            // the "Confirm Location" button; never auto-extract from typed input.
+            if (state.currentFieldType === '10016' &&
+                (message.toLowerCase() === 'yes' || message.toLowerCase() === 'confirm' ||
+                 message.toLowerCase() === 'correct' || message.toLowerCase() === "that's correct")) {
 
-    // Check if the user wants to create a dashboard or report
-    const dashboardHandled = await checkAndHandleDashboardIntent(message);
-    if (dashboardHandled) {
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        if (state.voiceMode) finalTranscript = '';
-        state.isProcessing = false;
-        if (state.voiceMode && !state.isSpeaking && !state.isListening) {
-            setTimeout(() => startListening(), 600);
-        }
-        return;
-    }
-
-    // Check if this is the first message
-    if (!state.sessionStarted) {
-        await startIntelligentSession(message);
-    } else {
-        // Special handling for map confirmation via voice/typing
-        // If user types/says "Yes" or "Confirm" for a map field, check if map is still visible
-        if (state.currentFieldType === '10016' && 
-            (message.toLowerCase() === 'yes' || message.toLowerCase() === 'confirm' || 
-             message.toLowerCase() === 'correct' || message.toLowerCase() === "that's correct")) {
-            
-            // Check if map UI is still visible
-            const mapContainer = document.querySelector('.map-container');
-            if (mapContainer) {
-                // Map is still visible, user typed "Yes" without clicking "Confirm Location"
-                // Auto-extract the data from the map and confirm it
-                const latInput = document.getElementById('mapLatitude');
-                const lngInput = document.getElementById('mapLongitude');
-                const locationNameDiv = document.getElementById('mapLocationName');
-                
-                if (latInput && lngInput && latInput.value && lngInput.value) {
-                    const lat = parseFloat(latInput.value);
-                    const lng = parseFloat(lngInput.value);
-                    const locationText = locationNameDiv ? 
-                        locationNameDiv.textContent
-                            .replace('📍 ', '')
-                            .replace('🔍 Looking up address...', 'Custom Location')
-                            .replace(/^✓ Pre-filled from your message\s+/, '') // Remove the prefix if present
-                        : 'Custom Location';
-                    
-                    if (!isNaN(lat) && !isNaN(lng)) {
-                        // Format as JSON
-                        const mapData = {
-                            Latitude: lat,
-                            Longitude: lng,
-                            Location: locationText.trim()
-                        };
-                        const mapDataString = JSON.stringify(mapData);
-                        
-                        console.log('User typed "Yes" with map visible, auto-confirming location:', mapDataString);
-                        
-                        // Remove map UI
-                        mapContainer.remove();
-                        
-                        // Reset map instances
-                        mapInstance = null;
-                        mapMarker = null;
-                        mapGeocoder = null;
-                        
-                        // Send the JSON data
-                        await sendChatMessage(mapDataString);
-                        
-                        // Clear the last map data
-                        state.lastMapData = null;
-                    } else {
-                        // No valid coordinates on map, send as normal message
-                        await sendChatMessage(message);
-                    }
+                if (state.lastMapData) {
+                    // User already clicked "Confirm Location" — send the stored confirmed data
+                    console.log('User confirmed map location via input, sending stored map data:', state.lastMapData);
+                    await sendChatMessage(state.lastMapData);
+                    state.lastMapData = null;
                 } else {
-                    // Map visible but no coordinates, send as normal message
+                    // Map still visible but not confirmed — require the button
                     await sendChatMessage(message);
                 }
-            } else if (state.lastMapData) {
-                // Map already confirmed, use stored data
-                console.log('User confirmed map location via input, sending stored map data:', state.lastMapData);
-                await sendChatMessage(state.lastMapData);
-                // Clear the last map data after using it
-                state.lastMapData = null;
+            } else if (state.currentFieldType === '10020' || state.currentFieldType === '10026') {
+                // Dataset Dropdown (single) — {"Value":"0","Text":"user input"}
+                const datasetJson = JSON.stringify({ Value: "0", Text: message });
+                await sendChatMessage(datasetJson, message);
+            } else if (state.currentFieldType === '10037') {
+                // Dataset Multi-select — split comma-delimited input into arrays
+                // e.g. "Vik, Nick, David" — {"Value":[0,0,0],"Text":["Vik","Nick","David"]}
+                const items = message.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                const multiJson = JSON.stringify({ Value: items.map(() => 0), Text: items });
+                await sendChatMessage(multiJson, message);
+            } else if (state.currentFieldType === '10023') {
+                // Substatement list box — multi-select stored with tilde (~)
+                const items = message.split(/[,;~]/).map(s => s.trim()).filter(s => s.length > 0);
+                await sendChatMessage(items.join('~') || message, message);
             } else {
-                // No map and no stored data, send as normal message
                 await sendChatMessage(message);
             }
-        } else {
-            await sendChatMessage(message);
         }
     }
 
-    // Clear input
+    // ── Cleanup (runs for all paths, including routed ones) ───────────────────
     activeInput.value = '';
     activeInput.style.height = 'auto';
-
-    // Reset transcript if in voice mode
-    if (state.voiceMode) {
-        finalTranscript = '';
-    }
-
-    // Done processing - speakText will handle restarting the listener
+    if (state.voiceMode) finalTranscript = '';
     state.isProcessing = false;
 
     // Safety: if voice mode is on and TTS isn't running, restart listening now
@@ -1441,6 +2422,184 @@ function matchVoiceToTemplate(spokenText) {
     return null;
 }
 
+/**
+ * Uses GPT-4o-mini to generate a short, descriptive session name based on
+ * the user's initial message and the chosen template name.
+ */
+async function generateSessionName(initialMessage, templateName) {
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+            signal: AbortSignal.timeout(5000),
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 15,
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Generate a short, descriptive session name (max 6 words, no quotes) based on the user message and template. Be specific and concise.'
+                    },
+                    {
+                        role: 'user',
+                        content: `Template: ${templateName}\nUser message: ${initialMessage}\n\nSession name:`
+                    }
+                ]
+            })
+        });
+        const data = await response.json();
+        trackCost('gpt-4o-mini', data.usage);
+        const name = (data.choices?.[0]?.message?.content || '').trim().replace(/^["']|["']$/g, '');
+        return name || templateName || 'Untitled Session';
+    } catch (e) {
+        console.warn('[generateSessionName] Failed:', e);
+        return templateName || 'Untitled Session';
+    }
+}
+
+function rankTemplatesForIntent(templates, message) {
+    if (!Array.isArray(templates) || templates.length === 0) return [];
+
+    const lower = String(message || '').toLowerCase();
+    const stopWords = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'need', 'raise', 'want', 'have', 'about', 'report']);
+    const tokens = lower
+        .split(/[^a-z0-9]+/)
+        .filter(token => token && token.length > 2 && !stopWords.has(token));
+
+    const intentGroups = [
+        {
+            trigger: /(incident|injury|accident|near\s*miss)/,
+            positive: ['incident', 'injury', 'accident', 'near miss'],
+            negative: ['audit', 'inspection', 'jsa', 'jsms']
+        },
+        {
+            trigger: /(hazard|risk)/,
+            positive: ['hazard', 'risk'],
+            negative: ['audit']
+        },
+        {
+            trigger: /(audit)/,
+            positive: ['audit'],
+            negative: ['incident', 'inspection']
+        },
+        {
+            trigger: /(inspection|inspect)/,
+            positive: ['inspection', 'inspect'],
+            negative: ['incident', 'audit']
+        },
+        {
+            trigger: /(contractor|jsa|jsms|safe work method|swms)/,
+            positive: ['contractor', 'jsa', 'jsms', 'swms'],
+            negative: ['incident']
+        }
+    ];
+
+    return templates
+        .map(template => {
+            const searchText = `${template.templateName || ''} ${template.moduleName || ''}`.toLowerCase();
+            let score = 0;
+
+            for (const token of tokens) {
+                if (searchText.includes(token)) score += 4;
+            }
+
+            intentGroups.forEach(group => {
+                if (group.trigger.test(lower)) {
+                    group.positive.forEach(term => {
+                        if (searchText.includes(term)) score += 30;
+                    });
+                    group.negative.forEach(term => {
+                        if (searchText.includes(term)) score -= 20;
+                    });
+                }
+            });
+
+            if (lower.includes('incident') && /^incident\b/.test(searchText)) score += 40;
+            if (lower.includes('hazard') && /^hazard\b/.test(searchText)) score += 40;
+            if (lower.includes('audit') && /^audit\b/.test(searchText)) score += 40;
+            if (lower.includes('inspection') && /^inspection\b/.test(searchText)) score += 40;
+
+            return { ...template, _rankScore: score };
+        })
+        .sort((a, b) => b._rankScore - a._rankScore || a.templateName.localeCompare(b.templateName));
+}
+
+function filterTemplatesForIntent(templates, message) {
+    if (!Array.isArray(templates) || templates.length === 0) return [];
+
+    const lower = String(message || '').toLowerCase();
+    const filterGroups = [
+        {
+            trigger: /(incident|injury|accident|near\s*miss)/,
+            terms: ['incident', 'injury', 'accident', 'near miss']
+        },
+        {
+            trigger: /(hazard|risk)/,
+            terms: ['hazard', 'risk']
+        },
+        {
+            trigger: /(audit)/,
+            terms: ['audit']
+        },
+        {
+            trigger: /(inspection|inspect)/,
+            terms: ['inspection', 'inspect']
+        },
+        {
+            trigger: /(contractor|jsa|jsms|safe work method|swms)/,
+            terms: ['contractor', 'jsa', 'jsms', 'safe work method', 'swms']
+        }
+    ];
+
+    const matchedGroup = filterGroups.find(group => group.trigger.test(lower));
+    if (!matchedGroup) return templates;
+
+    const filtered = templates.filter(template => {
+        const searchText = `${template.templateName || ''} ${template.moduleName || ''}`.toLowerCase();
+        return matchedGroup.terms.some(term => searchText.includes(term));
+    });
+
+    return filtered.length > 0 ? filtered : templates;
+}
+
+async function promptManualTemplateSelection() {
+    try {
+        const response = await fetch(`${CONFIG.apiUrl}/templates?storeId=${CONFIG.storeId}`);
+        const data = await response.json();
+
+        const modules = data?.modules || data?.Modules || [];
+        const allTemplates = modules.flatMap(module => {
+            const templates = module?.templates || module?.Templates || [];
+            return templates.map(template => ({
+                templateID: template.templateID ?? template.TemplateID,
+                templateName: template.templateName ?? template.TemplateName,
+                estimatedFields: template.estimatedFields ?? template.EstimatedFields ?? 0,
+                moduleID: template.moduleID ?? template.ModuleID ?? module.moduleID ?? module.ModuleID ?? 0,
+                templateTypeID: template.templateTypeID ?? template.TemplateTypeID ?? null,
+                moduleName: module.moduleName ?? module.ModuleName ?? ''
+            })).filter(t => t.templateID && t.templateName);
+        });
+
+        if (!allTemplates.length) {
+            addMessage('assistant', 'I could not load templates right now. Please try again.');
+            return;
+        }
+
+        const filteredTemplates = filterTemplatesForIntent(allTemplates, state.initialMessage);
+        const rankedTemplates = rankTemplatesForIntent(filteredTemplates, state.initialMessage);
+        const topTemplates = rankedTemplates.slice(0, 8);
+        const moreTemplates = rankedTemplates.slice(8);
+
+        addMessage('assistant', 'Please choose which template you want to use. I\'ve put the most relevant ones first.');
+        state.additionalTemplateChoices = moreTemplates;
+        addTemplateList(topTemplates, moreTemplates);
+        state.awaitingTemplateSelection = true;
+    } catch (error) {
+        console.warn('[TemplateSelection] Failed to load templates:', error);
+        addMessage('assistant', 'I could not load templates right now. Please try again.');
+    }
+}
+
 async function startIntelligentSession(initialMessage, selectedTemplateID = null) {
     // Store initial message
     if (!selectedTemplateID) {
@@ -1453,7 +2612,7 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
     }
 
     // Show typing indicator
-    showTypingIndicator();
+    showTypingIndicator(state.initialMessage);
 
     // Speak thinking phrase in voice mode (fire-and-forget — runs parallel to API call)
     speakThinking(selectedTemplateID ? 'template' : 'first', state.initialMessage);
@@ -1487,29 +2646,29 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
             // Template selection
             if (data.needsTemplateSelection && data.templateChoices && data.templateChoices.length > 0) {
                 trackServerCost(data.tokenUsage);
-                // Only auto-select if the message is detailed enough (20+ words)
-                const wordCount = (state.initialMessage || '').trim().split(/\s+/).length;
-                const autoID = wordCount >= 20
-                    ? await autoSelectTemplate(state.initialMessage, data.templateChoices)
-                    : null;
-                if (autoID) {
-                    await startIntelligentSession(null, autoID);
-                    return;
-                }
-                // Couldn't confidently pick — fall back to manual selection
                 addMessage('assistant', data.aiMessage);
-                addTemplateList(data.templateChoices);
+                state.additionalTemplateChoices = data.additionalTemplateChoices || [];
+                addTemplateList(data.templateChoices, state.additionalTemplateChoices);
                 state.awaitingTemplateSelection = true;
                 return;
             }
 
             // Session created
             state.sessionStarted = true;
+            state.sessionCompleted = false;
+            state._serverMarkedComplete = !!data.isComplete;
             state.awaitingTemplateSelection = false;
             state.regOthId = data.regOthID;
             state.internalNo = data.internalNo;
             state.templateName = data.templateName;
             state.moduleName = data.moduleName || '';
+            console.log('📡 API Response data.regTypeID:', data.regTypeID, 'All data keys:', Object.keys(data));
+            // Try all variations of RegTypeID property name
+            state.regTypeId = Number(data.RegTypeID || data.regTypeID || data.regTypeId || 0);
+            console.log('✅ Set state.regTypeId to:', state.regTypeId, '(from variations of RegTypeID property)');
+            if (data.templateTypeID) state.templateTypeId = data.templateTypeID;
+            state.pageId = (state.templateTypeId && TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId])
+                ? TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId] : null;
             trackServerCost(data.tokenUsage);
             // Show the progress toggle button now that a session exists
             document.getElementById('progressToggle').style.display = 'flex';
@@ -1521,100 +2680,18 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
             // Store current field info
             state.currentFieldID = data.currentFieldID;
             state.currentFieldType = data.currentFieldType;
+            state.currentFieldRequired = data.isCurrentFieldRequired !== false;
+            state.currentFieldDynamicFilter = data.currentFieldDynamicFilter || null;
+            if (data.totalFields !== undefined && data.totalFields !== null) state.totalFieldCount = data.totalFields;
+            if (data.answeredFields !== undefined && data.answeredFields !== null) state.answeredFieldCount = data.answeredFields;
+            if (data.completionPercentage !== undefined) state.completionPercentage = data.completionPercentage;
+            if (data.templateTypeID) state.templateTypeId = data.templateTypeID;
 
-            // ── Smart Fill mode: skip field-by-field UI, bulk extract instead ──────
-            if (isSmartFillEnabled()) {
-                state.smartFillTriggered = true;
-                showSmartFillTyping();
-                setTimeout(() => runSmartFill(), 800);
-                updateDebugInfo();
-                return;
-            }
-
-            addMessage('assistant', data.aiMessage);
-
-            // ALWAYS clean up previous field UI elements first (aggressive cleanup)
-            setTimeout(() => {
-                const existingFileUpload = document.querySelector('.file-upload-container');
-                const existingMapContainer = document.querySelector('.map-container');
-                
-                // Remove file upload UI if NOT a file upload field
-                if (state.currentFieldType !== '10013' && existingFileUpload) {
-                    console.log('Removing file upload UI - field type changed to:', state.currentFieldType);
-                    existingFileUpload.remove();
-                }
-                // Remove map UI if NOT a map field
-                if (state.currentFieldType !== '10016' && existingMapContainer) {
-                    console.log('Removing map UI - field type changed to:', state.currentFieldType);
-                    existingMapContainer.remove();
-                }
-
-                // Show file upload UI if current field is a file upload (Type Code 10013)
-                if (state.currentFieldType === '10013') {
-                    addFileUploadUI();
-                }
-                // Show map UI if current field is a map (Type Code 10016)
-                else if (state.currentFieldType === '10016') {
-                // Check if AI already extracted a location from the message
-                let initialLocation = null;
-                
-                console.log('[Intelligent Start] Map field detected. Checking for location...');
-                console.log('Current field ID:', state.currentFieldID);
-                console.log('Extracted fields:', data.extractedFields);
-                console.log('Initial message:', state.initialMessage);
-                
-                if (data.extractedFields && data.extractedFields.length > 0) {
-                    const mapField = data.extractedFields.find(f => f.fieldID === state.currentFieldID);
-                    console.log('Found map field in extractedFields:', mapField);
-                    if (mapField && mapField.extractedValue) {
-                        try {
-                            const mapData = JSON.parse(mapField.extractedValue);
-                            initialLocation = mapData.Location || null;
-                            console.log('Parsed location from extractedValue:', initialLocation);
-                        } catch (e) {
-                            // If not JSON, try to use the value as-is
-                            initialLocation = mapField.extractedValue;
-                            console.log('Using extractedValue as-is:', initialLocation);
-                        }
-                    }
-                }
-                
-                // If no location in extractedFields, try to extract from initial message
-                if (!initialLocation && state.initialMessage) {
-                    // Simple regex patterns to detect locations
-                    const locationPatterns = [
-                        /(?:at|location:|address:)\s*([^.!?,]+)/i,
-                        /(\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*)/i,
-                        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2,})/  // City, State format
-                    ];
-                    
-                    for (const pattern of locationPatterns) {
-                        const match = state.initialMessage.match(pattern);
-                        if (match && match[1]) {
-                            initialLocation = match[1].trim();
-                            console.log('Extracted location from initial message:', initialLocation);
-                            break;
-                        }
-                    }
-                }
-                
-                console.log('Final initialLocation:', initialLocation);
-                addMapUI(initialLocation);
-            }
-
-            // Add suggestions (skip for map fields - use Confirm Location button instead)
-            if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0 
-                && state.currentFieldType !== '10016') {
-                addSuggestions(data.nextSuggestedQuestions);
-            }
-
-            // Update progress
-            if (data.completionPercentage !== undefined) {
-                updateProgress(data.completionPercentage);
-            }
-
-            updateDebugInfo();
-            }, 50); // Small delay to ensure DOM has settled
+            // ── Auto-name this session silently, then proceed ────────────────
+            state._pendingSessionData = data;
+            const autoName = await generateSessionName(state.initialMessage, data.templateName);
+            await handleChatNameResponse(autoName, true /* silent */);
+            return;
 
         } else {
             addMessage('assistant', `${data.errorMessage || 'Failed to start session'}`);
@@ -1625,16 +2702,16 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
     }
 }
 
-async function sendChatMessage(message) {
-    addMessage('user', message);
+async function sendChatMessage(message, displayText) {
+    addMessage('user', displayText || message);
 
-    // Add to conversation history
+    // Add to conversation history — use displayText if provided so history stays meaningful
     state.conversationHistory.push({
         role: 'user',
-        content: message
+        content: displayText || message
     });
 
-    showTypingIndicator();
+    showTypingIndicator(message);
 
     // Speak thinking phrase in voice mode (fire-and-forget — runs parallel to API call)
     speakThinking('chat', message);
@@ -1654,7 +2731,8 @@ async function sendChatMessage(message) {
                 userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 userDateFormat: getUserDateFormat(),
                 memoryConfidence: localStorage.getItem('memoryConfidence') || 'medium',
-                userProfile: CONFIG.userProfile
+                userProfile: CONFIG.userProfile,
+                confirmedFieldIds: state.chatConfirmedFieldIds
             })
         });
 
@@ -1662,12 +2740,20 @@ async function sendChatMessage(message) {
         removeTypingIndicator();
 
         if (data.success) {
-            addMessage('assistant', data.aiMessage);
             trackServerCost(data.tokenUsage);
+
+            console.group('%c[CHAT RESPONSE]', 'color:#2196F3;font-weight:bold');
+            console.log('currentFieldID:', data.currentFieldID, '| type:', data.currentFieldType);
+            console.log('clusterFormFields:', data.clusterFormFields ? JSON.parse(JSON.stringify(data.clusterFormFields)) : null);
+            console.log('currentFieldDynamicFilter:', data.currentFieldDynamicFilter);
+            console.log('aiMessage:', data.aiMessage);
+            console.groupEnd();
 
             // Store current field info
             state.currentFieldID = data.currentFieldID;
             state.currentFieldType = data.currentFieldType;
+            state.currentFieldRequired = data.isCurrentFieldRequired !== false;
+            state.currentFieldDynamicFilter = data.currentFieldDynamicFilter || null;
             
             // Clear lastMapData if we've moved away from map field
             if (state.currentFieldType !== '10016' && state.lastMapData) {
@@ -1675,130 +2761,176 @@ async function sendChatMessage(message) {
                 state.lastMapData = null;
             }
 
-            // Wrap cleanup and UI operations in setTimeout to prevent race condition
-            setTimeout(() => {
-                console.log('[CLEANUP] Starting field UI cleanup for sendChatMessage');
-                console.log('[CLEANUP] Current field type:', state.currentFieldType);
-                
-                // Clean up previous field UI elements
-                const existingFileUpload = document.querySelector('.file-upload-container');
-                const existingMapContainer = document.querySelector('.map-container');
-                
-                console.log('[CLEANUP] Found file upload container:', !!existingFileUpload);
-                console.log('[CLEANUP] Found map container:', !!existingMapContainer);
-                
-                if (state.currentFieldType !== '10013' && existingFileUpload) {
-                    console.log('[CLEANUP] Removing file upload container');
-                    existingFileUpload.remove();
+            // Helper: show the AI next-question message + next field UI
+            // Called immediately when no photo prompt, or after photo prompt completes
+            const showNextQuestionAndFieldUI = () => {
+                // Show section divider when the form moves into a new section
+                const incomingSection = data.currentSection || null;
+                if (incomingSection && incomingSection !== state.currentSection) {
+                    showSectionDivider(incomingSection, data.currentSubSection || null);
                 }
-                if (state.currentFieldType !== '10016' && existingMapContainer) {
-                    console.log('[CLEANUP] Removing map container');
-                    existingMapContainer.remove();
-                }
+                state.currentSection = incomingSection;
 
-                // Show file upload UI if current field is a file upload (Type Code 10013)
-                if (state.currentFieldType === '10013') {
-                    console.log('[CLEANUP] Adding file upload UI');
-                    addFileUploadUI();
-                }
-                // Show map UI if current field is a map (Type Code 10016)
-                else if (state.currentFieldType === '10016') {
-                    // Check if AI already extracted a location from the message
-                    let initialLocation = null;
+                addMessage('assistant', data.aiMessage);
+
+                // Wrap cleanup and UI operations in setTimeout to prevent race condition
+                setTimeout(() => {
+                    console.log('[CLEANUP] Starting field UI cleanup for sendChatMessage');
+                    console.log('[CLEANUP] Current field type:', state.currentFieldType);
                     
-                    console.log('Map field detected. Checking for location...');
-                    console.log('Current field ID:', state.currentFieldID);
-                    console.log('Extracted fields:', data.extractedFields);
-                    console.log('AI message:', data.aiMessage);
-                    console.log('User message:', message);
-                    
-                    if (data.extractedFields && data.extractedFields.length > 0) {
-                        const mapField = data.extractedFields.find(f => f.fieldID === state.currentFieldID);
-                        console.log('Found map field in extractedFields:', mapField);
-                        if (mapField && mapField.extractedValue) {
-                            try {
-                                const mapData = JSON.parse(mapField.extractedValue);
-                                initialLocation = mapData.Location || null;
-                                console.log('Parsed location from extractedValue:', initialLocation);
-                            } catch (e) {
-                                // If not JSON, try to use the value as-is
-                                initialLocation = mapField.extractedValue;
-                                console.log('Using extractedValue as-is:', initialLocation);
+                    // Clean up previous field UI elements
+                    const existingFileUpload = document.querySelector('.file-upload-container');
+                    const existingMapContainer = document.querySelector('.map-container');
+                    const existingDynamicData = document.querySelector('.dynamic-data-container');
+                    const existingClusterCard = document.querySelector('.cluster-form-card');
+
+                    console.log('[CLEANUP] Found file upload container:', !!existingFileUpload);
+                    console.log('[CLEANUP] Found map container:', !!existingMapContainer);
+
+                    if (state.currentFieldType !== '10013' && existingFileUpload) {
+                        console.log('[CLEANUP] Removing file upload container');
+                        existingFileUpload.remove();
+                    }
+                    if (state.currentFieldType !== '10016' && existingMapContainer) {
+                        console.log('[CLEANUP] Removing map container');
+                        existingMapContainer.remove();
+                    }
+                    // Always remove stale dynamic-data widget
+                    if (existingDynamicData) existingDynamicData.remove();
+                    // Always remove stale cluster form card before potentially adding a new one
+                    if (existingClusterCard) existingClusterCard.remove();
+
+                    // Show the next field's UI (file upload / dropdown / map / suggestions)
+                    // Show file upload UI if current field is a file upload (Type Code 10013)
+                    if (state.currentFieldType === '10013') {
+                        console.log('[CLEANUP] Adding file upload UI');
+                        addFileUploadUI();
+                    }
+                    // Show dynamic dropdown for dataset fields (10020 single / 10037 multi)
+                    // Skip if clusterFormFields is present — the cluster card handles everything
+                    else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter && !(data.clusterFormFields && data.clusterFormFields.length >= 1)) {
+                        addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
+                    }
+                    // Show map UI if current field is a map (Type Code 10016)
+                    else if (state.currentFieldType === '10016') {
+                        // Check if AI already extracted a location from the message
+                        let initialLocation = null;
+                        
+                        console.log('Map field detected. Checking for location...');
+                        console.log('Current field ID:', state.currentFieldID);
+                        console.log('Extracted fields:', data.extractedFields);
+                        console.log('AI message:', data.aiMessage);
+                        console.log('User message:', message);
+                        
+                        if (data.extractedFields && data.extractedFields.length > 0) {
+                            const mapField = data.extractedFields.find(f => f.fieldID === state.currentFieldID);
+                            console.log('Found map field in extractedFields:', mapField);
+                            if (mapField && mapField.extractedValue) {
+                                try {
+                                    const mapData = JSON.parse(mapField.extractedValue);
+                                    initialLocation = mapData.Location || null;
+                                    console.log('Parsed location from extractedValue:', initialLocation);
+                                } catch (e) {
+                                    // If not JSON, try to use the value as-is
+                                    initialLocation = mapField.extractedValue;
+                                    console.log('Using extractedValue as-is:', initialLocation);
+                                }
                             }
                         }
-                    }
-                    
-                    // If no location in extractedFields, try to extract from AI message (it often repeats the address)
-                    if (!initialLocation && data.aiMessage) {
-                        // Pattern to detect addresses in quotes or mentioned by AI
-                        const addressPatterns = [
-                            /"([^"]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^"]+)"/i,
-                            /address\s+"([^"]+)"/i,
-                            /location\s+"([^"]+)"/i,
-                            /(\d+\/\d+\s+[^,]+,\s*[^,]+(?:,\s*[A-Z]{2,4}(?:\s+\d+)?)?(?:,\s*[A-Za-z\s]+)?)/i, // Matches "3/9 McKay Lane, Turner ACT 2612, Australia"
-                            /(\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*)/i
-                        ];
                         
-                        for (const pattern of addressPatterns) {
-                            const match = data.aiMessage.match(pattern);
-                            if (match && match[1]) {
-                                initialLocation = match[1].trim();
-                                console.log('Extracted location from AI message:', initialLocation);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // If still no location, try to extract from user's message
-                    if (!initialLocation && message) {
-                        const locationPatterns = [
-                            /(?:at|location:|address:)\s*([^.!?,]+)/i,
-                            /(\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*)/i,
-                            /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2,})/
-                        ];
-                        
-                        for (const pattern of locationPatterns) {
-                            const match = message.match(pattern);
-                            if (match && match[1]) {
-                                initialLocation = match[1].trim();
-                                console.log('Extracted location from user message:', initialLocation);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Last resort: search conversation history for recent addresses
-                    if (!initialLocation && state.conversationHistory && state.conversationHistory.length > 0) {
-                        console.log('Searching conversation history for addresses...');
-                        const addressPattern = /(\d+(?:\/\d+)?\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*(?:,\s*[^.!?,]+)?)/i;
-                        
-                        // Search last 5 messages
-                        for (let i = state.conversationHistory.length - 1; i >= Math.max(0, state.conversationHistory.length - 5); i--) {
-                            const msg = state.conversationHistory[i];
-                            if (msg.role === 'user' && msg.content) {
-                                const match = msg.content.match(addressPattern);
+                        // If no location in extractedFields, try to extract from AI message (it often repeats the address)
+                        if (!initialLocation && data.aiMessage) {
+                            // Pattern to detect addresses in quotes or mentioned by AI
+                            const addressPatterns = [
+                                /"([^"]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^"]+)"/i,
+                                /address\s+"([^"]+)"/i,
+                                /location\s+"([^"]+)"/i,
+                                /(\d+\/\d+\s+[^,]+,\s*[^,]+(?:,\s*[A-Z]{2,4}(?:\s+\d+)?)?(?:,\s*[A-Za-z\s]+)?)/i, // Matches "3/9 McKay Lane, Turner ACT 2612, Australia"
+                                /(\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*)/i
+                            ];
+                            
+                            for (const pattern of addressPatterns) {
+                                const match = data.aiMessage.match(pattern);
                                 if (match && match[1]) {
                                     initialLocation = match[1].trim();
-                                    console.log('Found location in conversation history:', initialLocation);
+                                    console.log('Extracted location from AI message:', initialLocation);
                                     break;
                                 }
                             }
                         }
+                        
+                        // If still no location, try to extract from user's message
+                        if (!initialLocation && message) {
+                            const locationPatterns = [
+                                /(?:at|location:|address:)\s*([^.!?,]+)/i,
+                                /(\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*)/i,
+                                /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2,})/
+                            ];
+                            
+                            for (const pattern of locationPatterns) {
+                                const match = message.match(pattern);
+                                if (match && match[1]) {
+                                    initialLocation = match[1].trim();
+                                    console.log('Extracted location from user message:', initialLocation);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Last resort: search conversation history for recent addresses
+                        if (!initialLocation && state.conversationHistory && state.conversationHistory.length > 0) {
+                            console.log('Searching conversation history for addresses...');
+                            const addressPattern = /(\d+(?:\/\d+)?\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*(?:,\s*[^.!?,]+)?)/i;
+                            
+                            // Search last 5 messages
+                            for (let i = state.conversationHistory.length - 1; i >= Math.max(0, state.conversationHistory.length - 5); i--) {
+                                const msg = state.conversationHistory[i];
+                                if (msg.role === 'user' && msg.content) {
+                                    const match = msg.content.match(addressPattern);
+                                    if (match && match[1]) {
+                                        initialLocation = match[1].trim();
+                                        console.log('Found location in conversation history:', initialLocation);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        console.log('Final initialLocation:', initialLocation);
+                        addMapUI(initialLocation);
                     }
-                    
-                    console.log('Final initialLocation:', initialLocation);
-                    addMapUI(initialLocation);
-                }
 
-                // Add suggestions (skip for map fields - use Confirm Location button instead)
-                if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0 
-                    && state.currentFieldType !== '10016') {
-                    console.log('[CLEANUP] Adding suggestions');
-                    addSuggestions(data.nextSuggestedQuestions);
-                }
+                    // Add suggestions (skip for map fields - use Confirm Location button instead)
+                    console.log('%c[CLUSTER CHECK]', 'color:#9C27B0;font-weight:bold', 'clusterFormFields:', data.clusterFormFields, '| length:', data.clusterFormFields?.length);
+                    if (data.clusterFormFields && data.clusterFormFields.length >= 1) {
+                        // Cluster mode: render a compact inline form card instead of suggestion chips
+                        // Skip chip is suppressed — cluster card has its own skip-all button
+                        console.log('%c[CLUSTER] Rendering cluster card with', 'color:#9C27B0;font-weight:bold', data.clusterFormFields.length, 'fields:', data.clusterFormFields.map(f => f.fieldID + ':' + f.typeCode));
+                        addClusterFormCard(data.clusterFormFields);
+                    } else {
+                        if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0 
+                            && state.currentFieldType !== '10016') {
+                            console.log('[CLEANUP] Adding suggestions');
+                            addSuggestions(data.nextSuggestedQuestions);
+                        }
+                        addSkipChipIfOptional();
+                    }
 
-                console.log('[CLEANUP] Field UI cleanup complete');
-            }, 50); // 50ms delay to prevent race condition
+                    console.log('[CLEANUP] Field UI cleanup complete');
+                }, 50); // 50ms delay to prevent race condition
+            };
+
+            setTimeout(() => {
+                addSupplementaryPromptUI(
+                    data.showPhotoFieldIds,
+                    data.showCommentFieldIds,
+                    data.showActionFieldIds,
+                    data.showHazardInfo || null,
+                    data.extractedFields,
+                    data,
+                    showNextQuestionAndFieldUI
+                );
+            }, 50);
 
             // Add to history
             state.conversationHistory.push({
@@ -1806,8 +2938,13 @@ async function sendChatMessage(message) {
                 content: data.aiMessage
             });
 
-            // Update extracted fields
+            // Auto-save transcript to localStorage after every exchange
+            saveTranscript();
+
+            // Update extracted fields and track confirmed IDs so the server
+            // knows which pre-filled defaults have now been explicitly answered.
             if (data.extractedFields && data.extractedFields.length > 0) {
+                markFieldsConfirmed(data.extractedFields);
                 data.extractedFields.forEach(field => {
                     state.extractedFieldsMap.set(field.fieldID, field);
                 });
@@ -1818,19 +2955,29 @@ async function sendChatMessage(message) {
                 scheduleMemoryRefresh();
             }
 
-            // Update progress
-            if (data.completionPercentage !== undefined) {
-                updateProgress(data.completionPercentage);
+            // Handle edit field request — remove the field from confirmed set so it gets re-asked
+            if (data.editFieldId) {
+                state.chatConfirmedFieldIds = state.chatConfirmedFieldIds.filter(id => id !== data.editFieldId);
+                state.extractedFieldsMap.delete(data.editFieldId);
+                saveConfirmedFieldIds(state.regOthId, state.chatConfirmedFieldIds);
+                updateFieldsList();
             }
 
-            // AI signals all fields are covered — prompt user to complete
-            if (data.isComplete && !state.sessionCompleted) {
-                setTimeout(() => promptCompletion(), 600);
+            // Update progress
+            if (data.completionPercentage !== undefined) {
+                updateProgress(data.completionPercentage, data.totalFields, data.answeredFields);
+                saveTranscript();
             }
+
+            // End-of-form prompt (guarded): trigger from server flag, 100% progress, or AI completion wording.
+            if (data.isComplete) state._serverMarkedComplete = true;
+            setTimeout(() => { if (_shouldAutoPromptCompletion(data)) promptCompletion(); }, 600);
 
             updateDebugInfo();
         } else {
-            addMessage('assistant', ` ${data.errorMessage || 'Error'}`);
+            if (!handleCompletedSessionRefusal(data.errorMessage)) {
+                addMessage('assistant', ` ${data.errorMessage || 'Error'}`);
+            }
         }
     } catch (error) {
         removeTypingIndicator();
@@ -1838,45 +2985,157 @@ async function sendChatMessage(message) {
     }
 }
 
+function _hasBlockingFieldUi() {
+    const selector = '.dynamic-data-container, .file-upload-container, .photo-upload-container, .comment-input-container, .action-input-container, .map-container';
+    const nodes = document.querySelectorAll(selector);
+    return Array.from(nodes).some(el => {
+        if (!el || !document.body.contains(el)) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        return el.offsetParent !== null;
+    });
+}
+
+function _shouldAutoPromptCompletion(data) {
+    if (state.sessionCompleted) return false;
+    if (state._collectingHeaderDetails) return false;
+    if ((Number(state.totalFieldCount || 0) === 0) && (Number(state.answeredFieldCount || 0) === 0)) return false;
+
+    // Fire if the server explicitly says all fields are done (even if some were skipped)
+    const aiSaysDone = typeof data?.aiMessage === 'string'
+        && /(covered all the questions|you can now submit|ready to submit|reached the end of the form)/i.test(data.aiMessage);
+    const serverDone = !!data?.isComplete || !!state._serverMarkedComplete || aiSaysDone;
+    // Also fire if percentage hit 100 without an explicit isComplete flag
+    const pctDone = Number(data?.completionPercentage ?? state.completionPercentage ?? 0) >= 100;
+    if (!serverDone && !pctDone) return false;
+
+    if (state.awaitingHeaderField || state._headerFieldCallback) return false;
+
+    if (_hasBlockingFieldUi()) return false;
+
+    return true;
+}
+
 function promptCompletion() {
     if (state.sessionCompleted) return;
+    if (document.getElementById('completionPrompt')) return;
     const messagesArea = document.getElementById('messagesArea');
+
+    const pct = Math.round(state.completionPercentage || 0);
+    const answered = state.answeredFieldCount || 0;
+    const total    = state.totalFieldCount || 0;
+    const skipped  = total > 0 ? Math.max(0, total - answered) : 0;
+
+    let bodyText;
+    if (pct >= 100) {
+        bodyText = `Great work — all fields have been answered! Ready to submit this ${state.templateName || 'record'}?`;
+    } else if (skipped > 0) {
+        bodyText = `Looks like we've reached the end of the form. ${answered} of ${total} fields answered${skipped > 0 ? ` (${skipped} skipped)` : ''}. You can fill in the skipped fields directly in the form later. Ready to submit now?`;
+    } else {
+        bodyText = `It looks like we've covered everything! Ready to submit this ${state.templateName || 'record'}?`;
+    }
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant';
+    messageDiv.id = 'completionPrompt';
 
     const icon = document.createElement('div');
     icon.className = 'message-icon';
-    icon.innerHTML = '<i class="ph-thin ph-chats-circle"></i>';
+    icon.innerHTML = '<i class="ph-thin ph-check-circle"></i>';
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    contentDiv.textContent = "It looks like we've covered everything! Would you like to complete the session now?";
 
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'suggestions';
-    actionsDiv.style.marginTop = '12px';
+    const container = document.createElement('div');
+    container.style.cssText = 'padding:16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;max-width:520px;box-sizing:border-box;margin-top:10px;';
+    container.innerHTML = `
+        <div style="margin-bottom:12px;font-size:14px;color:#374151;">${escapeHtml(bodyText)}</div>
+        ${total > 0 ? `<div style="margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:#6b7280;margin-bottom:4px;">
+                <span>${answered} / ${total} fields answered</span><span>${pct}%</span>
+            </div>
+            <div style="background:#e5e7eb;border-radius:4px;height:6px;overflow:hidden;">
+                <div style="background:#3B98F1;height:100%;width:${pct}%;border-radius:4px;transition:width .3s;"></div>
+            </div>
+            ${skipped > 0 ? `<div style="margin-top:6px;font-size:12px;color:#fd7e14;">${skipped} field${skipped > 1 ? 's' : ''} were skipped — you can complete them in the form.</div>` : ''}
+        </div>` : ''}
+        <div style="display:flex;gap:8px;">
+            <button class="cmp-yes" style="padding:8px 18px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500;font-size:14px;">Submit now</button>
+            <button class="cmp-no" style="padding:8px 14px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Not yet</button>
+        </div>`;
 
-    const yesBtn = document.createElement('button');
-    yesBtn.className = 'suggestion-pill';
-    yesBtn.textContent = 'Yes, complete it';
-    yesBtn.onclick = () => { actionsDiv.remove(); completeSession(); };
-
-    const noBtn = document.createElement('button');
-    noBtn.className = 'suggestion-pill';
-    noBtn.style.background = '#6b7280';
-    noBtn.textContent = 'Not yet';
-    noBtn.onclick = () => actionsDiv.remove();
-
-    actionsDiv.appendChild(yesBtn);
-    actionsDiv.appendChild(noBtn);
-    contentDiv.appendChild(actionsDiv);
+    contentDiv.innerHTML = '';
+    contentDiv.appendChild(container);
     messageDiv.appendChild(icon);
     messageDiv.appendChild(contentDiv);
     messagesArea.appendChild(messageDiv);
     scrollToBottom();
 
-    if (state.voiceMode) speakText("It looks like we've covered everything! Would you like to complete the session now?");
+    container.querySelector('.cmp-yes').onclick = () => { messageDiv.remove(); completeSession(); };
+    container.querySelector('.cmp-no').onclick  = () => messageDiv.remove();
+
+    if (state.voiceMode) speakText(bodyText);
+}
+
+function isAwaitingCompletion() {
+    if (state.sessionCompleted) return false;
+    if (state._collectingHeaderDetails) return false;
+    if ((Number(state.totalFieldCount || 0) === 0) && (Number(state.answeredFieldCount || 0) === 0)) return false;
+    const pct = Number(state.completionPercentage || 0);
+    if (pct < 100 && !state._serverMarkedComplete) return false;
+    if (state.awaitingHeaderField || state._headerFieldCallback) return false;
+
+    return !_hasBlockingFieldUi();
+}
+
+function isCompletedSessionMutationError(errorMessage) {
+    const msg = String(errorMessage || '').toLowerCase();
+    return msg.includes('cannot modify completed session')
+        || msg.includes('session is completed')
+        || msg.includes('already completed');
+}
+
+function handleCompletedSessionRefusal(errorMessage) {
+    if (!isCompletedSessionMutationError(errorMessage)) return false;
+
+    state.sessionCompleted = true;
+    if (Number(state.completionPercentage || 0) < 100) {
+        updateProgress(100, state.totalFieldCount, state.totalFieldCount || state.answeredFieldCount || 0);
+    }
+
+    setChatInputState(true, 'Session completed.');
+
+    const completeBtn = document.getElementById('completeBtnPanel');
+    if (completeBtn) {
+        completeBtn.disabled = true;
+        completeBtn.textContent = 'Session Completed';
+    }
+
+    if (!document.getElementById('completedSessionNotice')) {
+        const messagesArea = document.getElementById('messagesArea');
+        if (messagesArea) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            messageDiv.id = 'completedSessionNotice';
+
+            const icon = document.createElement('div');
+            icon.className = 'message-icon';
+            icon.innerHTML = '<i class="ph-thin ph-lock-simple"></i>';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = 'This session is already completed, so chat is now read-only. You can continue in the form page if needed.';
+
+            messageDiv.appendChild(icon);
+            messageDiv.appendChild(contentDiv);
+            messagesArea.appendChild(messageDiv);
+            scrollToBottom();
+        }
+    }
+
+    saveTranscript();
+    _markSessionCompleteLocally(state.regOthId);
+    return true;
 }
 
 // Strip font-size from inline styles so pasted content doesn't carry over font sizing
@@ -1918,7 +3177,30 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function enhanceTables(container) {
+    if (typeof jQuery === 'undefined' || !jQuery.fn.DataTable) return;
+    container.querySelectorAll('table').forEach(table => {
+        if (jQuery.fn.DataTable.isDataTable(table)) return;
+        if (!table.id) table.id = 'dt-' + Math.random().toString(36).slice(2, 9);
+        jQuery(table).DataTable({
+            dom: 'Bfrtip',
+            buttons: [
+                { extend: 'csv', text: '\u2B07 Export CSV' }
+            ],
+            paging: false,
+            searching: false,
+            info: false,
+            ordering: true
+        });
+    });
+}
+
 function addMessage(role, content) {
+    // Track every displayed message for save/restore (skip during replay)
+    if (!state._replayMode) {
+        state.displayMessages.push({ role, content });
+    }
+
     const messagesArea = document.getElementById('messagesArea');
 
     const messageDiv = document.createElement('div');
@@ -1940,8 +3222,12 @@ function addMessage(role, content) {
     } else if (role === 'user' && isMapJSON(content)) {
         // Special formatting for map JSON data from user
         contentDiv.innerHTML = formatMapJSON(content);
+    } else if (role === 'assistant' && typeof content === 'string' && /<(div|input|button|textarea)\b/i.test(content)) {
+        contentDiv.innerHTML = content;
+        enhanceTables(contentDiv);
     } else if (role === 'assistant' && typeof marked !== 'undefined') {
         contentDiv.innerHTML = marked.parse(content);
+        enhanceTables(contentDiv);
     } else {
         contentDiv.textContent = content;
     }
@@ -1953,7 +3239,7 @@ function addMessage(role, content) {
     scrollToBottom();
 
     // If voice mode is active and this is an AI message, speak it
-    if (state.voiceMode && role === 'assistant') {
+    if (state.voiceMode && role === 'assistant' && !state._replayMode) {
         state.lastAiMessage = content;
         speakText(content);
     }
@@ -2008,50 +3294,165 @@ async function autoSelectTemplate(message, templates) {
     return null;
 }
 
-function addTemplateList(templates) {
+// Returns a Bootstrap column class based on item count and max text length.
+// 1 item or very long text → lg-12; 2 items or medium text → lg-6; otherwise → lg-4
+/** Builds a Material-style floating-label searchable dropdown */
+function _makeFloatingSelect(labelText, placeholderText, options, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-floating-select-wrap';
+
+    const label = document.createElement('span');
+    label.className = 'chat-floating-label';
+    label.textContent = labelText;
+
+    const inputWrap = document.createElement('div');
+    inputWrap.style.cssText = 'position:relative;';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'chat-floating-input';
+    input.placeholder = placeholderText;
+    input.autocomplete = 'off';
+
+    const dd = document.createElement('div');
+    dd.className = 'chat-floating-dd';
+    dd.style.display = 'none';
+
+    let selectedValue = null;
+
+    const renderList = (filter) => {
+        const q = (filter || '').toLowerCase();
+        const matches = q ? options.filter(o => o.text.toLowerCase().includes(q)) : options;
+        if (!matches.length) {
+            dd.innerHTML = '<div class="chat-floating-dd-empty">No results</div>';
+        } else {
+            dd.innerHTML = matches.map((o, i) =>
+                `<div class="chat-floating-dd-item" data-idx="${i}" data-value="${escapeHtml(String(o.value))}">${escapeHtml(o.text)}</div>`
+            ).join('');
+            dd.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                el.addEventListener('mousedown', e => {
+                    e.preventDefault();
+                    const opt = matches[parseInt(el.dataset.idx)];
+                    input.value = opt.text;
+                    selectedValue = opt.value;
+                    dd.style.display = 'none';
+                    input.blur();
+                    onChange(opt.value, opt.text);
+                });
+            });
+        }
+        dd.style.display = 'block';
+    };
+
+    input.addEventListener('focus', () => renderList(input.value));
+    input.addEventListener('input',  () => { selectedValue = null; renderList(input.value); });
+    input.addEventListener('blur',   () => setTimeout(() => { dd.style.display = 'none'; }, 150));
+
+    inputWrap.appendChild(input);
+    inputWrap.appendChild(dd);
+    wrap.appendChild(label);
+    wrap.appendChild(inputWrap);
+    return wrap;
+}
+
+function getSuggestionColClass(texts) {
+    const count = texts.length;
+    const maxLen = Math.max(...texts.map(t => (t || '').trim().length));
+    if (count === 1 || maxLen > 28) return 'col-12 col-sm-12 col-md-12 col-lg-12';
+    if (count === 2 || maxLen > 20) return 'col-12 col-sm-12 col-md-6 col-lg-6';
+    return 'col-12 col-sm-12 col-md-4 col-lg-4';
+}
+
+function addTemplateList(templates, additionalTemplates) {
     // Store templates for voice recognition
     state.availableTemplates = templates;
 
     const messagesArea = document.getElementById('messagesArea');
     const lastMessage = messagesArea.lastElementChild;
+    const allTemplates = [...templates, ...(additionalTemplates || [])];
 
-    // Add numbered list to last message
-    const listDiv = document.createElement('div');
-    listDiv.className = 'template-list';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'suggestions';
 
-    templates.forEach((template, index) => {
-        const item = document.createElement('div');
-        item.className = 'template-list-item';
-        item.textContent = `${index + 1}. ${template.templateName}`;
-        listDiv.appendChild(item);
-    });
+    if (allTemplates.length > 3) {
+        // Floating-label dropdown mode — all templates in one select
+        state.availableTemplates = allTemplates;
+        const floatingSelect = _makeFloatingSelect(
+            'Template',
+            'Select a template…',
+            allTemplates.map(t => ({ value: String(t.templateID), text: t.templateName })),
+            (value) => {
+                const chosen = allTemplates.find(t => String(t.templateID) === value);
+                if (chosen) selectTemplate(chosen.templateID, chosen.templateName, chosen.estimatedFields || 0, chosen);
+            }
+        );
+        wrapper.appendChild(floatingSelect);
+    } else {
+        // Button mode — ≤ 3 templates
+        wrapper.classList.add('row', 'g-2');
+        const allTemplateNames = allTemplates.map(t => t.templateName);
+        const colClass = getSuggestionColClass(allTemplateNames);
 
-    const question = document.createElement('div');
-    question.className = 'template-question';
-    question.textContent = 'Which one would you like to Complete';
+        templates.forEach((template) => {
+            const col = document.createElement('div');
+            col.className = colClass;
+            const pill = document.createElement('button');
+            pill.className = 'btn btn-primary w-100';
+            pill.textContent = template.templateName;
+            pill.onclick = () => selectTemplate(template.templateID, template.templateName, template.estimatedFields || 0, template);
+            col.appendChild(pill);
+            wrapper.appendChild(col);
+        });
 
-    lastMessage.querySelector('.message-content').appendChild(listDiv);
-    lastMessage.querySelector('.message-content').appendChild(question);
+        if (additionalTemplates && additionalTemplates.length > 0) {
+            const loadMoreCol = document.createElement('div');
+            loadMoreCol.className = colClass;
+            const loadMoreBtn = document.createElement('button');
+            loadMoreBtn.className = 'btn btn-outline-primary w-100';
+            loadMoreBtn.textContent = `Load more (${additionalTemplates.length})…`;
+            loadMoreBtn.onclick = () => {
+                loadMoreCol.remove();
+                additionalTemplates.forEach((template) => {
+                    const col = document.createElement('div');
+                    col.className = colClass;
+                    const pill = document.createElement('button');
+                    pill.className = 'btn btn-primary w-100';
+                    pill.textContent = template.templateName;
+                    pill.onclick = () => selectTemplate(template.templateID, template.templateName, template.estimatedFields || 0, template);
+                    col.appendChild(pill);
+                    wrapper.appendChild(col);
+                });
+                state.availableTemplates = [...state.availableTemplates, ...additionalTemplates];
+                state.additionalTemplateChoices = [];
+                scrollToBottom();
+            };
+            loadMoreCol.appendChild(loadMoreBtn);
+            wrapper.appendChild(loadMoreCol);
+        }
+    }
 
-    // Add number pills
-    const suggestions = document.createElement('div');
-    suggestions.className = 'suggestions';
-
-    templates.forEach((template, index) => {
-        const pill = document.createElement('button');
-        pill.className = 'suggestion-pill';
-        pill.textContent = template.templateName;
-        pill.onclick = () => selectTemplate(template.templateID, template.templateName);
-        suggestions.appendChild(pill);
-    });
-
-    lastMessage.querySelector('.message-content').appendChild(suggestions);
+    lastMessage.querySelector('.message-content').appendChild(wrapper);
     scrollToBottom();
 }
 
-async function selectTemplate(templateID, displayText) {
+async function selectTemplate(templateID, displayText, estimatedFields = 0, templateMeta = null) {
     // Remove all suggestion pills
     document.querySelectorAll('.suggestions').forEach(el => el.remove());
+
+    // Capture total field count for the selected template
+    if (estimatedFields > 0) state.totalFieldCount = estimatedFields;
+
+    // Ensure RegTypeID/TemplateTypeID are available before header-detail APIs run
+    if (templateMeta) {
+        const selectedRegTypeId = Number(templateMeta.moduleID || templateMeta.ModuleID || 0);
+        if (selectedRegTypeId > 0) state.regTypeId = selectedRegTypeId;
+
+        const selectedTemplateTypeId = Number(templateMeta.templateTypeID || templateMeta.TemplateTypeID || 0);
+        if (selectedTemplateTypeId > 0) {
+            state.templateTypeId = selectedTemplateTypeId;
+            state.pageId = TEMPLATE_TYPE_PAGE_MAP[selectedTemplateTypeId] || state.pageId;
+        }
+    }
 
     // Add user's selection
     addMessage('user', displayText);
@@ -2060,25 +3461,725 @@ async function selectTemplate(templateID, displayText) {
     await startIntelligentSession(state.initialMessage, templateID);
 }
 
+/**
+ * Called when the user confirms / provides a name for the chat session.
+ * Clears the naming UI, saves the name, then continues into SmartFill or field-by-field.
+ */
+async function handleChatNameResponse(name, silent = false) {
+    document.querySelectorAll('.suggestions').forEach(el => el.remove());
+
+    const data = state._pendingSessionData || {};
+    state._pendingSessionData = null;
+
+    const finalName = (name && name.trim()) ? name.trim() : (state.templateName || 'Untitled Session');
+    state.chatName = finalName;
+    state.awaitingChatName = false;
+    state._chatCreatedAt = new Date().toISOString();
+
+    if (!silent) {
+        addMessage('user', name || finalName);
+    }
+
+    // Update topbar title
+    setTopbarTitle(finalName);
+
+    if (data.totalFields !== undefined && data.totalFields !== null) state.totalFieldCount = data.totalFields;
+    if (data.answeredFields !== undefined && data.answeredFields !== null) state.answeredFieldCount = data.answeredFields;
+    if (data.completionPercentage !== undefined) state.completionPercentage = data.completionPercentage;
+
+    // Create transcript index entry immediately so the sidebar shows it
+    saveTranscript();
+
+    // Show the progress widget immediately using the server's smart counts
+    if (data.completionPercentage !== undefined) {
+        updateProgress(data.completionPercentage, data.totalFields, data.answeredFields);
+    } else {
+        updateInlineChatProgress(0);
+    }
+
+    // ── Persist the user-chosen title to the server (fire-and-forget) ─────────
+    if (state.regOthId) {
+        fetch(`${CONFIG.apiUrl}/update-title`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                regOthID: state.regOthId,
+                storeID: CONFIG.storeId,
+                title: finalName,
+                updatedByID: CONFIG.userId
+            })
+        }).catch(err => console.warn('Failed to update session title:', err));
+    }
+
+    // ── Collect header record details first (if PageId known for this template type) ──────────
+    const proceedWithQuestions = () => {
+
+        // ── Smart Fill mode ──────────────────────────────────────────────────────
+        if (isSmartFillEnabled()) {
+            state.smartFillTriggered = true;
+            showSmartFillTyping();
+            setTimeout(() => runSmartFill(), 800);
+            updateDebugInfo();
+            return;
+        }
+
+        // ── Field-by-field mode ──────────────────────────────────────────────────
+
+        // Helper: show the AI message + cleanup + next field UI
+        const showNextQuestionAndFieldUI = () => {
+        addMessage('assistant', data.aiMessage);
+
+        setTimeout(() => {
+            const existingFileUpload = document.querySelector('.file-upload-container');
+            const existingMapContainer = document.querySelector('.map-container');
+            const existingDynamicData = document.querySelector('.dynamic-data-container');
+
+            if (state.currentFieldType !== '10013' && existingFileUpload) existingFileUpload.remove();
+            if (state.currentFieldType !== '10016' && existingMapContainer) existingMapContainer.remove();
+            if (state.currentFieldType !== '10020' && state.currentFieldType !== '10037' && existingDynamicData) existingDynamicData.remove();
+
+            if (state.currentFieldType === '10013') {
+                addFileUploadUI();
+            } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
+                addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
+            } else if (state.currentFieldType === '10016') {
+                let initialLocation = null;
+                if (data.extractedFields && data.extractedFields.length > 0) {
+                    const mapField = data.extractedFields.find(f => f.fieldID === state.currentFieldID);
+                    if (mapField && mapField.extractedValue) {
+                        try {
+                            const mapData = JSON.parse(mapField.extractedValue);
+                            initialLocation = mapData.Location || null;
+                        } catch (e) {
+                            initialLocation = mapField.extractedValue;
+                        }
+                    }
+                }
+                if (!initialLocation && state.initialMessage) {
+                    const locationPatterns = [
+                        /(?:at|location:|address:)\s*([^.!?,]+)/i,
+                        /(\d+\s+[A-Za-z\s]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Place|Pl)[^.!?,]*)/i,
+                        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2,})/
+                    ];
+                    for (const pattern of locationPatterns) {
+                        const match = state.initialMessage.match(pattern);
+                        if (match && match[1]) { initialLocation = match[1].trim(); break; }
+                    }
+                }
+                addMapUI(initialLocation);
+            }
+
+            if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0
+                && state.currentFieldType !== '10016') {
+                addSuggestions(data.nextSuggestedQuestions);
+            }
+            addSkipChipIfOptional();
+        }, 50);
+
+        if (data.completionPercentage !== undefined) {
+            updateProgress(data.completionPercentage, data.totalFields, data.answeredFields);
+        }
+
+        updateDebugInfo();
+    };
+
+    setTimeout(() => {
+        addSupplementaryPromptUI(
+            data.showPhotoFieldIds,
+            data.showCommentFieldIds,
+            data.showActionFieldIds,
+            data.showHazardInfo || null,
+            data.extractedFields,
+            data,
+            showNextQuestionAndFieldUI
+        );
+    }, 50);
+    }; // end proceedWithQuestions
+
+    const headerPageId = state.pageId || getCurrentPageId();
+    if (headerPageId) {
+        state.pageId = headerPageId;
+        collectHeaderDetails(() => {
+            if (!state._headerDetailsReadyForChecklist) return;
+            if (state._collectingHeaderDetails || state.awaitingHeaderField) return;
+            proceedWithQuestions();
+        });
+    } else {
+        state._headerDetailsReadyForChecklist = true;
+        proceedWithQuestions();
+    }
+}
+
+const SKIP_CHIP_STYLE = ''; // kept for compat — classes applied via _skipChipButtonHtml
+
+function _skipChipButtonHtml({ id = '', className = '', label = 'Skip (optional)', extraStyle = '', extraAttrs = '' } = {}) {
+    const idAttr    = id        ? `id="${id}"`         : '';
+    const extraCls  = className ? ` ${className}`       : '';
+    // extraStyle ignored — Bootstrap handles it; extraAttrs still forwarded (e.g. onclick)
+    return `<button ${idAttr} class="btn btn-outline-secondary btn-sm${extraCls}" ${extraAttrs || ''}>${escapeHtml(label)}</button>`;
+}
+
+/**
+ * Appends a "Skip (optional)" chip to the last assistant message when the
+ * current checklist field is not required. Clicking it sends "skip this question"
+ * through the normal chat pipeline so the server records __skipped__.
+ */
+function addSkipChipIfOptional() {
+    if (state.currentFieldRequired !== false) return;
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMessage  = messagesArea?.lastElementChild;
+    if (!lastMessage) return;
+    const content = lastMessage.querySelector('.message-content');
+    if (!content) return;
+
+    const chipDiv = document.createElement('div');
+    chipDiv.className = 'checklist-skip-chip';
+    chipDiv.style.cssText = 'margin-top:6px;';
+    chipDiv.innerHTML = _skipChipButtonHtml({ className: 'checklist-skip-btn', label: 'Skip (optional)' });
+    chipDiv.querySelector('button').onclick = () => _sendSkipMessage('Skip');
+    content.appendChild(chipDiv);
+    scrollToBottom();
+}
+
+async function _sendSkipMessage(displayText = 'Skip') {
+    if (state._collectingHeaderDetails) {
+        addMessage('assistant', 'Skip is unavailable while details are being completed. Please answer the current details question.');
+        scrollToBottom();
+        return;
+    }
+
+    if (!state.sessionStarted || !state.regOthId) return;
+    document.querySelectorAll('.suggestions, .checklist-skip-chip').forEach(el => el.remove());
+    await sendChatMessage('skip this question', displayText);
+}
+
 function addSuggestions(suggestions) {
     if (!suggestions || suggestions.length === 0) return;
+
+    state.lastSuggestedQuestions = [...suggestions];
+    state.lastSuggestionFieldId = state.currentFieldID;
 
     const messagesArea = document.getElementById('messagesArea');
     const lastMessage = messagesArea.lastElementChild;
 
-    const suggestionsDiv = document.createElement('div');
-    suggestionsDiv.className = 'suggestions';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'suggestions';
 
-    suggestions.forEach(suggestion => {
-        const pill = document.createElement('button');
-        pill.className = 'suggestion-pill';
-        // Display without brackets, but keep brackets in the value
-        pill.textContent = suggestion.replace(/[\[\]]/g, '');
-        pill.onclick = () => selectSuggestion(suggestion);
-        suggestionsDiv.appendChild(pill);
+    if (suggestions.length > 3) {
+        // Floating-label dropdown mode
+        const floatingSelect = _makeFloatingSelect(
+            'Options',
+            'Select an option…',
+            suggestions.map(s => ({ value: s, text: s.replace(/[\[\]]/g, '') })),
+            (value) => selectSuggestion(value)
+        );
+        wrapper.appendChild(floatingSelect);
+    } else {
+        // Button mode
+        wrapper.classList.add('row', 'g-2');
+        const colClass = getSuggestionColClass(suggestions.map(s => s.replace(/[\[\]]/g, '')));
+        suggestions.forEach(suggestion => {
+            const col = document.createElement('div');
+            col.className = colClass;
+            const pill = document.createElement('button');
+            pill.className = 'btn btn-primary w-100';
+            pill.textContent = suggestion.replace(/[\[\]]/g, '');
+            pill.onclick = () => selectSuggestion(suggestion);
+            col.appendChild(pill);
+            wrapper.appendChild(col);
+        });
+    }
+
+    lastMessage.querySelector('.message-content').appendChild(wrapper);
+    scrollToBottom();
+}
+
+/**
+ * Renders a compact inline form card for cluster-mode questions.
+ * Each field gets an appropriately-typed input; submitting all at once sends a
+ * structured message that the server extracts in cluster mode.
+ *
+ * @param {Array} fields  Array of ClusterFormFieldDto from the server
+ */
+function addClusterFormCard(fields) {
+    console.group('%c[addClusterFormCard]', 'color:#4CAF50;font-weight:bold');
+    console.log('fields received:', fields ? JSON.parse(JSON.stringify(fields)) : null);
+    if (!fields || fields.length === 0) { console.warn('NO FIELDS — returning early'); console.groupEnd(); return; }
+
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMessage  = messagesArea.lastElementChild;
+    if (!lastMessage) return;
+
+    const card = document.createElement('div');
+    card.className = 'cluster-form-card mt-2';
+
+    const inputEls = []; // { fieldId, label, isRequired, getValue, el, group, conditionalOnFieldId, conditionalOnValues }
+    const valueMap  = new Map(); // fieldId -> current value (for conditional visibility checks)
+
+    // Multi-select type codes — values joined with ~
+    const multiSelectCodes = new Set(['10006', '10017', '10023']);
+
+    // Re-evaluate which conditional rows are visible based on current selections (OR logic across all triggers)
+    function reevaluateVisibility() {
+        inputEls.forEach(item => {
+            if (!item.conditionalTriggers || item.conditionalTriggers.length === 0) return;
+            const show = item.conditionalTriggers.some(trigger => {
+                const triggerRaw = (valueMap.get(trigger.triggerFieldId) || '').replace(/[\[\]]/g, '').trim().toLowerCase();
+                return (trigger.allowedValues || []).some(v =>
+                    v.replace(/[\[\]]/g, '').trim().toLowerCase() === triggerRaw
+                );
+            });
+            item.group.style.display = show ? '' : 'none';
+        });
+    }
+
+    function notifyChange(fieldId, value) {
+        valueMap.set(fieldId, value || '');
+        reevaluateVisibility();
+    }
+
+    fields.forEach(field => {
+        const group = document.createElement('div');
+        group.className = 'mb-3';
+
+        const labelText = (field.questionText || field.fieldName || '') + (field.isRequired ? ' *' : '');
+        const tc = field.typeCode || '';
+        let inputEl;
+
+        // Helper: wrap any input in a notched md-field
+        const makeNotchedField = (el) => {
+            el.classList.add('md-input');
+            const wrap = document.createElement('div');
+            wrap.className = 'md-field';
+            const lbl = document.createElement('label');
+            lbl.className = 'md-label';
+            lbl.textContent = labelText;
+            wrap.appendChild(el);
+            wrap.appendChild(lbl);
+            return { wrap, el };
+        };
+
+        // Helper: build a searchable combobox identical to makeSearchSelect in the header card.
+        // multi=false → single pick; multi=true → multiple picks joined by ~
+        // fetchFn (optional): async (search) => [{id, text}] — used for dataset fields (10020/10026/10037)
+        const makeClusterCombo = (options, multi, fetchFn) => {
+            let allOpts = options.map(o => typeof o === 'string' ? { id: o, text: o } : o);
+            const selectedSet = new Set();          // used for multi only
+            const selectedTextMap = new Map();      // used for multi only: id → display text
+            let _selVal = '', _selText = '';         // used for single only
+            let fetchTimer = null;
+
+            const outer = document.createElement('div');
+            outer.className = 'md-search-select';
+
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.className = 'md-input';
+            inp.placeholder = 'Select or search…'; inp.autocomplete = 'off';
+
+            const arrow = document.createElement('span');
+            arrow.className = 'md-select-arrow'; arrow.innerHTML = '&#9662;';
+            arrow.addEventListener('mousedown', e => { e.preventDefault(); inp.focus(); });
+
+            const dd = document.createElement('div');
+            dd.className = 'chat-floating-dd';
+            dd.style.cssText = 'display:none;position:absolute;z-index:1000;width:100%;max-height:200px;overflow-y:auto;';
+
+            const renderOpts = (filter) => {
+                const q = (filter || '').trim().toLowerCase();
+                // When fetchFn is used, allOpts is already server-filtered — skip client filtering
+                const filtered = (fetchFn || !q) ? allOpts : allOpts.filter(o => o.text.toLowerCase().includes(q));
+                if (!filtered.length) {
+                    dd.innerHTML = '<div class="chat-floating-dd-empty">No results</div>';
+                    return;
+                }
+                dd.innerHTML = filtered.map(o => {
+                    const active = multi ? selectedSet.has(String(o.id)) : (_selVal === String(o.id));
+                    return `<div class="chat-floating-dd-item${active ? ' selected' : ''}"
+                        data-id="${escapeHtml(String(o.id))}" data-text="${escapeHtml(o.text)}">
+                        ${multi ? `<span class="dd-check">${active ? '&#10003;' : '&nbsp;'}</span>` : ''}
+                        ${escapeHtml(o.text)}</div>`;
+                }).join('');
+                dd.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                    el.addEventListener('mousedown', e => {
+                        e.preventDefault();
+                        const id = el.dataset.id, text = el.dataset.text;
+                        if (multi) {
+                            if (selectedSet.has(id)) { selectedSet.delete(id); selectedTextMap.delete(id); }
+                            else { selectedSet.add(id); selectedTextMap.set(id, text); }
+                            inp.value = selectedSet.size > 0 ? [...selectedSet].map(sid => {
+                                const o = allOpts.find(x => String(x.id) === sid);
+                                return o ? o.text : sid;
+                            }).join(', ') : '';
+                            notifyChange(field.fieldID, selectedSet.size > 0 ? [...selectedSet].join('~') : null);
+                            renderOpts(fetchFn ? '' : inp.value); // re-render with updated checks
+                        } else {
+                            _selVal = id; _selText = text;
+                            inp.value = text;
+                            dd.style.display = 'none';
+                            notifyChange(field.fieldID, id);
+                        }
+                    });
+                });
+            };
+
+            const doFetch = async (q) => {
+                try {
+                    const items = await fetchFn(q);
+                    allOpts = items;
+                    renderOpts('');
+                    dd.style.display = allOpts.length ? 'block' : 'block';
+                } catch (e) {
+                    dd.innerHTML = '<div class="chat-floating-dd-empty">Error loading options</div>';
+                    dd.style.display = 'block';
+                }
+            };
+
+            inp.addEventListener('focus', () => {
+                if (fetchFn) {
+                    if (allOpts.length === 0) {
+                        dd.innerHTML = '<div class="chat-floating-dd-empty">Loading…</div>';
+                        dd.style.display = 'block';
+                        doFetch(inp.value);
+                    } else {
+                        renderOpts('');
+                        dd.style.display = 'block';
+                    }
+                } else {
+                    renderOpts(inp.value); dd.style.display = 'block';
+                }
+            });
+            inp.addEventListener('blur',  () => { setTimeout(() => { dd.style.display = 'none'; }, 150); });
+            inp.addEventListener('input', () => {
+                if (!multi) { _selVal = ''; _selText = ''; }
+                if (fetchFn) {
+                    clearTimeout(fetchTimer);
+                    dd.innerHTML = '<div class="chat-floating-dd-empty">Loading…</div>';
+                    dd.style.display = 'block';
+                    fetchTimer = setTimeout(() => doFetch(inp.value), 280);
+                } else {
+                    renderOpts(inp.value);
+                    dd.style.display = 'block';
+                }
+            });
+
+            outer.appendChild(inp); outer.appendChild(arrow); outer.appendChild(dd);
+
+            // Wrap in notched md-field
+            const wrap = document.createElement('div');
+            wrap.className = 'md-field';
+            const lbl = document.createElement('label');
+            lbl.className = 'md-label';
+            lbl.textContent = labelText;
+            wrap.appendChild(outer); wrap.appendChild(lbl);
+
+            const getValue = multi
+                ? () => selectedSet.size > 0 ? [...selectedSet].join('~') : null
+                : () => _selVal || null;
+            // getValueFull: returns {Value, Text} JSON string (for dataset fields 10020/10026/10037)
+            const getValueFull = multi
+                ? () => selectedSet.size > 0
+                    ? JSON.stringify({ Value: [...selectedSet], Text: [...selectedSet].map(id => selectedTextMap.get(id) || id) })
+                    : null
+                : () => _selVal
+                    ? JSON.stringify({ Value: _selVal, Text: _selText })
+                    : null;
+
+            return { wrap, getValue, getValueFull, el: inp };
+        };
+
+        // ── Dataset Dropdown / SubDynamicCombo / Dataset Multi-select (10020 / 10026 / 10037) ──
+        console.log(`  field #${field.fieldID} "${field.fieldName}" | typeCode=${tc} | options=${field.options ? field.options.length : 'NULL'} | dynamicFilterCondn=${field.dynamicFilterCondn ? field.dynamicFilterCondn.slice(0,80)+'…' : 'NULL'}`);
+        if (tc === '10020' || tc === '10026' || tc === '10037') {
+            const isMulti = tc === '10037';
+            const filterCondn = field.dynamicFilterCondn;
+            if (!filterCondn) {
+                console.warn(`  [DATASET FALLBACK] field ${field.fieldID} has no dynamicFilterCondn — plain text`);
+                // No filter config — fall back to plain text input
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.oninput = () => notifyChange(field.fieldID, inp.value.trim());
+                const { wrap, el } = makeNotchedField(inp);
+                group.appendChild(wrap);
+                inputEl = { getValue: () => inp.value.trim() || null, el };
+            } else {
+                let parsedFilter;
+                try { parsedFilter = JSON.parse(filterCondn); } catch (e) { parsedFilter = filterCondn; }
+                const baseUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template$/i, '');
+                const asmxUrl = baseUrl + '/NetServices/POSTBusinessPlan.asmx/spGetDynamicDataV2';
+                const primaryField = (parsedFilter && parsedFilter.primaryDetails)
+                    || (parsedFilter && parsedFilter.fieldData && parsedFilter.fieldData.find(f => f.isPrimaryKey));
+                console.log(`  [DATASET] field ${field.fieldID} isMulti=${isMulti} asmxUrl=${asmxUrl}`);
+                console.log(`  [DATASET] parsedFilter:`, parsedFilter);
+                const fetchFn = async (search) => {
+                    if (!parsedFilter || !parsedFilter.fieldData) { console.warn('[DATASET fetchFn] parsedFilter missing fieldData'); return []; }
+                    console.log(`[DATASET fetchFn] field=${field.fieldID} search="${search}"`);
+                    try {
+                        const resp = await fetch(asmxUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                dynamicFilters: parsedFilter,
+                                search: search || '',
+                                value: '',
+                                type: '',
+                                RegOthHazardTempalteID: field.fieldID
+                            })
+                        });
+                        const json = await resp.json();
+                        let raw = json.d || json;
+                        if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = []; } }
+                        console.log(`[DATASET fetchFn] raw response (first 3):`, Array.isArray(raw) ? raw.slice(0,3) : raw);
+                        if (!Array.isArray(raw)) { console.warn('[DATASET fetchFn] raw is not array:', raw); return []; }
+                        return raw.map(row => {
+                            let id = null, textParts = [];
+                            (parsedFilter.fieldData || []).forEach(fd => {
+                                const val = row[fd.fieldName];
+                                if (fd.isPrimaryKey || (primaryField && fd.fieldName === primaryField.fieldName)) {
+                                    id = val;
+                                } else if (fd.display !== 'hide') {
+                                    textParts.push(val != null ? String(val) : '');
+                                }
+                            });
+                            return id != null ? { id: String(id), text: textParts.join(' ').trim() } : null;
+                        }).filter(Boolean);
+                    } catch (e) {
+                        console.error('[ClusterDataset] fetch error:', e);
+                        return [];
+                    }
+                };
+                const { wrap, getValueFull, el } = makeClusterCombo([], isMulti, fetchFn);
+                console.log(`  [DATASET] combo created for field ${field.fieldID}`);
+                group.appendChild(wrap);
+                inputEl = { getValue: getValueFull, el };
+            }
+        }
+
+        // ── YesNo / YesNoNA — single-select searchable combobox ───────────
+        else if (tc === '10008' || tc === '10009') {
+            const opts = tc === '10009' ? ['YES', 'NO', 'N/A'] : ['YES', 'NO'];
+            const mapped = opts.map(o => ({ id: `[${o}]`, text: o }));
+            const { wrap, getValue, el } = makeClusterCombo(mapped, false);
+            group.appendChild(wrap);
+            inputEl = { getValue, el };
+        }
+
+        // ── Multi-select — searchable combobox with checkmarks ────────────
+        else if (multiSelectCodes.has(tc) && field.options && field.options.length > 0) {
+            const { wrap, getValue, el } = makeClusterCombo(field.options, true);
+            group.appendChild(wrap);
+            inputEl = { getValue, el };
+        }
+
+        // ── Single-select — searchable combobox ───────────────────────────
+        else if (field.options && field.options.length > 0) {
+            const { wrap, getValue, el } = makeClusterCombo(field.options, false);
+            group.appendChild(wrap);
+            inputEl = { getValue, el };
+        }
+
+        // ── Date ───────────────────────────────────────────────────────────
+        else if (tc === '10010') {
+            const inp = document.createElement('input');
+            inp.type = 'date';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value);
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value || null, el };
+        }
+
+        // ── Time ───────────────────────────────────────────────────────────
+        else if (tc === '10012') {
+            const inp = document.createElement('input');
+            inp.type = 'time';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value);
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value || null, el };
+        }
+
+        // ── Number ─────────────────────────────────────────────────────────
+        else if (tc === '10003' || tc === '10025') {
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value);
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value || null, el };
+        }
+
+        // ── Textarea ───────────────────────────────────────────────────────
+        else if (tc === '10002' || tc === '10004') {
+            const ta = document.createElement('textarea');
+            ta.rows = 3;
+            ta.style.resize = 'vertical';
+            ta.oninput = () => notifyChange(field.fieldID, ta.value.trim());
+            const { wrap, el } = makeNotchedField(ta);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => ta.value.trim() || null, el };
+        }
+
+        // ── Default: single-line text ──────────────────────────────────────
+        else {
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value.trim());
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value.trim() || null, el };
+        }
+
+        console.log(`  pushed inputEl for field ${field.fieldID}, getValue=${typeof (inputEl && inputEl.getValue)}`);
+        inputEls.push({
+            fieldId:             field.fieldID,
+            label:               field.fieldName,
+            isRequired:          field.isRequired,
+            group,
+            conditionalTriggers: field.conditionalTriggers || null,
+            ...inputEl
+        });
+        card.appendChild(group);
     });
+    console.log('inputEls built:', inputEls.length, '| ids:', inputEls.map(i => i.fieldId));
+    console.groupEnd();
 
-    lastMessage.querySelector('.message-content').appendChild(suggestionsDiv);
+    // Initial pass — hide conditional rows until their trigger is answered
+    reevaluateVisibility();
+
+    // ── Skip all button (only shown when all visible fields are optional) ──
+    const allOptional = inputEls.every(it => !it.isRequired);
+    if (allOptional) {
+        const skipAllBtn = document.createElement('button');
+        skipAllBtn.type = 'button';
+        skipAllBtn.className = 'btn btn-outline-secondary btn-sm w-100 mt-2 mb-1';
+        skipAllBtn.textContent = 'Skip (optional)';
+        skipAllBtn.onclick = () => {
+            card.remove();
+            // Mark all cluster field IDs as confirmed so server skips them
+            inputEls.forEach(it => {
+                if (!state.chatConfirmedFieldIds.includes(it.fieldId))
+                    state.chatConfirmedFieldIds.push(it.fieldId);
+            });
+            saveConfirmedFieldIds(state.regOthId, state.chatConfirmedFieldIds);
+            sendChatMessage('What is the next question?', '');
+        };
+        card.appendChild(skipAllBtn);
+    }
+
+    // ── Submit button ──────────────────────────────────────────────────────
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'btn btn-primary hdr-submit-btn w-100 mt-2';
+    submitBtn.textContent = 'Submit answers';
+    submitBtn.onclick = async () => {
+        const parts = [];
+        let hasError = false;
+        const fieldsToSave = [];
+
+        console.group('%c[ClusterSubmit]', 'color:#FF5722;font-weight:bold');
+        inputEls.forEach(item => {
+            // Skip hidden conditional fields
+            if (item.group.style.display === 'none') { console.log(`  field ${item.fieldId} SKIPPED (hidden)`); return; }
+
+            const val = item.getValue ? item.getValue() : null;
+            console.log(`  field ${item.fieldId} "${item.label}" val=${JSON.stringify(val)} required=${item.isRequired}`);
+            if (!val && item.isRequired) {
+                hasError = true;
+                if (item.el) item.el.classList.add('md-input--error');
+            } else {
+                if (item.el) item.el.classList.remove('md-input--error');
+                if (val) {
+                    parts.push(`${item.label}: ${val}`);
+                    fieldsToSave.push({ fieldID: item.fieldId, value: val });
+                }
+            }
+        });
+        console.log('fieldsToSave:', JSON.parse(JSON.stringify(fieldsToSave)));
+        console.groupEnd();
+
+        if (hasError) {
+            console.warn('[ClusterSubmit] blocked by required field error');
+            // Show or update error banner inside the card
+            let banner = card.querySelector('.cluster-error-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.className = 'cluster-error-banner';
+                banner.style.cssText = 'background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:8px;color:#856404;font-size:13px;';
+                card.insertBefore(banner, submitBtn);
+            }
+            const missing = inputEls
+                .filter(it => it.group.style.display !== 'none' && it.isRequired && !it.getValue?.())
+                .map(it => it.label.replace(/&nbsp;/g,'').trim());
+            banner.textContent = '⚠ Please fill in: ' + missing.join(', ');
+            // Scroll first errored field into view
+            const firstErr = inputEls.find(it => it.isRequired && !it.getValue?.());
+            if (firstErr) firstErr.el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+        if (fieldsToSave.length === 0) { console.warn('[ClusterSubmit] nothing to save'); return; }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving…';
+
+        const regOthID = state.regOthId; // CONFIG has no regOthId — session ID lives in state
+        console.log('[ClusterSubmit] using regOthID:', regOthID, '| storeID:', CONFIG.storeId, '| userID:', CONFIG.userId);
+
+        let saveOk = false;
+        try {
+            // Save ALL fields directly — bypasses AI extraction (no "one field per turn" limit)
+            const confirmUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template$/i, '') + '/affinda/api/smart-fill/confirm';
+            const resp = await fetch(confirmUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    regOthID: regOthID,
+                    storeID:  CONFIG.storeId,
+                    userID:   CONFIG.userId,
+                    confirmedFields: fieldsToSave
+                })
+            });
+            const result = await resp.json();
+            console.log('[ClusterSubmit] save result:', result);
+            if (result.success) {
+                saveOk = true;
+            } else {
+                console.error('[ClusterSubmit] Direct save failed:', result.message);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit answers';
+                let banner = card.querySelector('.cluster-error-banner');
+                if (!banner) {
+                    banner = document.createElement('div');
+                    banner.className = 'cluster-error-banner';
+                    banner.style.cssText = 'background:#f8d7da;border:1px solid #f5c2c7;border-radius:6px;padding:8px 12px;margin-bottom:8px;color:#842029;font-size:13px;';
+                    card.insertBefore(banner, submitBtn);
+                }
+                banner.textContent = '❌ Save failed: ' + result.message;
+                return;
+            }
+        } catch (e) {
+            console.error('[ClusterSubmit] Direct save error:', e);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit answers';
+            return;
+        }
+
+        // Only proceed if save succeeded
+        card.remove();
+
+        // Add all saved field IDs to confirmedFieldIds so the server excludes them from next cluster
+        fieldsToSave.forEach(f => {
+            if (!state.chatConfirmedFieldIds.includes(f.fieldID)) {
+                state.chatConfirmedFieldIds.push(f.fieldID);
+            }
+        });
+        saveConfirmedFieldIds(state.regOthId, state.chatConfirmedFieldIds);
+
+        // Call the chat API - show the submitted answers as the user bubble,
+        // but send a clean "next question" trigger so the AI doesn't re-extract saved fields
+        sendChatMessage('What is the next question?', parts.join('\n'));
+    };
+    card.appendChild(submitBtn);
+
+    lastMessage.querySelector('.message-content').appendChild(card);
     scrollToBottom();
 }
 
@@ -2092,69 +4193,273 @@ function selectSuggestion(suggestion) {
     if (state.currentFieldType === '10016' && 
         (cleanSuggestion === 'yes' || cleanSuggestion === 'confirm')) {
         
-        // Check if map UI is still visible
-        const mapContainer = document.querySelector('.map-container');
-        if (mapContainer) {
-            // Map is still visible, user clicked "Yes" without clicking "Confirm Location"
-            // Auto-extract the data from the map and confirm it
-            const latInput = document.getElementById('mapLatitude');
-            const lngInput = document.getElementById('mapLongitude');
-            const locationNameDiv = document.getElementById('mapLocationName');
-            
-            if (latInput && lngInput && latInput.value && lngInput.value) {
-                const lat = parseFloat(latInput.value);
-                const lng = parseFloat(lngInput.value);
-                const locationText = locationNameDiv ? 
-                    locationNameDiv.textContent
-                        .replace('📍 ', '')
-                        .replace('🔍 Looking up address...', 'Custom Location')
-                        .replace(/^✓ Pre-filled from your message\s+/, '') // Remove the prefix if present
-                    : 'Custom Location';
-                
-                if (!isNaN(lat) && !isNaN(lng)) {
-                    // Format as JSON
-                    const mapData = {
-                        Latitude: lat,
-                        Longitude: lng,
-                        Location: locationText.trim()
-                    };
-                    const mapDataString = JSON.stringify(mapData);
-                    
-                    console.log('User clicked "Yes" with map visible, auto-confirming location:', mapDataString);
-                    
-                    // Remove map UI
-                    mapContainer.remove();
-                    
-                    // Reset map instances
-                    mapInstance = null;
-                    mapMarker = null;
-                    mapGeocoder = null;
-                    
-                    // Send the JSON data
-                    getActiveInput().value = mapDataString;
-                    sendMessage();
-                    
-                    // Clear the last map data
-                    state.lastMapData = null;
-                    return;
-                }
-            }
-        }
-        
-        // If we have stored map data (user already clicked "Confirm Location"), use it
+        // Map fields must always be confirmed via the "Confirm Location" button.
+        // Only send stored map data if the user already explicitly clicked "Confirm Location".
         if (state.lastMapData) {
             console.log('User confirmed map location with "Yes", sending stored map data:', state.lastMapData);
             getActiveInput().value = state.lastMapData;
             sendMessage();
-            // Clear the last map data after using it
             state.lastMapData = null;
             return;
         }
+        // Map not yet confirmed — fall through to send as normal text message
     }
 
     // Send as user message via the currently active input
     getActiveInput().value = suggestion;
     sendMessage();
+}
+
+// ── Dynamic Dataset Dropdown / Multi-select UI (10020 / 10037) ────────────
+function addDynamicDataUI(fieldType, dynamicFilterJson) {
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMessage = messagesArea.lastElementChild;
+    if (!lastMessage) return;
+
+    // Remove any existing dynamic data container
+    const existing = document.querySelector('.dynamic-data-container');
+    if (existing) existing.remove();
+
+    // Parse the filter config
+    let filterConfig;
+    try {
+        filterConfig = typeof dynamicFilterJson === 'string' ? JSON.parse(dynamicFilterJson) : dynamicFilterJson;
+    } catch (e) {
+        console.warn('[DynamicData] Failed to parse DynamicFilterCondn:', e);
+        return;
+    }
+    if (!filterConfig || !filterConfig.fieldData) {
+        console.warn('[DynamicData] Invalid filter config — missing fieldData');
+        return;
+    }
+
+    const isMulti = fieldType === '10037';
+    const currentFieldId = Number(state.currentFieldID || 0);
+    const container = document.createElement('div');
+    container.className = 'dynamic-data-container';
+    container.style.cssText = 'margin-top: 12px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e5e7eb;';
+
+    // Build the ASMX URL — derive base from CONFIG.apiUrl
+    // CONFIG.apiUrl = https://beta.whsmonitor.com.au/affinda/api/chat-template
+    // ASMX lives at  https://beta.whsmonitor.com.au/NetServices/POSTBusinessPlan.asmx/spGetDynamicDataV2
+    const baseUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template$/i, '');
+    const asmxUrl = baseUrl + '/NetServices/POSTBusinessPlan.asmx/spGetDynamicDataV2';
+
+    // Identify primary key field
+    const primaryField = filterConfig.primaryDetails
+        || filterConfig.fieldData.find(f => f.isPrimaryKey);
+
+    container.innerHTML = `
+        <div class="chat-floating-select-wrap" style="margin-top:0;">
+            <span class="chat-floating-label">${isMulti ? 'Select options' : 'Select an option'}</span>
+            <div style="position:relative;">
+                <input type="text" id="dynamicDataSearch" class="chat-floating-input" autocomplete="off"
+                       placeholder="Type to search...">
+                <div id="dynamicDataDropdown" class="chat-floating-dd" style="display:none;"></div>
+            </div>
+        </div>
+        ${isMulti ? '<div id="dynamicDataChips" style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;"></div>' : ''}
+        <div style="margin-top: 10px; display: flex; gap: 8px;">
+            ${isMulti ? `<button id="dynamicDataSubmit" class="btn btn-primary btn-sm">Confirm Selection</button>` : ''}
+            ${_skipChipButtonHtml({ id: 'dynamicDataSkip', label: 'Skip (optional)' })}
+        </div>
+    `;
+
+    lastMessage.querySelector('.message-content').appendChild(container);
+    scrollToBottom();
+
+    // State for selections
+    const selectedItems = []; // { id, text }
+    let debounceTimer = null;
+    let lastFetchedItems = []; // cached items from last fetch — indexed by data-idx
+
+    const searchInput = document.getElementById('dynamicDataSearch');
+    const dropdown = document.getElementById('dynamicDataDropdown');
+    const chipsContainer = document.getElementById('dynamicDataChips');
+    const submitBtn = document.getElementById('dynamicDataSubmit');
+    const skipBtn = document.getElementById('dynamicDataSkip');
+
+    // ── Fetch data from ASMX ─────────────────────────────────────────────
+    async function fetchOptions(searchText) {
+        try {
+            const requestBody = {
+                dynamicFilters: filterConfig,
+                search: searchText || '',
+                value: JSON.stringify(selectedItems.map(s => s.id)),
+                type: '',
+                RegOthHazardTempalteID: currentFieldId
+            };
+
+            const resp = await fetch(asmxUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+            const json = await resp.json();
+            let rawData = json.d || json;
+            if (typeof rawData === 'string') {
+                try {
+                    rawData = JSON.parse(rawData);
+                } catch {
+                    rawData = [];
+                }
+            }
+
+            // Transform using same logic as $.makeSelectData
+            const items = [];
+            if (Array.isArray(rawData)) {
+                rawData.forEach(row => {
+                    let id = null;
+                    let textParts = [];
+                    filterConfig.fieldData.forEach(fd => {
+                        const val = row[fd.fieldName];
+                        if (fd.isPrimaryKey || (primaryField && fd.fieldName === primaryField.fieldName)) {
+                            id = val;
+                        } else if (fd.display !== 'hide') {
+                            textParts.push(val != null ? String(val) : '');
+                        }
+                    });
+                    if (id != null) {
+                        items.push({ id: id, text: textParts.join(' ').trim() });
+                    }
+                });
+            }
+            lastFetchedItems = items;
+            return items;
+        } catch (err) {
+            console.warn('[DynamicData] ASMX fetch error:', err);
+            lastFetchedItems = [];
+            return [];
+        }
+    }
+
+    // ── Build a unique key for a selection (id + text) ───────────────────
+    function itemKey(item) { return String(item.id) + '|||' + String(item.text); }
+
+    // ── Render dropdown items ────────────────────────────────────────────
+    function renderDropdown(items) {
+        if (!items || items.length === 0) {
+            dropdown.innerHTML = '<div class="chat-floating-dd-empty">No results found</div>';
+            dropdown.style.display = 'block';
+            return;
+        }
+        const selectedKeys = new Set(selectedItems.map(s => itemKey(s)));
+        dropdown.innerHTML = items.map((item, idx) => {
+            const isSelected = selectedKeys.has(itemKey(item));
+            return `<div class="chat-floating-dd-item${isSelected ? ' dd-item-selected' : ''} dynamic-option" data-idx="${idx}">${item.text}</div>`;
+        }).join('');
+        dropdown.style.display = 'block';
+    }
+
+    // ── Render chips (multi-select) ──────────────────────────────────────
+    function renderChips() {
+        if (!chipsContainer) return;
+        chipsContainer.innerHTML = selectedItems.map((item, idx) =>
+            `<span style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; background:#3B98F1; color:white; border-radius:16px; font-size:13px;">
+                ${item.text}
+                <span data-remove-idx="${idx}" style="cursor:pointer; font-weight:bold; margin-left:2px;" title="Remove">&times;</span>
+            </span>`
+        ).join('');
+
+        // Bind remove clicks
+        chipsContainer.querySelectorAll('[data-remove-idx]').forEach(el => {
+            el.addEventListener('click', () => {
+                const idx = parseInt(el.getAttribute('data-remove-idx'));
+                selectedItems.splice(idx, 1);
+                renderChips();
+            });
+        });
+    }
+
+    // ── Event: search input ──────────────────────────────────────────────
+    searchInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            const text = searchInput.value.trim();
+            if (text.length < 1) { dropdown.style.display = 'none'; return; }
+            dropdown.innerHTML = '<div class="chat-floating-dd-empty">Searching...</div>';
+            dropdown.style.display = 'block';
+            const items = await fetchOptions(text);
+            renderDropdown(items);
+        }, 300);
+    });
+
+    // Show dropdown on focus with empty search (load initial data)
+    searchInput.addEventListener('focus', async () => {
+        if (dropdown.children.length === 0 || dropdown.style.display === 'none') {
+            dropdown.innerHTML = '<div class="chat-floating-dd-empty">Loading...</div>';
+            dropdown.style.display = 'block';
+            const items = await fetchOptions('');
+            renderDropdown(items);
+        }
+    });
+
+    // ── Event: option click ──────────────────────────────────────────────
+    dropdown.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent outside-click listener from closing the dropdown
+        const option = e.target.closest('.dynamic-option');
+        if (!option) return;
+
+        const idx = parseInt(option.getAttribute('data-idx'));
+        const item = lastFetchedItems[idx];
+        if (!item) return;
+
+        if (isMulti) {
+            // Toggle selection using composite key (id + text) for uniqueness
+            const key = itemKey(item);
+            const existingIdx = selectedItems.findIndex(s => itemKey(s) === key);
+            if (existingIdx >= 0) {
+                selectedItems.splice(existingIdx, 1);
+            } else {
+                selectedItems.push({ id: item.id, text: item.text });
+            }
+            renderChips();
+            // Re-render dropdown in-place to show check marks (no new fetch)
+            renderDropdown(lastFetchedItems);
+            searchInput.focus();
+        } else {
+            // Single select — submit immediately
+            dropdown.style.display = 'none';
+            const jsonAnswer = JSON.stringify({ Value: String(item.id), Text: item.text });
+            container.remove();
+            sendChatMessage(jsonAnswer, item.text);
+        }
+    });
+
+    // ── Event: submit button (multi-select) ──────────────────────────────
+    if (submitBtn) {
+        submitBtn.addEventListener('click', () => {
+            if (selectedItems.length === 0) {
+                alert('Please select at least one option.');
+                return;
+            }
+            const ids = selectedItems.map(s => s.id);
+            const texts = selectedItems.map(s => s.text);
+            const jsonAnswer = JSON.stringify({ Value: ids, Text: texts });
+            const displayText = texts.join(', ');
+            container.remove();
+            sendChatMessage(jsonAnswer, displayText);
+        });
+    }
+
+    // ── Event: skip button ───────────────────────────────────────────────
+    skipBtn.addEventListener('click', () => {
+        container.remove();
+        _sendSkipMessage('Skip');
+    });
+
+    // ── Close dropdown on outside click ──────────────────────────────────
+    document.addEventListener('click', function closeDynDrop(e) {
+        if (!container.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
+        // Clean up listener when container is removed
+        if (!document.body.contains(container)) {
+            document.removeEventListener('click', closeDynDrop);
+        }
+    });
+
+    scrollToBottom();
 }
 
 function addFileUploadUI() {
@@ -2163,16 +4468,16 @@ function addFileUploadUI() {
     
     const fileUploadDiv = document.createElement('div');
     fileUploadDiv.className = 'file-upload-container';
-    fileUploadDiv.style.cssText = 'margin-top: 12px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #dee2e6;';
+    fileUploadDiv.style.cssText = 'margin-top: 12px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #e5e7eb;';
     
     fileUploadDiv.innerHTML = `
         <div style="display: flex; align-items: center; gap: 12px;">
-            <input type="file" id="fileUploadInput" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; background: white;">
-            <button id="fileUploadButton" onclick="handleFileUpload()" style="padding: 8px 16px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+            <input type="file" id="fileUploadInput" style="flex: 1; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px; background: white;">
+            <button id="fileUploadButton" onclick="handleFileUpload()" style="padding: 8px 16px; background: #3B98F1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                 Upload
             </button>
         </div>
-        <div id="fileUploadProgress" style="margin-top: 8px; display: none; color: #6c757d; font-size: 13px;"></div>
+        <div id="fileUploadProgress" style="margin-top: 8px; display: none; color: #6b7280; font-size: 13px;"></div>
     `;
     
     lastMessage.querySelector('.message-content').appendChild(fileUploadDiv);
@@ -2210,7 +4515,7 @@ async function handleFileUpload() {
         const data = await response.json();
         
         if (data.success) {
-            progress.textContent = `✓ Uploaded: ${file.name}`;
+            progress.textContent = `Uploaded: ${file.name}`;
             progress.style.color = '#198754';
             
             // Remove file upload UI
@@ -2219,8 +4524,8 @@ async function handleFileUpload() {
                 fileUploadContainer.remove();
             }
             
-            // Auto-submit the file path as the answer
-            await sendChatMessage(data.filePath);
+            // Auto-submit the file path as the answer (show friendly filename in chat, send path to API)
+            await sendChatMessage(data.filePath, file.name);
         } else {
             progress.textContent = ` Upload failed: ${data.errorMessage || 'Unknown error'}`;
             progress.style.color = '#dc3545';
@@ -2237,7 +4542,2365 @@ async function handleFileUpload() {
     }
 }
 
-// Google Maps state
+// ── ShowPhoto prompt ─────────────────────────────────────────────────────────
+
+/**
+ * Shared accordion helper for Photo / Comment / Action prompts.
+ * Renders a grey card with one row per field. Each row has an "Add" button that
+ * expands the form inline, and a "Skip" link. Calls onComplete() when all rows
+ * are resolved.
+ *
+ * @param {object[]} fields        - [{ id, name }]
+ * @param {string}   iconClass     - Phosphor icon class e.g. 'ph-thin ph-camera'
+ * @param {string}   heading       - Card heading text
+ * @param {string}   addLabel      - Label for the expand button e.g. 'Add Photo'
+ * @param {function} buildFormFn   - (fieldId, rowBodyEl, onRowDone) → void
+ * @param {function} onComplete    - called when every row is resolved
+ */
+function _buildFieldAccordionCard(fields, iconClass, heading, addLabel, buildFormFn, onComplete) {
+    if (!fields || !fields.length) { if (onComplete) onComplete(); return; }
+
+    const messagesArea = document.getElementById('messagesArea');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message assistant';
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'message-icon';
+    iconEl.innerHTML = `<i class="${iconClass}"></i>`;
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'padding:0;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;width:100%;max-width:520px;box-sizing:border-box;overflow:hidden;';
+
+    // Header row
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#6b7280;font-weight:500;';
+    header.textContent = heading;
+    card.appendChild(header);
+
+    let pending = fields.length;
+    const checkDone = () => { if (--pending <= 0 && onComplete) onComplete(); };
+
+    fields.forEach((f, idx) => {
+        const isLast = idx === fields.length - 1;
+
+        const rowWrap = document.createElement('div');
+        rowWrap.style.cssText = `border-bottom:${isLast ? 'none' : '1px solid #e5e7eb'};`;
+
+        // ── Row header (icon + name + buttons) ──────────────────────────────
+        const rowHead = document.createElement('div');
+        rowHead.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 16px;';
+        rowHead.innerHTML = `
+            <i class="${iconClass}" style="color:#3B98F1;font-size:16px;flex-shrink:0;"></i>
+            <span style="flex:1;font-size:14px;color:#374151;">${escapeHtml(f.name)}</span>
+            <button class="acc-add-btn btn btn-primary btn-sm" style="white-space:nowrap;">${addLabel}</button>
+            ${_skipChipButtonHtml({ className: 'acc-skip-btn', label: 'Skip (optional)' })}
+        `;
+
+        // ── Expandable form area ─────────────────────────────────────────────
+        const rowBody = document.createElement('div');
+        rowBody.style.cssText = 'display:none;padding:0 16px 14px;';
+
+        rowWrap.appendChild(rowHead);
+        rowWrap.appendChild(rowBody);
+        card.appendChild(rowWrap);
+
+        const addBtn  = rowHead.querySelector('.acc-add-btn');
+        const skipBtn = rowHead.querySelector('.acc-skip-btn');
+
+        const markDone = (label, color) => {
+            addBtn.remove();
+            skipBtn.remove();
+            const badge = document.createElement('span');
+            badge.style.cssText = `color:${color};font-size:13px;font-weight:500;`;
+            badge.textContent = label;
+            rowHead.appendChild(badge);
+            checkDone();
+        };
+
+        addBtn.onclick = () => {
+            addBtn.disabled = true;
+            skipBtn.style.display = 'none';
+            rowBody.style.display = 'block';
+            scrollToBottom();
+            buildFormFn(f.id, rowBody, (saved) => {
+                rowBody.style.display = saved ? 'block' : 'none';
+                markDone(saved ? 'Added' : '⊘ Skipped', saved ? '#198754' : '#6b7280');
+            });
+        };
+
+        skipBtn.onclick = () => markDone('⊘ Skipped', '#6b7280');
+    });
+
+    // Footer skip-all link (only shown when >1 field)
+    if (fields.length > 1) {
+        const footer = document.createElement('div');
+        footer.style.cssText = 'padding:10px 16px;border-top:1px solid #e5e7eb;text-align:right;';
+        footer.innerHTML = _skipChipButtonHtml({ className: 'acc-skip-all-btn', label: 'Skip all', extraStyle: 'font-style:normal;' });
+        footer.querySelector('button').onclick = () => {
+            card.querySelectorAll('.acc-add-btn,.acc-skip-btn').forEach(b => b.click && b.dispatchEvent(new MouseEvent('click')));
+        };
+        card.appendChild(footer);
+    }
+
+    contentDiv.appendChild(card);
+    msgDiv.appendChild(iconEl);
+    msgDiv.appendChild(contentDiv);
+    messagesArea.appendChild(msgDiv);
+    scrollToBottom();
+}
+
+function addSupplementaryPromptUI(photoFieldIds, commentFieldIds, actionFieldIds, hazardInfo, extractedFields, responseData, onComplete) {
+    const hasPhoto   = Array.isArray(photoFieldIds)   && photoFieldIds.length   > 0;
+    const hasComment = Array.isArray(commentFieldIds) && commentFieldIds.length > 0;
+    const hasAction  = Array.isArray(actionFieldIds)  && actionFieldIds.length  > 0;
+    const hasHazard  = !!(hazardInfo && (hazardInfo.hazardTemplateDetId || hazardInfo.fieldId));
+    if (!hasPhoto && !hasComment && !hasAction && !hasHazard) { if (onComplete) onComplete(); return; }
+
+    const options = [];
+    if (hasPhoto)   options.push({ key: 'photo',   label: 'Photo',   icon: 'ph-thin ph-camera' });
+    if (hasComment) options.push({ key: 'comment', label: 'Comment', icon: 'ph-thin ph-chat-text' });
+    if (hasAction)  options.push({ key: 'action',  label: 'Action',  icon: 'ph-thin ph-clipboard-text' });
+    if (hasHazard)  options.push({ key: 'hazard',  label: 'Hazard',  icon: 'ph-thin ph-warning' });
+    const availableKeys = options.map(function(o) { return o.key; });
+
+    // ── DOM ───────────────────────────────────────────────────────────────────
+    const messagesArea = document.getElementById('messagesArea');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message assistant';
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'message-icon';
+    iconEl.innerHTML = '<i class="ph-thin ph-paperclip"></i>';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content message-add-ons';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'padding:0;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;width:100%;max-width:520px;box-sizing:border-box;overflow:hidden;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#6b7280;font-weight:500;';
+    header.textContent = 'Would you like to add anything else?';
+    card.appendChild(header);
+
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:12px 16px;';
+    card.appendChild(body);
+
+    // ── Chip strip ─────────────────────────────────────────────────────────────
+    const chipWrap = document.createElement('div');
+    chipWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;';
+    body.appendChild(chipWrap);
+
+    // AI hint bar
+    const hint = document.createElement('div');
+    hint.style.cssText = 'display:none;font-size:12px;color:#374151;margin-bottom:8px;padding:8px 10px;background:#f0f7ff;border-radius:6px;border:1px solid #dbeafe;line-height:1.5;';
+    body.appendChild(hint);
+
+    // Form area — one section visible at a time
+    const rowBody = document.createElement('div');
+    rowBody.style.cssText = 'display:none;padding:0 0 4px;';
+    body.appendChild(rowBody);
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:10px 16px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;';
+    const skipBtn = document.createElement('button');
+    skipBtn.className = 'supp-skip';
+    skipBtn.style.cssText = 'padding:8px 16px;background:white;color:#6b7280;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;font-size:13px;';
+    skipBtn.textContent = 'Skip';
+    const contBtn = document.createElement('button');
+    contBtn.className = 'supp-continue';
+    contBtn.style.cssText = 'padding:8px 16px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;';
+    contBtn.textContent = 'Continue';
+    footer.appendChild(skipBtn);
+    footer.appendChild(contBtn);
+    card.appendChild(footer);
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    const doneMap  = {};
+    const chipEls  = {};
+    let   activeKey = null;
+    let   _hazardSaveFromChat = null;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    const _setHint = function(html, show) {
+        hint.style.display = (show === false) ? 'none' : 'block';
+        if (html !== undefined) hint.innerHTML = html;
+    };
+
+    const _done = function() {
+        _undockCard();
+        state._suppChatHandler = null;
+        const ed = document.querySelector('#chatMessageInput .ql-editor');
+        if (ed) ed.dataset.placeholder = 'Type your message...';
+        setChatInputState(false, 'Type your message...');
+        if (onComplete) onComplete();
+    };
+
+    const _setChipStyle = function(key, isActive) {
+        const btn = chipEls[key];
+        if (!btn) return;
+        if (doneMap[key]) {
+            btn.style.background = '#e8f5ee'; btn.style.borderColor = '#198754'; btn.style.color = '#198754';
+            return;
+        }
+        if (isActive) {
+            btn.style.background = '#3B98F1'; btn.style.borderColor = '#3B98F1'; btn.style.color = 'white';
+        } else {
+            btn.style.background = 'white'; btn.style.borderColor = '#3B98F1'; btn.style.color = '#3B98F1';
+        }
+    };
+
+    // Open (or re-use) a form in the shared rowBody container
+    const _openFormInCard = function(key) {
+        if (activeKey === key) return; // already shown
+        Object.keys(chipEls).forEach(function(k) { _setChipStyle(k, k === key); });
+        activeKey = key;
+        rowBody.style.display = 'block';
+        rowBody.innerHTML = '';
+        if (key === 'photo') {
+            _showPhotoFormInline(photoFieldIds[0], rowBody, function(saved) {
+                if (saved) { doneMap.photo = true; _setChipStyle('photo', false); }
+            });
+        } else if (key === 'comment') {
+            _showCommentFormInline(commentFieldIds[0], rowBody, function(saved) {
+                if (saved) { doneMap.comment = true; _setChipStyle('comment', false); }
+            });
+        } else if (key === 'action') {
+            _showActionFormInline(actionFieldIds[0], rowBody, responseData, function(saved) {
+                if (saved) { doneMap.action = true; _setChipStyle('action', false); }
+            });
+        } else if (key === 'hazard') {
+            _hazardSaveFromChat = _showHazardFormInline(hazardInfo, rowBody, function(saved) {
+                if (saved) { doneMap.hazard = true; _setChipStyle('hazard', false); }
+            });
+        }
+        scrollToBottom();
+    };
+
+    // ── Build chip buttons ────────────────────────────────────────────────────
+    options.forEach(function(opt) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.style.cssText = 'padding:6px 14px;border-radius:20px;border:1px solid #3B98F1;background:white;color:#3B98F1;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:6px;';
+        btn.innerHTML = '<i class="' + opt.icon + '" style="font-size:14px;"></i><span>' + opt.label + '</span>';
+        chipEls[opt.key] = btn;
+        chipWrap.appendChild(btn);
+        btn.onclick = function() { _openFormInCard(opt.key); };
+    });
+
+    // ── AI intent detector ────────────────────────────────────────────────────
+    const _detectIntent = async function(userText) {
+        const cats = availableKeys.join(', ');
+        const opts = availableKeys.concat(['none']).join(' | ');
+        const sys = 'You are a WHS (Work Health & Safety) intake classifier.\nAvailable categories: ' + cats + '\n\nClassify the user message into EXACTLY ONE category:\n- photo:   user wants to attach/upload a photo, image, or picture\n- comment: user is adding a note, comment, or remark\n- action:  user describes a corrective action or task to be done\n- hazard:  user describes a hazard, risk, or unsafe condition\n\nRespond with ONLY one word: ' + opts;
+        try {
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.openaiApiKey },
+                body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: sys }, { role: 'user', content: userText }], temperature: 0, max_tokens: 10 })
+            });
+            const d = await res.json();
+            if (d.usage) trackCost('gpt-4o-mini', d.usage);
+            const content = ((d.choices || [{}])[0].message || {}).content || '';
+            const word = content.trim().toLowerCase().split(/\W/)[0];
+            return availableKeys.indexOf(word) !== -1 ? word : null;
+        } catch (e) { return null; }
+    };
+
+    // ── Chat lock ─────────────────────────────────────────────────────────────
+    const _installGeneralHandler = function() {
+        const nonPhotoLabels = options.filter(function(o) { return o.key !== 'photo'; }).map(function(o) { return o.label.toLowerCase(); });
+        const placeholder = nonPhotoLabels.length
+            ? 'Describe a ' + nonPhotoLabels.join(', ') + ', or type "continue" / "skip"'
+            : 'Type "continue" or "skip" to proceed';
+        setChatInputState(false, placeholder);
+        const ed = document.querySelector('#chatMessageInput .ql-editor');
+        if (ed) ed.dataset.placeholder = placeholder;
+
+        state._suppChatHandler = async function(userText) {
+            _dockCard(); // move card to sticky footer on first send
+            const lower = userText.trim().toLowerCase();
+            if (lower === 'continue' || lower === 'done' || lower === 'next' || lower === 'proceed') { _done(); return; }
+            if (lower === 'skip' || lower === 'no' || lower === 'no thanks' || lower === 'ignore' || lower === 'cancel') { _done(); return; }
+
+            _setHint('\u23F3 <em style="color:#6b7280;">Detecting intent\u2026</em>');
+            const key = await _detectIntent(userText);
+
+            if (key === 'comment' && hasComment) {
+                _openFormInCard('comment');
+                _setHint('<span style="color:#10b981;font-weight:600;">\u2713 Comment detected</span> \u2014 saving\u2026');
+                const ta = rowBody.querySelector('.commentTextarea');
+                if (ta) { ta.value = userText; setTimeout(function() { const b = rowBody.querySelector('.commentSaveBtn'); if (b) b.click(); }, 80); }
+                setTimeout(function() { _setHint('', false); }, 3500);
+
+            } else if (key === 'action' && hasAction) {
+                _openFormInCard('action');
+                _setHint('\u23F3 <em style="color:#6b7280;">Extracting action details\u2026</em>');
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const extractRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.openaiApiKey },
+                        body: JSON.stringify({
+                            model: 'gpt-4o-mini',
+                            messages: [{
+                                role: 'system',
+                                content: `You extract action details from a work health & safety message.\nReturn JSON with these fields:\n- actionText (string): the task/action to be performed\n- assignedTo (string|null): the person's name if mentioned, otherwise null\n- startDate (string|null): start date in YYYY-MM-DD if mentioned, otherwise null\n- deadline (string|null): deadline/due date in YYYY-MM-DD if mentioned, otherwise null\nToday is ${today}. Only include dates when explicitly stated.`
+                            }, {
+                                role: 'user', content: userText
+                            }],
+                            response_format: { type: 'json_object' },
+                            temperature: 0, max_tokens: 150
+                        })
+                    });
+                    const extractData = await extractRes.json();
+                    if (extractData.usage) trackCost('gpt-4o-mini', extractData.usage);
+                    const parsed = JSON.parse(((extractData.choices || [{}])[0].message || {}).content || '{}');
+
+                    // Fill action text
+                    const ta = rowBody.querySelector('.actionTextarea');
+                    if (ta && parsed.actionText) ta.value = parsed.actionText;
+
+                    // Fill dates if extracted
+                    if (parsed.startDate) { const sd = rowBody.querySelector('.actionStartDate'); if (sd) sd.value = parsed.startDate; }
+                    if (parsed.deadline)  { const dl = rowBody.querySelector('.actionDeadline');  if (dl) dl.value = parsed.deadline; }
+
+                    // Search for assigned person
+                    if (parsed.assignedTo) {
+                        const searchInput = rowBody.querySelector('.actionAssignedToSearch');
+                        const hiddenId    = rowBody.querySelector('.actionAssignedToId');
+                        if (searchInput) searchInput.value = parsed.assignedTo;
+                        try {
+                            const _baseUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+                            const personResp = await fetch(_baseUrl + '/NetServices/POSTDynamicChecklist.asmx/GetAuditedLimit', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ data: { StoreID: CONFIG.storeId, LocType: 0, LocID: 0, MemberId: CONFIG.userId, Search: parsed.assignedTo } })
+                            });
+                            const personJson = await personResp.json();
+                            const records = (personJson.d && personJson.d.recordList) ? personJson.d.recordList : [];
+                            if (records.length > 0) {
+                                if (hiddenId)    hiddenId.value    = records[0].IDNo;
+                                if (searchInput) searchInput.value = records[0].RowDescription;
+                                _setHint('<span style="color:#10b981;font-weight:600;">\u2713 Action ready</span> \u2014 assigned to <strong>' + escapeHtml(records[0].RowDescription) + '</strong>. Will save automatically.');
+                            } else {
+                                _setHint('<span style="color:#f59e0b;font-weight:600;">\u26A0 Worker \u201c' + escapeHtml(parsed.assignedTo) + '\u201d not found in the system.</span> Please select manually, or save without an assignee.');
+                            }
+                        } catch (_pe) {
+                            _setHint('<span style="color:#10b981;font-weight:600;">\u2713 Action detected</span> \u2014 could not look up person.');
+                        }
+                    } else {
+                        _setHint('<span style="color:#10b981;font-weight:600;">\u2713 Action detected</span> \u2014 form filled. Will save automatically.');
+                    }
+
+                    // Trigger debounced auto-save via input event
+                    const ta2 = rowBody.querySelector('.actionTextarea');
+                    if (ta2) ta2.dispatchEvent(new Event('input'));
+                } catch (_ae) {
+                    // Fallback: dump full text into textarea
+                    const ta = rowBody.querySelector('.actionTextarea');
+                    if (ta) { ta.value = userText; ta.dispatchEvent(new Event('input')); }
+                    _setHint('<span style="color:#10b981;font-weight:600;">\u2713 Action detected</span>');
+                }
+                setTimeout(function() { _setHint('', false); }, 6000);
+
+            } else if (key === 'hazard' && hasHazard) {
+                _openFormInCard('hazard');
+                _setHint('\u23F3 <em style="color:#6b7280;">Analysing &amp; saving hazard\u2026</em>');
+                if (_hazardSaveFromChat) {
+                    await _hazardSaveFromChat(userText, function(msg) { _setHint(msg); });
+                    setTimeout(function() { _setHint('', false); }, 4000);
+                }
+
+            } else if (key === 'photo') {
+                _openFormInCard('photo');
+                _setHint('\uD83D\uDCF7 Photo section is now open \u2014 please select a photo to upload.');
+            } else {
+                const labels = options.map(function(o) { return '<strong>' + o.label + '</strong>'; }).join(', ');
+                _setHint('<span style="color:#ef4444;">\u26A0 Couldn\'t identify.</span> Click a chip (' + labels + ') or type <em>skip</em> / <em>continue</em>.');
+            }
+        };
+    };
+
+    // ── Footer buttons ────────────────────────────────────────────────────────
+    skipBtn.onclick = function() { _done(); };
+    contBtn.onclick = function() { _done(); };
+
+    // ── Sticky dock helper ────────────────────────────────────────────────────
+    let _docked = false;
+    const _dockCard = function() {
+        if (_docked) return;
+        _docked = true;
+        // Create or reuse a dock container in the sticky footer
+        let dock = document.getElementById('suppCardDock');
+        if (!dock) {
+            dock = document.createElement('div');
+            dock.id = 'suppCardDock';
+            dock.style.cssText = 'padding:6px 12px 0;';
+            const stickyFooter = document.querySelector('.chat-sticky-footer');
+            if (stickyFooter) stickyFooter.insertBefore(dock, stickyFooter.firstChild);
+        }
+        // Replace the full message bubble with a small "pinned" badge
+        msgDiv.innerHTML = '';
+        const badge = document.createElement('div');
+        badge.className = 'message assistant';
+        badge.style.cssText = 'opacity:0.6;';
+        badge.innerHTML = '<div class="message-icon"><i class="ph-thin ph-paperclip"></i></div>' +
+            '<div class="message-content"><span style="font-size:12px;color:#9ca3af;">&#128204; Add-ons pinned below</span></div>';
+        msgDiv.replaceWith(badge);
+        // Move the card into the dock
+        dock.appendChild(card);
+        scrollToBottom();
+    };
+
+    const _undockCard = function() {
+        const dock = document.getElementById('suppCardDock');
+        if (dock) dock.remove();
+    };
+
+    // ── Mount & install ───────────────────────────────────────────────────────
+    contentDiv.appendChild(card);
+    msgDiv.appendChild(iconEl);
+    msgDiv.appendChild(contentDiv);
+    messagesArea.appendChild(msgDiv);
+
+    const autoLabels = options.filter(function(o) { return o.key !== 'photo'; }).map(function(o) { return '<strong>' + o.label.toLowerCase() + '</strong>'; });
+    if (autoLabels.length) {
+        _setHint('<span style="color:#3B98F1;font-weight:600;">Type below</span> \u2014 describe a ' + autoLabels.join(', ') + ' and I\'ll auto-fill &amp; save. Or click a chip above. Type <em>skip</em> / <em>continue</em> when done.');
+    }
+    _installGeneralHandler();
+    scrollToBottom();
+}
+function addPhotoPromptUI(photoFieldIds, extractedFields, onComplete) {
+    if (!photoFieldIds || !photoFieldIds.length) { if (onComplete) onComplete(); return; }
+    const fields = photoFieldIds.map(id => {
+        const f = extractedFields ? extractedFields.find(x => x.fieldID === id) : null;
+        return { id, name: f ? stripHtml(f.fieldName || 'this field') : 'this field' };
+    });
+    _buildFieldAccordionCard(
+        fields,
+        'ph-thin ph-camera',
+        'Would you like to attach a photo?',
+        'Add Photo',
+        (fieldId, rowBody, onRowDone) => {
+            _showPhotoFormInline(fieldId, rowBody, onRowDone);
+        },
+        onComplete
+    );
+}
+
+/**
+ * Inline photo form rendered inside an accordion row body.
+ */
+function _showPhotoFormInline(fieldId, rowBody, onRowDone) {
+    rowBody.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <input type="file" class="photoUploadInput" accept="image/*"
+                style="flex:1;min-width:0;padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:white;font-size:13px;">
+            <button class="photoUploadBtn" style="padding:7px 16px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500;font-size:13px;">Upload</button>
+        </div>
+        <div class="photoUploadProgress" style="margin-top:8px;display:none;font-size:13px;"></div>
+    `;
+    const fileInput = rowBody.querySelector('.photoUploadInput');
+    const uploadBtn = rowBody.querySelector('.photoUploadBtn');
+    const progress  = rowBody.querySelector('.photoUploadProgress');
+
+    uploadBtn.onclick = async () => {
+        if (!fileInput.files || !fileInput.files.length) { alert('Please select a photo first'); return; }
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('regOthID', state.regOthId);
+        formData.append('storeID', CONFIG.storeId);
+        try {
+            uploadBtn.disabled = true; uploadBtn.style.opacity = '0.6';
+            progress.style.display = 'block'; progress.style.color = '#6b7280';
+            progress.textContent = 'Uploading...';
+            const uploadResp = await fetch(`${CONFIG.apiUrl}/upload`, { method: 'POST', body: formData });
+            const uploadData = await uploadResp.json();
+            if (!uploadData.success) throw new Error(uploadData.errorMessage || 'Upload failed');
+            progress.textContent = 'Saving record...';
+            const saveResp = await fetch(`${CONFIG.apiUrl}/save-field-photo`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    regOthID: state.regOthId, storeID: CONFIG.storeId, fieldID: fieldId,
+                    fileName: file.name, fullFileName: uploadData.filePath,
+                    updatedByID: CONFIG.userId, updatedByName: CONFIG.userProfile.FullName || CONFIG.userName
+                })
+            });
+            const saveData = await saveResp.json();
+            progress.textContent = saveData.success ? `${file.name}` : `Uploaded, save failed`;
+            progress.style.color = saveData.success ? '#198754' : '#fd7e14';
+            setTimeout(() => onRowDone(true), 1200);
+        } catch (err) {
+            progress.textContent = `${err.message}`; progress.style.color = '#dc3545';
+            uploadBtn.disabled = false; uploadBtn.style.opacity = '1';
+        }
+    };
+}
+
+// ── ShowComment prompt ───────────────────────────────────────────────────────
+
+function addCommentPromptUI(commentFieldIds, extractedFields, onComplete) {
+    if (!commentFieldIds || !commentFieldIds.length) { if (onComplete) onComplete(); return; }
+    const fields = commentFieldIds.map(id => {
+        const f = extractedFields ? extractedFields.find(x => x.fieldID === id) : null;
+        return { id, name: f ? stripHtml(f.fieldName || 'this field') : 'this field' };
+    });
+    _buildFieldAccordionCard(
+        fields,
+        'ph-thin ph-chat-text',
+        'Would you like to add a comment?',
+        'Add Comment',
+        (fieldId, rowBody, onRowDone) => {
+            _showCommentFormInline(fieldId, rowBody, onRowDone);
+        },
+        onComplete
+    );
+}
+
+function _showCommentFormInline(fieldId, rowBody, onRowDone) {
+    rowBody.innerHTML = `
+        <textarea class="commentTextarea" rows="3" placeholder="Type your comment here..."
+            style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+        <button class="commentSaveBtn" style="display:none;"></button>
+        <div class="commentSaveProgress" style="margin-top:6px;display:none;font-size:13px;"></div>
+    `;
+    const textarea = rowBody.querySelector('.commentTextarea');
+    const saveBtn  = rowBody.querySelector('.commentSaveBtn');
+    const progress = rowBody.querySelector('.commentSaveProgress');
+    setTimeout(() => textarea.focus(), 80);
+
+    let _saveTimer = null;
+    let _lastSaved = '';
+
+    const _doSave = async () => {
+        const comment = textarea.value.trim();
+        if (!comment || comment === _lastSaved) return;
+        if (saveBtn.disabled) return;
+        try {
+            saveBtn.disabled = true;
+            progress.style.display = 'block'; progress.style.color = '#6b7280';
+            progress.textContent = 'Saving...';
+            const resp = await fetch(`${CONFIG.apiUrl}/save-field-comment`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ regOthID: state.regOthId, storeID: CONFIG.storeId, fieldID: fieldId, comment, updatedByID: CONFIG.userId })
+            });
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.errorMessage || 'Save failed');
+            _lastSaved = comment;
+            progress.textContent = '\u2713 Saved'; progress.style.color = '#198754';
+            setTimeout(() => { progress.style.display = 'none'; }, 2000);
+            onRowDone(true);
+        } catch (err) {
+            progress.textContent = err.message; progress.style.color = '#dc3545';
+        } finally {
+            saveBtn.disabled = false;
+        }
+    };
+
+    saveBtn.onclick = () => _doSave();
+    textarea.addEventListener('input', () => { clearTimeout(_saveTimer); _saveTimer = setTimeout(_doSave, 1500); });
+    textarea.addEventListener('blur',  () => { clearTimeout(_saveTimer); _doSave(); });
+}
+
+/**
+ * Shows a textarea input for a comment. Saves via /save-field-comment. Calls onComplete() when done.
+ */
+function showCommentInputUI(fieldId, parentContentDiv, onComplete) {
+    const commentDiv = document.createElement('div');
+    commentDiv.className = 'comment-input-container';
+    commentDiv.style.cssText = 'margin-top:10px;padding:14px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;max-width:520px;box-sizing:border-box;';
+
+    commentDiv.innerHTML = `
+        <textarea class="commentTextarea" rows="3" placeholder="Type your comment here..."
+            style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="commentSaveBtn" style="padding:8px 18px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500;font-size:14px;">Save Comment</button>
+            ${_skipChipButtonHtml({ className: 'commentSkipBtn', label: 'Skip (optional)', extraStyle: 'padding:8px 14px;' })}
+        </div>
+        <div class="commentSaveProgress" style="margin-top:8px;display:none;color:#6b7280;font-size:13px;"></div>
+    `;
+
+    parentContentDiv.appendChild(commentDiv);
+    scrollToBottom();
+
+    const textarea = commentDiv.querySelector('.commentTextarea');
+    const saveBtn = commentDiv.querySelector('.commentSaveBtn');
+    const skipBtn = commentDiv.querySelector('.commentSkipBtn');
+    const progress = commentDiv.querySelector('.commentSaveProgress');
+
+    // Focus the textarea
+    setTimeout(() => textarea.focus(), 100);
+
+    skipBtn.onclick = () => {
+        commentDiv.remove();
+        parentContentDiv.innerHTML += ' <span style="color:#6b7280;font-size:13px;">(skipped)</span>';
+        if (onComplete) onComplete();
+    };
+
+    saveBtn.onclick = async () => {
+        const comment = textarea.value.trim();
+        if (!comment) {
+            alert('Please enter a comment or click Skip');
+            return;
+        }
+
+        try {
+            saveBtn.disabled = true;
+            skipBtn.disabled = true;
+            saveBtn.style.opacity = '0.6';
+            skipBtn.style.opacity = '0.6';
+            progress.style.display = 'block';
+            progress.textContent = 'Saving comment...';
+
+            const resp = await fetch(`${CONFIG.apiUrl}/save-field-comment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    regOthID: state.regOthId,
+                    storeID: CONFIG.storeId,
+                    fieldID: fieldId,
+                    comment: comment,
+                    updatedByID: CONFIG.userId
+                })
+            });
+            const data = await resp.json();
+
+            if (data.success) {
+                progress.textContent = `Comment saved`;
+                progress.style.color = '#198754';
+            } else {
+                progress.textContent = `Save failed: ${data.errorMessage || 'Unknown'}`;
+                progress.style.color = '#dc3545';
+                saveBtn.disabled = false;
+                skipBtn.disabled = false;
+                saveBtn.style.opacity = '1';
+                skipBtn.style.opacity = '1';
+                return; // Let user retry
+            }
+        } catch (error) {
+            progress.textContent = `Error: ${error.message}`;
+            progress.style.color = '#dc3545';
+            saveBtn.disabled = false;
+            skipBtn.disabled = false;
+            saveBtn.style.opacity = '1';
+            skipBtn.style.opacity = '1';
+            return; // Let user retry
+        }
+
+        // After success, wait briefly then continue
+        setTimeout(() => {
+            commentDiv.remove();
+            if (onComplete) onComplete();
+        }, 1000);
+    };
+}
+
+// ── Action prompt (ShowAction) ────────────────────────────────────────────────
+
+function addActionPromptUI(actionFieldIds, extractedFields, responseData, onComplete) {
+    if (!actionFieldIds || !actionFieldIds.length) { if (onComplete) onComplete(); return; }
+    const fields = actionFieldIds.map(id => {
+        const f = extractedFields ? extractedFields.find(x => x.fieldID === id) : null;
+        return { id, name: f ? stripHtml(f.fieldName || 'this field') : 'this field' };
+    });
+    _buildFieldAccordionCard(
+        fields,
+        'ph-thin ph-clipboard-text',
+        'Would you like to add an action?',
+        'Add Action',
+        (fieldId, rowBody, onRowDone) => {
+            _showActionFormInline(fieldId, rowBody, responseData, onRowDone);
+        },
+        onComplete
+    );
+}
+
+// Show the 4-field action form: Action text, Assigned to, Start Date, Deadline
+function _showActionFormInline(fieldId, rowBody, responseData, onRowDone) {
+    const baseUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template$/i, '');
+    const auditedLimitUrl = baseUrl + '/NetServices/POSTDynamicChecklist.asmx/GetAuditedLimit';
+    const today = new Date().toISOString().split('T')[0];
+
+    rowBody.innerHTML = `
+        <div style="margin-bottom:10px;">
+            <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Action</label>
+            <textarea class="actionTextarea" rows="3" placeholder="Describe the action to be implemented..."
+                style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+        </div>
+        <div style="margin-bottom:10px;">
+            <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Assigned to</label>
+            <div style="position:relative;">
+                <input type="text" class="actionAssignedToSearch" placeholder="Search person..."
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;box-sizing:border-box;" autocomplete="off">
+                <input type="hidden" class="actionAssignedToId" value="">
+                <div class="actionAssignedToDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+            </div>
+        </div>
+        <div style="display:flex;gap:12px;margin-bottom:10px;">
+            <div style="flex:1;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Start Date</label>
+                <input type="date" class="actionStartDate" value="${today}"
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Deadline</label>
+                <input type="date" class="actionDeadline" value="${today}"
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;box-sizing:border-box;">
+            </div>
+        </div>
+        <button class="actionSaveBtn" style="display:none;"></button>
+        <div class="actionSaveProgress" style="margin-top:8px;display:none;color:#6b7280;font-size:13px;"></div>
+    `;
+
+    scrollToBottom();
+
+    const textarea = rowBody.querySelector('.actionTextarea');
+    const searchInput = rowBody.querySelector('.actionAssignedToSearch');
+    const hiddenId = rowBody.querySelector('.actionAssignedToId');
+    const dropdown = rowBody.querySelector('.actionAssignedToDropdown');
+    const startDateInput = rowBody.querySelector('.actionStartDate');
+    const deadlineInput = rowBody.querySelector('.actionDeadline');
+    const saveBtn = rowBody.querySelector('.actionSaveBtn');
+    const progress = rowBody.querySelector('.actionSaveProgress');
+
+    setTimeout(() => textarea.focus(), 100);
+
+    // ── Assigned-to search dropdown (calls GetAuditedLimit ASMX) ──────────
+    let searchTimeout = null;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        const term = searchInput.value.trim();
+        if (term.length < 2) { dropdown.style.display = 'none'; return; }
+
+        searchTimeout = setTimeout(async () => {
+            try {
+                const resp = await fetch(auditedLimitUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data: {
+                            StoreID: CONFIG.storeId,
+                            LocType: 0,
+                            LocID: 0,
+                            MemberId: CONFIG.userId,
+                            Search: term
+                        }
+                    })
+                });
+                const json = await resp.json();
+                const records = json.d?.recordList || [];
+
+                if (records.length === 0) {
+                    dropdown.innerHTML = '<div style="padding:8px 10px; color:#6b7280; font-size:13px;">No results</div>';
+                    dropdown.style.display = 'block';
+                    return;
+                }
+
+                dropdown.innerHTML = records.map(r =>
+                    `<div class="action-person-option" data-id="${r.IDNo}" data-name="${escapeHtml(r.RowDescription)}"
+                          style="padding:8px 10px; cursor:pointer; font-size:14px; border-bottom:1px solid #f0f0f0;"
+                          onmouseover="this.style.background='#e9ecef'" onmouseout="this.style.background='white'">
+                        ${escapeHtml(r.RowDescription)}
+                    </div>`
+                ).join('');
+                dropdown.style.display = 'block';
+
+                dropdown.querySelectorAll('.action-person-option').forEach(opt => {
+                    opt.addEventListener('click', () => {
+                        hiddenId.value = opt.getAttribute('data-id');
+                        searchInput.value = opt.getAttribute('data-name');
+                        dropdown.style.display = 'none';
+                    });
+                });
+            } catch (err) {
+                console.warn('[Action] Assigned-to search error:', err);
+                dropdown.style.display = 'none';
+            }
+        }, 300);
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', function closeActionDropdown(e) {
+        if (!rowBody.contains(e.target)) {
+            dropdown.style.display = 'none';
+            document.removeEventListener('click', closeActionDropdown);
+        }
+    });
+
+    // ── Save action ───────────────────────────────────────────────────────
+    let _actSaveTimer = null;
+    let _actLastSaved = '';
+
+    const _doSave = async () => {
+        const actionText = textarea.value.trim();
+        if (!actionText || actionText === _actLastSaved) return;
+        if (saveBtn.disabled) return;
+        try {
+            saveBtn.disabled = true;
+            progress.style.display = 'block';
+            progress.textContent = 'Saving...'; progress.style.color = '#6b7280';
+
+            const resp = await fetch(`${CONFIG.apiUrl}/save-field-action`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    regOthID: state.regOthId,
+                    storeID: CONFIG.storeId,
+                    regTypeID: responseData.regTypeID || 0,
+                    fieldID: fieldId,
+                    actionText: actionText,
+                    startDate: startDateInput.value || today,
+                    deadline: deadlineInput.value || today,
+                    updatedByID: CONFIG.userId,
+                    updatedByName: CONFIG.userProfile.FullName || CONFIG.userName,
+                    actionImplementorID: parseInt(hiddenId.value) || 0,
+                    actionImplementorName: searchInput.value.trim()
+                })
+            });
+            const data = await resp.json();
+
+            if (data.success) {
+                _actLastSaved = actionText;
+                progress.textContent = '\u2713 Saved'; progress.style.color = '#198754';
+                setTimeout(() => { progress.style.display = 'none'; }, 2000);
+                onRowDone(true);
+            } else {
+                progress.textContent = `Save failed: ${data.errorMessage || 'Unknown'}`;
+                progress.style.color = '#dc3545';
+                saveBtn.disabled = false;
+            }
+        } catch (error) {
+            progress.textContent = `Error: ${error.message}`;
+            progress.style.color = '#dc3545';
+            saveBtn.disabled = false;
+        }
+    };
+
+    saveBtn.onclick = () => _doSave();
+    textarea.addEventListener('input', () => { clearTimeout(_actSaveTimer); _actSaveTimer = setTimeout(_doSave, 1800); });
+    textarea.addEventListener('blur',  () => { clearTimeout(_actSaveTimer); _doSave(); });
+    startDateInput.addEventListener('change', () => { clearTimeout(_actSaveTimer); _actSaveTimer = setTimeout(_doSave, 500); });
+    deadlineInput.addEventListener('change',  () => { clearTimeout(_actSaveTimer); _actSaveTimer = setTimeout(_doSave, 500); });
+}
+
+// ── Hazard form inline ────────────────────────────────────────────────────────
+/**
+ * Inline hazard creation form (table in chat + right-side panel for adding).
+ * hazardInfo: { hazardTemplateDetId, riskMatrixId, showAddRA, showAddControl, showAddCurrentRA, showAddResidualRA, showAddNewControl, fieldId }
+ */
+function _showHazardFormInline(hazardInfo, rowBody, onRowDone) {
+    const _riskColorMap = { Low: '#198754', Medium: '#fd7e14', High: '#dc3545', Extreme: '#6f42c1' };
+
+    function _getRatingColor(h) {
+        if (h.RawBgColor && h.RawBgColor !== '') return h.RawBgColor;
+        if (h.RawBGColor && h.RawBGColor !== '') return h.RawBGColor;
+        return _riskColorMap[h.RawRiskRating] || _riskColorMap[h.RawCodeName] || '#6b7280';
+    }
+
+    const TAB_STYLE_ACTIVE   = 'padding:8px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:600;color:#3B98F1;border-bottom:2px solid #3B98F1;margin-bottom:-1px;';
+    const TAB_STYLE_INACTIVE = 'padding:8px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-1px;';
+
+    // ── ShowAdd* flags ─────────────────────────────────────────────────────
+    const showRA         = !!(hazardInfo.showAddRA);
+    const showCurRA      = !!(hazardInfo.showAddCurrentRA);
+    const showResRA      = !!(hazardInfo.showAddResidualRA);
+    const showControl    = !!(hazardInfo.showAddControl);
+    const showNewControl = !!(hazardInfo.showAddNewControl);
+
+    // ── Hazard list (module-level for action handlers) ───────────────────
+    let existingHazardsList = [];
+
+    function _ratingBadge(rating, color) {
+        if (!rating) return '<span style="color:#9ca3af;">-</span>';
+        return `<span style="font-size:11px;font-weight:600;color:white;background:${color || '#6b7280'};padding:2px 9px;border-radius:10px;">${escapeHtml(rating)}</span>`;
+    }
+
+    // ── Table helpers ──────────────────────────────────────────────────────
+    const _matrixIconSvg = `<span class="icon-arventa icon-arventa-risk-matrix" style="pointer-events:none;"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span><span class="path5"></span><span class="path6"></span><span class="path7"></span><span class="path8"></span><span class="path9"></span></span>`;
+
+    function _buildHazardCard(h, idx) {
+        const rawCol = h.RawBgColor     || '';
+        const curCol = h.CurrentBgColor || '';
+        const resCol = h.ResBgColor     || '';
+        const ctrlCount    = h.CurCtrlCount != null ? h.CurCtrlCount : (h.ControlMeasures    ? h.ControlMeasures.split('\n').filter(s => s.trim()).length    : 0);
+        const newCtrlCount = h.NewCtrlCount != null ? h.NewCtrlCount : (h.NewControlMeasures ? h.NewControlMeasures.split('\n').filter(s => s.trim()).length : 0);
+        const accentColor  = rawCol || '#d1d5db';
+
+        function _ratingBtn(ratingName, ratingColor, type, label) {
+            const pill = ratingName
+                ? `<span style="font-size:10px;font-weight:700;color:white;background:${ratingColor||'#6b7280'};padding:1px 6px;border-radius:6px;margin-left:3px;vertical-align:middle;">${escapeHtml(ratingName)}</span>`
+                : '';
+            return `<button class="hz-rating-btn hz-act-btn" data-idx="${idx}" data-type="${type}" title="Set ${label}"
+                style="display:inline-flex;align-items:center;gap:3px;padding:3px 7px;border:1px solid #e5e7eb;border-radius:6px;background:white;cursor:pointer;font-size:11px;color:#6b7280;white-space:nowrap;">${_matrixIconSvg}<span>${escapeHtml(label)}</span>${pill}</button>`;
+        }
+        function _ctrlBtn(count, type, label) {
+            return `<button class="hz-ctrl-btn hz-act-btn" data-idx="${idx}" data-type="${type}" title="Add ${label}"
+                style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid #e5e7eb;border-radius:6px;background:white;cursor:pointer;font-size:11px;color:#6b7280;white-space:nowrap;">
+                <i class="icon-arventa icon-arventa-risk-add" style="pointer-events:none;font-size:13px;"></i>
+                <span>${escapeHtml(label)}</span>
+                <span style="background:#198754;color:white;border-radius:8px;padding:0 5px;font-size:10px;font-weight:700;min-width:16px;text-align:center;">${count}</span>
+            </button>`;
+        }
+        const hasRatingBtns = showRA || showCurRA || showResRA;
+
+        // ── Inline controls section ──────────────────────────────────────
+        const _ctrlArr = Array.isArray(h.ControlResponses) ? h.ControlResponses : [];
+        const _curCtrls = _ctrlArr.filter(c => c.IsCurrentControl !== false);
+        const _newCtrls = _ctrlArr.filter(c => c.IsCurrentControl === false);
+        const _showCtrlSection = showControl || showNewControl || _curCtrls.length > 0 || _newCtrls.length > 0;
+
+        function _ctrlItemRow(c) {
+            const hierColor = { Elimination:'#7c3aed', Substitution:'#2563eb', Isolation:'#0891b2',
+                Engineering:'#059669', Administrative:'#d97706', PPE:'#dc2626' };
+            const hier   = c.ControlHeirarchy || c.ControlMeasureDesc || '';
+            const desc   = c.ControlDescription || c.ControlText || '';
+            const hColor = hierColor[hier] || '#6b7280';
+            return `<div style="display:flex;gap:7px;align-items:flex-start;padding:5px 0;border-bottom:1px solid #f3f4f6;">
+                <span style="flex-shrink:0;font-size:10px;font-weight:600;padding:1px 5px;border-radius:4px;background:${hColor}1a;color:${hColor};margin-top:1px;white-space:nowrap;">${escapeHtml(hier)}</span>
+                <span style="font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(desc)}</span>
+            </div>`;
+        }
+
+        const _ctrlTotal = _curCtrls.length + _newCtrls.length;
+        const _ctrlSummaryLabel = _ctrlTotal > 0
+            ? `Controls &nbsp;<span style="font-size:10px;font-weight:400;color:#6b7280;">(${_curCtrls.length} current, ${_newCtrls.length} new)</span>`
+            : `Controls`;
+        const _ctrlSection = _showCtrlSection ? `
+            <details style="margin-top:8px;border-top:1px solid #f3f4f6;padding-top:6px;">
+                <summary style="cursor:pointer;font-size:11px;font-weight:600;color:#6b7280;list-style:none;display:flex;align-items:center;gap:5px;user-select:none;">
+                    <span style="font-size:10px;">&#9654;</span> ${_ctrlSummaryLabel}
+                </summary>
+                <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+                    ${(showControl || _curCtrls.length > 0) ? `
+                    <div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                            <span style="font-size:11px;font-weight:700;color:#065f46;">Current Controls <span style="font-weight:400;color:#9ca3af;">(${_curCtrls.length})</span></span>
+                            <button class="hz-ctrl-btn hz-act-btn" data-idx="${idx}" data-type="ctrl" style="padding:1px 8px;border:1px solid #d1fae5;border-radius:5px;background:#f0fdf4;color:#065f46;font-size:11px;cursor:pointer;">+ Add</button>
+                        </div>
+                        <div style="display:flex;flex-direction:column;">
+                            ${_curCtrls.length ? _curCtrls.map(_ctrlItemRow).join('') : '<span style="font-size:11px;color:#9ca3af;padding:3px 0;display:block;">None recorded</span>'}
+                        </div>
+                    </div>` : ''}
+                    ${(showControl || showNewControl || _newCtrls.length > 0) ? `
+                    <div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                            <span style="font-size:11px;font-weight:700;color:#1e40af;">&#8635; New Controls <span style="font-weight:400;color:#9ca3af;">(${_newCtrls.length})</span></span>
+                            <button class="hz-ctrl-btn hz-act-btn" data-idx="${idx}" data-type="newctrl" style="padding:1px 8px;border:1px solid #dbeafe;border-radius:5px;background:#eff6ff;color:#1e40af;font-size:11px;cursor:pointer;">+ Add</button>
+                        </div>
+                        <div style="display:flex;flex-direction:column;">
+                            ${_newCtrls.length ? _newCtrls.map(_ctrlItemRow).join('') : '<span style="font-size:11px;color:#9ca3af;padding:3px 0;display:block;">None recorded</span>'}
+                        </div>
+                    </div>` : ''}
+                </div>
+            </details>` : ''
+
+        return `<div data-hz-idx="${idx}" style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;border-left:4px solid ${accentColor};">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:13px;font-weight:600;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(h.HazardTypeDetails||'')}">${escapeHtml(h.HazardTypeDetails||'\u2013')}</div>
+                    ${h.HazardType ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${escapeHtml(h.HazardType)}</div>` : ''}
+                </div>
+                <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
+                    ${rawCol && !showRA ? `<span style="font-size:10px;font-weight:700;color:white;background:${rawCol};padding:2px 7px;border-radius:8px;margin-right:4px;">${escapeHtml(h.RawRiskRating||'')}</span>` : ''}
+                    <button class="hz-act-btn hz-edit-btn" data-idx="${idx}" title="Edit" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;color:#6b7280;"><i class="icon-arventa icon-arventa-risk-edit" style="pointer-events:none;"></i></button>
+                    <button class="hz-act-btn hz-copy-btn" data-idx="${idx}" title="Copy" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;color:#6b7280;"><i class="icon-arventa icon-arventa-migrate_to_whs_monitor" style="pointer-events:none;"></i></button>
+                    <button class="hz-act-btn hz-del-btn" data-idx="${idx}" title="Delete" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px;color:#dc3545;"><i class="icon-arventa icon-arventa-risk-delete" style="pointer-events:none;"></i></button>
+                </div>
+            </div>
+            ${h.RiskDescription ? `<div style="font-size:12px;color:#555;line-height:1.45;margin-top:6px;">${escapeHtml(h.RiskDescription)}</div>` : ''}
+            ${hasRatingBtns ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">
+                ${showRA  ? _ratingBtn(h.RawRiskRating,     rawCol, 'raw', 'Raw Rating') : ''}
+                ${showCurRA ? _ratingBtn(h.CurrentRiskRating, curCol, 'cur', 'Cur Rating') : ''}
+                ${showResRA ? _ratingBtn(h.ResRiskRating,     resCol, 'res', 'Res Rating') : ''}
+            </div>` : ''}
+            ${_ctrlSection}
+        </div>`;
+    }
+
+    function _bindTableActions(cardList) {
+        cardList.addEventListener('click', async e => {
+            const btn = e.target.closest('.hz-act-btn');
+            if (!btn) return;
+            const idx = parseInt(btn.dataset.idx);
+            const h   = existingHazardsList[idx];
+            if (!h) return;
+
+            if (btn.classList.contains('hz-ctrl-btn')) {
+                const isCurrentCtrl = btn.dataset.type === 'ctrl';
+                const _ctrlBaseUrl  = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+                let selectedHierarchy = 'Elimination';
+                const _hierOpts = ['Elimination','Substitution','Isolation','Engineering','Administrative','PPE'];
+
+                const _extraFields = !isCurrentCtrl ? `
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
+                        <div style="flex:1;min-width:120px;">
+                            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Start Date</label>
+                            <input id="hz-ctrl-startdate" type="date" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box;">
+                        </div>
+                        <div style="flex:1;min-width:120px;">
+                            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Deadline</label>
+                            <input id="hz-ctrl-deadline" type="date" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box;">
+                        </div>
+                        <div style="flex:1;min-width:120px;">
+                            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Implemented By</label>
+                            <input id="hz-ctrl-implementedby" type="text" placeholder="Name" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box;">
+                        </div>
+                    </div>` : '';
+
+                const _ctrlOverlay = document.createElement('div');
+                _ctrlOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;display:flex;align-items:flex-start;justify-content:flex-end;';
+                // Build existing controls list
+                const _existingCtrls = Array.isArray(h.ControlResponses)
+                    ? h.ControlResponses.filter(c => !!c.IsCurrentControl === isCurrentCtrl)
+                    : [];
+                const _existingHtml = _existingCtrls.length
+                    ? _existingCtrls.map(c => {
+                        const _ph = { Elimination:'#7c3aed', Substitution:'#2563eb', Isolation:'#0891b2', Engineering:'#059669', Administrative:'#d97706', PPE:'#dc2626' };
+                        const _h = c.ControlHeirarchy || c.ControlMeasureDesc || '';
+                        const _d = c.ControlDescription || c.ControlText || '';
+                        const _hc = _ph[_h] || '#6b7280';
+                        return `<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f3f4f6;">
+                            <span style="flex-shrink:0;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:${_hc}1a;color:${_hc};margin-top:1px;">${escapeHtml(_h)}</span>
+                            <span style="font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(_d)}</span>
+                        </div>`;
+                    }).join('')
+                    : '<p style="font-size:12px;color:#9ca3af;margin:0;">None recorded yet.</p>';
+                _ctrlOverlay.innerHTML = `
+                    <div style="background:white;height:100%;width:480px;max-width:95vw;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.2);">
+                        <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+                            <span style="font-weight:700;font-size:15px;color:#111;">${isCurrentCtrl ? 'Current Controls' : 'New Controls'}</span>
+                            <button class="hz-ctrl-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1;padding:2px 6px;">&times;</button>
+                        </div>
+                        <div style="flex:1;overflow-y:auto;padding:20px;">
+                            <div style="margin-bottom:16px;">
+                                <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Existing ${isCurrentCtrl ? 'Current' : 'New'} Controls</div>
+                                <div class="hz-ctrl-existing-list" style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;background:#fafafa;">${_existingHtml}</div>
+                            </div>
+                            <hr style="margin:0 0 16px;border:none;border-top:1px solid #e5e7eb;">
+                            <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:12px;">Add ${isCurrentCtrl ? 'Current' : 'New'} Control</div>
+                            <div style="margin-bottom:16px;">
+                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:8px;">Hierarchy</label>
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;" id="hz-ctrl-hierarchy">
+                                    ${_hierOpts.map(hh => `<button type="button" data-h="${hh}" class="hz-hier-btn" style="padding:5px 10px;border:1px solid #d1d5db;border-radius:6px;background:${hh==='Elimination'?'#1d4ed8':'white'};color:${hh==='Elimination'?'white':'#374151'};cursor:pointer;font-size:12px;">${hh}</button>`).join('')}
+                                </div>
+                            </div>
+                            <div style="margin-bottom:14px;">
+                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Description <span style="color:#dc3545;font-size:10px;font-weight:400;">Required</span></label>
+                                <textarea id="hz-ctrl-desc" rows="4" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:12px;resize:vertical;box-sizing:border-box;" placeholder="Enter control description..."></textarea>
+                                <div id="hz-ctrl-desc-err" style="display:none;color:#dc3545;font-size:11px;margin-top:3px;">Description is required</div>
+                            </div>
+                            <div style="margin-bottom:14px;">
+                                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Comments</label>
+                                <textarea id="hz-ctrl-comment" rows="3" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:12px;resize:vertical;box-sizing:border-box;" placeholder="Optional comments..."></textarea>
+                            </div>
+                            ${_extraFields}
+                        </div>
+                        <div style="padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:10px;">
+                            <button class="hz-ctrl-close" style="padding:7px 18px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:13px;cursor:pointer;color:#374151;">Close</button>
+                            <button id="hz-ctrl-save" style="padding:7px 18px;border:none;border-radius:6px;background:#198754;color:white;font-size:13px;font-weight:600;cursor:pointer;">Save Control</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(_ctrlOverlay);
+
+                // Hierarchy toggle
+                _ctrlOverlay.querySelector('#hz-ctrl-hierarchy').addEventListener('click', ev => {
+                    const hBtn = ev.target.closest('.hz-hier-btn');
+                    if (!hBtn) return;
+                    selectedHierarchy = hBtn.dataset.h;
+                    _ctrlOverlay.querySelectorAll('.hz-hier-btn').forEach(b => {
+                        const active = b === hBtn;
+                        b.style.background = active ? '#1d4ed8' : 'white';
+                        b.style.color      = active ? 'white'   : '#374151';
+                    });
+                });
+                // Close
+                _ctrlOverlay.querySelectorAll('.hz-ctrl-close').forEach(c => c.addEventListener('click', () => _ctrlOverlay.remove()));
+                _ctrlOverlay.addEventListener('click', ev => { if (ev.target === _ctrlOverlay) _ctrlOverlay.remove(); });
+
+                // Save
+                _ctrlOverlay.querySelector('#hz-ctrl-save').addEventListener('click', async () => {
+                    const desc  = _ctrlOverlay.querySelector('#hz-ctrl-desc').value.trim();
+                    const errEl = _ctrlOverlay.querySelector('#hz-ctrl-desc-err');
+                    if (!desc) { errEl.style.display = 'block'; return; }
+                    errEl.style.display = 'none';
+                    const comment = (_ctrlOverlay.querySelector('#hz-ctrl-comment').value || '').trim();
+                    const _sdEl   = _ctrlOverlay.querySelector('#hz-ctrl-startdate');
+                    const _ddEl   = _ctrlOverlay.querySelector('#hz-ctrl-deadline');
+                    const _ibEl   = _ctrlOverlay.querySelector('#hz-ctrl-implementedby');
+
+                    const ctrlPayload = { obj: {
+                        RegOthHazTplID:       h.RegOthHazTplID || 0,
+                        RegOthHazTplControlID: 0,
+                        RegOthID:             state.regOthId,
+                        ControlHeirarchy:     selectedHierarchy,
+                        ControlCategory:      '',
+                        ControlComment:       comment,
+                        ControlDescription:   desc,
+                        HazardTemplateDetID:  hazardInfo.hazardTemplateDetId || 0,
+                        HazardTemplateID:     hazardInfo.hazardTemplateId    || 0,
+                        Action:               'CREATE',
+                        ByName:               CONFIG.userProfile.FullName || CONFIG.userName || '',
+                        Type:                 'adhoc',
+                        IsCurrentControl:     isCurrentCtrl,
+                        StartDate:            _sdEl ? (_sdEl.value || null) : null,
+                        EndDate:              _ddEl ? (_ddEl.value || null) : null,
+                        ControlImplementorID: _ibEl ? (_ibEl.value || null) : null,
+                        PriorityID:           null,
+                        ControlGroups:        '',
+                        RelativeStartDate:    0,
+                        RelativeDeadline:     0
+                    }};
+
+                    const saveBtn = _ctrlOverlay.querySelector('#hz-ctrl-save');
+                    saveBtn.textContent = 'Saving…';
+                    saveBtn.disabled = true;
+                    try {
+                        const resp = await fetch(_ctrlBaseUrl + '/NetServices/POSTDynamicChecklist.asmx/RegisterControlUpsert', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                            body: JSON.stringify(ctrlPayload)
+                        });
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        if (!Array.isArray(h.ControlResponses)) h.ControlResponses = [];
+                        h.ControlResponses.push({ IsCurrentControl: isCurrentCtrl, ControlHeirarchy: selectedHierarchy, ControlDescription: desc });
+                        if (isCurrentCtrl) h.CurCtrlCount = (h.CurCtrlCount || 0) + 1;
+                        else               h.NewCtrlCount = (h.NewCtrlCount || 0) + 1;
+                        const _oldCard = cardList.querySelector(`[data-hz-idx="${idx}"]`);
+                        if (_oldCard) _oldCard.outerHTML = _buildHazardCard(h, idx);
+                        _bindTableActions(cardList); // rebind after innerHTML change
+                        // Refresh the existing controls list in the open panel
+                        const _existingBox = _ctrlOverlay.querySelector('.hz-ctrl-existing-list');
+                        if (_existingBox) {
+                            const _refreshedCtrls = h.ControlResponses.filter(c => !!c.IsCurrentControl === isCurrentCtrl);
+                            const _hierColorMap = { Elimination:'#7c3aed', Substitution:'#2563eb', Isolation:'#0891b2', Engineering:'#059669', Administrative:'#d97706', PPE:'#dc2626' };
+                            _existingBox.innerHTML = _refreshedCtrls.map(c => {
+                                const _h = c.ControlHeirarchy || c.ControlMeasureDesc || '';
+                                const _d = c.ControlDescription || c.ControlText || '';
+                                const _hc = _hierColorMap[_h] || '#6b7280';
+                                return `<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f3f4f6;">
+                                    <span style="flex-shrink:0;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:${_hc}1a;color:${_hc};margin-top:1px;">${escapeHtml(_h)}</span>
+                                    <span style="font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(_d)}</span>
+                                </div>`;
+                            }).join('') || '<p style="font-size:12px;color:#9ca3af;margin:0;">None recorded yet.</p>';
+                        }
+                        // Reset form
+                        _ctrlOverlay.querySelector('#hz-ctrl-desc').value = '';
+                        _ctrlOverlay.querySelector('#hz-ctrl-comment').value = '';
+                        saveBtn.textContent = 'Save Control';
+                        saveBtn.disabled = false;
+                    } catch (err) {
+                        saveBtn.textContent = 'Save Control';
+                        saveBtn.disabled = false;
+                        alert(`Save failed: ${err.message}`);
+                    }
+                });
+            } else if (btn.classList.contains('hz-rating-btn')) {
+                // Inline matrix picker — load matrix data if needed, show popup, save on select
+                const type = btn.dataset.type; // 'raw' | 'cur' | 'res'
+                const _effectiveMatrixId = hazardInfo.riskMatrixId || 37;
+                if (!matrixRawData.length) {
+                    try {
+                        const _whsBase2 = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+                        const _mRes  = await fetch(`${_whsBase2}/NetServices/DynamicChecklist.asmx/GetRiskMatrix?matrixId=${encodeURIComponent(_effectiveMatrixId)}`, { credentials: 'include' });
+                        const _mJson = await _mRes.json();
+                        matrixRawData = (_mJson && _mJson.d) ? _mJson.d : (Array.isArray(_mJson) ? _mJson : []);
+                        console.log('[Hazard] GetRiskMatrix (on click) returned', matrixRawData.length, 'items for matrixId', _effectiveMatrixId);
+                    } catch (_me) { console.warn('[Hazard] GetRiskMatrix inline error:', _me); return; }
+                }
+                if (!matrixRawData.length) { console.warn('[Hazard] matrix data empty for matrixId', _effectiveMatrixId); return; }
+                const _mByType       = t => matrixRawData.filter(d => d.CodeType === t);
+                const _mConsequences = _mByType('CONSEQUENCE').sort((a, b) => (a.DisplayOrder||0)-(b.DisplayOrder||0));
+                const _mLikelihoods  = _mByType('LIKELIHOOD').sort((a, b) => (a.DisplayOrder||0)-(b.DisplayOrder||0));
+                const _mCells        = _mByType('RISKMATRIX');
+                const _mRatings      = _mByType('RISKRATING');
+                function _mGetRInfo(cn) { const r = _mRatings.find(x => x.CodeName===cn); return { id: r?(r.CodeId||r.CodeValue||0):0, color: r?(r.BgColor||'#6b7280'):'#6b7280' }; }
+                if (!_mLikelihoods.length || !_mConsequences.length) return;
+                const _mTitle = type==='raw' ? 'Raw Risk Rating' : type==='cur' ? 'Current Risk Rating' : 'Res Risk Rating';
+                let _mTbl = `<table style="border-collapse:separate;border-spacing:3px;font-size:12px;"><tr><td style="padding:6px 10px;font-size:10px;font-weight:600;color:#9ca3af;text-align:right;">Likelihood &darr;</td>`;
+                _mConsequences.forEach(c => { _mTbl += `<td style="padding:8px 6px;text-align:center;font-weight:700;font-size:11px;background:${c.BgColor||'#6b7280'};color:white;border-radius:6px;min-width:72px;letter-spacing:0.3px;">${escapeHtml(c.CodeName)}</td>`; });
+                _mTbl += `</tr>`;
+                _mLikelihoods.forEach(l => {
+                    _mTbl += `<tr><td style="padding:6px 14px;font-weight:700;font-size:11px;background:${l.BgColor||'#6b7280'};color:white;border-radius:6px;text-align:right;white-space:nowrap;letter-spacing:0.3px;">${escapeHtml(l.CodeName)}</td>`;
+                    _mConsequences.forEach(c => {
+                        // parseInt() normalises string/number type mismatch — same as legacy code
+                        const _liId2 = parseInt(l.CodeId) || parseInt(l.CodeValue) || 0;
+                        const _coId2 = parseInt(c.CodeId) || parseInt(c.CodeValue) || 0;
+                        const _cell  = _mCells.find(m => parseInt(m.LikelihoodId) === _liId2 && parseInt(m.ConsequenceId) === _coId2);
+                        const _cn   = _cell ? (_cell.CodeName||'') : '';
+                        const _ri   = _mGetRInfo(_cn);
+                        _mTbl += `<td class="hz-inline-cell" data-lid="${l.CodeId||l.CodeValue}" data-cid="${c.CodeId||c.CodeValue}" data-rid="${_ri.id}" data-rname="${escapeHtml(_cn)}" data-rbg="${_ri.color}" style="padding:10px 8px;text-align:center;background:${_ri.color};color:white;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;transition:transform 0.12s,box-shadow 0.12s;box-shadow:0 1px 3px rgba(0,0,0,0.15);" title="${escapeHtml(l.CodeName)} &times; ${escapeHtml(c.CodeName)} = ${escapeHtml(_cn)}">${escapeHtml(_cn)}</td>`;
+                    });
+                    _mTbl += `</tr>`;
+                });
+                _mTbl += `</table>`;
+                const _mOverlay = document.createElement('div');
+                _mOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;display:flex;align-items:stretch;justify-content:flex-end;backdrop-filter:blur(2px);';
+                _mOverlay.innerHTML = `<style>@keyframes hz-slide-in2{from{transform:translateX(100%)}to{transform:translateX(0)}}.hz-inline-drawer{animation:hz-slide-in2 0.28s cubic-bezier(.4,0,.2,1) both}.hz-inline-cell:hover{transform:scale(1.1);box-shadow:0 4px 14px rgba(0,0,0,0.28)!important;z-index:1;position:relative;}.hz-inline-close:hover{background:#f3f4f6!important;color:#111!important;}</style><div class="hz-inline-drawer" style="background:white;width:auto;max-width:95vw;height:100%;display:flex;flex-direction:column;box-shadow:-8px 0 40px rgba(0,0,0,0.18);"><div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px 12px;border-bottom:1px solid #f3f4f6;flex-shrink:0;"><div><div style="font-weight:800;font-size:15px;color:#1f2937;letter-spacing:-0.2px;">${escapeHtml(_mTitle)}</div><div style="font-size:12px;color:#9ca3af;margin-top:3px;">Click a cell to set the rating.</div></div><button class="hz-inline-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1;padding:4px 8px;border-radius:6px;transition:background 0.15s,color 0.15s;margin-left:16px;">&times;</button></div><div style="flex:1;overflow:auto;padding:20px 24px;">${_mTbl}</div></div>`;
+                document.body.appendChild(_mOverlay);
+                _mOverlay.querySelector('.hz-inline-close').addEventListener('click', () => _mOverlay.remove());
+                _mOverlay.addEventListener('click', ev => { if (ev.target === _mOverlay) _mOverlay.remove(); });
+                _mOverlay.querySelectorAll('.hz-inline-cell').forEach(cell => {
+                    cell.addEventListener('click', async () => {
+                        _mOverlay.remove();
+                        const rName = cell.dataset.rname; const rColor = cell.dataset.rbg;
+                        const rId = parseInt(cell.dataset.rid)||0;
+                        const lid = parseInt(cell.dataset.lid)||0; const cid = parseInt(cell.dataset.cid)||0;
+                        if (type==='raw')      { h.RawRiskRating=rName; h.RawBgColor=rColor; h.RawRiskRatingID=rId; h.RawLikelihoodID=lid; h.RawConsequenceID=cid; }
+                        else if (type==='cur') { h.CurrentRiskRating=rName; h.CurrentBgColor=rColor; }
+                        else                   { h.ResRiskRating=rName; h.ResBgColor=rColor; }
+                        const _oldCard = cardList.querySelector(`[data-hz-idx="${idx}"]`);
+                        if (_oldCard) _oldCard.outerHTML = _buildHazardCard(h, idx);
+                        try {
+                            const _saveUrl2 = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '') + '/NetServices/POSTDynamicChecklist.asmx/RegisterHazardUpsert';
+                            await fetch(_saveUrl2, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json; charset=utf-8'},
+                                body: JSON.stringify({ obj: { RegOthHazTplID:h.RegOthHazTplID||0, RegOthID:state.regOthId, RiskDescription:h.RiskDescription||'',
+                                    ExposureFreqID:h.RawExposureFreqID||0, ExposurePossibilityID:h.RawLikelihoodID||0, ImpactLevelID:h.RawConsequenceID||0,
+                                    RiskRatingID:h.RawRiskRatingID||0, RegOthHazTPLChemID:0, HazardType:h.HazardType||'', HazardTypeDetails:h.HazardTypeDetails||'',
+                                    HazardDescription:h.HazardSource||'', ControlMeasures:h.ControlMeasures||'', NewControlMeasures:h.NewControlMeasures||'',
+                                    StoreID:CONFIG.storeId, ByName:CONFIG.userProfile.FullName||CONFIG.userName,
+                                    HazardTemplateDetID:hazardInfo.hazardTemplateDetId||0, HazardTemplateID:hazardInfo.hazardTemplateId||0,
+                                    Action:'UPDATE', RiskMatrixID:hazardInfo.riskMatrixId||0, RegOthHazTempalteID:hazardInfo.regOthHazTempalteId||0, IsFreeForm:true }}) });
+                        } catch (_se) { console.warn('[Hazard] inline rating save:', _se); }
+                    });
+                });
+            } else if (btn.classList.contains('hz-edit-btn')) {
+                _openPanel('edit', h, idx);
+            } else if (btn.classList.contains('hz-copy-btn')) {
+                _openPanel('copy', h, null);
+            } else if (btn.classList.contains('hz-del-btn')) {
+                if (!confirm('Delete this hazard?')) return;
+                try {
+                    const _delUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '') +
+                        '/NetServices/POSTDynamicChecklist.asmx/RegisterHazardUpsert';
+                    const resp = await fetch(_delUrl, {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                        body: JSON.stringify({ obj: {
+                            RegOthHazTplID: h.RegOthHazTplID || 0,
+                            RegOthID:       state.regOthId,
+                            Action:         'DELETE',
+                            StoreID:        CONFIG.storeId,
+                            ByName:         CONFIG.userProfile.FullName || CONFIG.userName
+                        }})
+                    });
+                    if (resp.ok) {
+                        // Parse ASMX body — HTTP 200 can still mean failure
+                        let delOk = true;
+                        try {
+                            const dj = await resp.json();
+                            if (dj && dj.d !== undefined) {
+                                if (typeof dj.d === 'boolean') delOk = dj.d;
+                                else if (typeof dj.d === 'object' && dj.d !== null) delOk = dj.d.Success !== false;
+                            }
+                        } catch (_) {}
+                        if (!delOk) { alert('Delete failed — please try again.'); return; }
+                        existingHazardsList.splice(idx, 1);
+                        const card = cardList.querySelector(`[data-hz-idx="${idx}"]`);
+                        if (card) card.remove();
+                        // Reindex remaining cards
+                        cardList.querySelectorAll('[data-hz-idx]').forEach((r, i) => {
+                            r.setAttribute('data-hz-idx', i);
+                            r.querySelectorAll('.hz-act-btn').forEach(b => b.dataset.idx = i);
+                        });
+                        const badge = rowBody.querySelector('.hazard-existing-count');
+                        if (badge) badge.textContent = existingHazardsList.length;
+                    } else {
+                        alert(`Delete failed (HTTP ${resp.status})`);
+                    }
+                } catch(err) { console.error('[Hazard] delete error', err); alert(`Delete error: ${err.message}`); }
+            }
+        });
+    }
+
+    // ── Hazard table refresh helpers ─────────────────────────────────────────
+    function _mapHazardRow(h) {
+        // ControlResponses is the legacy per-item controls array from the API
+        const ctrlArr = Array.isArray(h.ControlResponses) ? h.ControlResponses : [];
+        const curCtrlCount = ctrlArr.filter(c => c.IsCurrentControl === true).length
+            || (h.ControlMeasures ? h.ControlMeasures.split('\n').filter(s => s.trim()).length : 0);
+        const newCtrlCount = ctrlArr.filter(c => c.IsCurrentControl === false).length
+            || (h.NewControlMeasures ? h.NewControlMeasures.split('\n').filter(s => s.trim()).length : 0);
+        // If server omits the raw rating name/colour, look it up from the risk matrix by ID so we
+        // never accidentally display the generic/current RiskRating as if it were the raw one.
+        const _ratingById = (id) => {
+            if (!id || !matrixRawData.length) return { name: '', color: '' };
+            const r = matrixRawData.find(d => d.CodeType === 'RISKRATING' &&
+                (String(d.CodeId) === String(id) || String(d.CodeValue) === String(id)));
+            return r ? { name: r.CodeName || '', color: r.BgColor || '' } : { name: '', color: '' };
+        };
+        const rawId     = h.RawRiskRatingID || 0;
+        const rawLookup = (rawId && (!h.RawRiskRating || !h.RawBgColor)) ? _ratingById(rawId) : null;
+        return {
+            RegOthHazTplID:     h.RegOthHazTplID || 0,
+            HazardTypeDetails:  h.HazardTypeDetails || h.HazardTypeDetail || h.SubHazardType || h.HazardSubType || h.HazardDetail || '',
+            HazardType:         h.HazardType || h.HazardCategory || '',
+            HazardSource:       h.HazardSource || h.HazardDescription || h.HazardDesc || '',
+            RiskDescription:    h.RiskDescription || '',
+            RawRiskRating:      h.RawRiskRating  || (rawLookup ? rawLookup.name  : '') || '',
+            RawBgColor:         h.RawBgColor     || (rawLookup ? rawLookup.color : '') || '',
+            CurrentRiskRating:  h.CurrentRiskRating || '',
+            CurrentBgColor:     h.CurrentBgColor || '',
+            ResRiskRating:      h.ResRiskRating || '',
+            ResBgColor:         h.ResBgColor || '',
+            ControlMeasures:    h.ControlMeasures || '',
+            NewControlMeasures: h.NewControlMeasures || '',
+            CurCtrlCount:       curCtrlCount,
+            NewCtrlCount:       newCtrlCount,
+            ControlResponses:   Array.isArray(h.ControlResponses) ? h.ControlResponses : [],
+            RawLikelihoodID:    h.RawLikelihoodID || 0,
+            RawConsequenceID:   h.RawConsequenceID || 0,
+            RawExposureFreqID:  h.RawExposureFreqID || 0,
+            RawRiskRatingID:    h.RawRiskRatingID || 0
+        };
+    }
+
+    function _refreshHazardTable(hazards) {
+        existingHazardsList = hazards;
+        const section = rowBody.querySelector('.hazard-existing-section');
+        if (!section) return;
+        section.style.cssText = 'margin-bottom:14px;';
+        section.innerHTML = `
+            <div style="font-weight:600;font-size:13px;color:#333;margin-bottom:8px;">
+                Existing Hazards
+                <span class="hazard-existing-count" style="background:#e5e7eb;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:500;margin-left:5px;">${hazards.length}</span>
+            </div>
+            <div class="hazard-existing-list" style="display:flex;flex-direction:column;gap:8px;">${hazards.map(_buildHazardCard).join('')}</div>`;
+        const cardList = section.querySelector('.hazard-existing-list');
+        if (cardList) _bindTableActions(cardList);
+    }
+
+    async function _reloadHazards() {
+        try {
+            const _whsBase = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+            const url = `${_whsBase}/NetServices/DynamicChecklist.asmx/GetHazards` +
+                `?hazardTemplateDetId=${encodeURIComponent(hazardInfo.hazardTemplateDetId || 0)}` +
+                `&regOthId=${encodeURIComponent(state.regOthId || 0)}` +
+                `&regOthHazTempalteID=${encodeURIComponent(hazardInfo.regOthHazTempalteId || 0)}`;
+            const res  = await fetch(url, { credentials: 'include' });
+            const json = await res.json();
+            const arr  = (json && json.d) ? json.d : (Array.isArray(json) ? json : []);
+            _refreshHazardTable(arr.map(_mapHazardRow));
+        } catch (_e) { console.warn('[Hazard] reload error:', _e); }
+    }
+
+    // ── Register form builder ──────────────────────────────────────────────────
+    function _buildRegisterForm(saveBtnLabel) {
+        saveBtnLabel = saveBtnLabel || 'Save Hazard';
+        const raBtnLabel = showRA ? '<span style="font-size:11px;color:#6b7280;">(click to set)</span>' : '';
+        return `
+            <div class="hz-ai-section" style="margin-bottom:14px;padding:14px;background:#f0f7ff;border-radius:8px;border:1px solid #bfdbfe;">
+                <div style="font-weight:600;font-size:13px;color:#1d4ed8;margin-bottom:8px;">&#10024; AI Assist &mdash; describe the hazard</div>
+                <textarea class="hz-ai-input" rows="3" placeholder="e.g. Cuts, crush injuries from manual harvesting or using equipment..."
+                    style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;box-sizing:border-box;background:white;"></textarea>
+                <div style="display:flex;gap:10px;margin-top:8px;align-items:center;">
+                    <button class="hz-ai-fill-btn" type="button"
+                        style="padding:7px 16px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">&#10024; Fill with AI</button>
+                    <span class="hz-ai-status" style="font-size:12px;color:#6b7280;display:none;"></span>
+                </div>
+            </div>
+            <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 14px 0;">
+            <div style="margin-bottom:10px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Hazard Type <span style="color:#dc3545;">*</span></label>
+                <div style="position:relative;">
+                    <input type="text" class="hazardType chat-floating-input" autocomplete="off" placeholder="Loading...">
+                    <input type="hidden" class="hazardTypeValue">
+                    <div class="hazardTypeDd chat-floating-dd" style="display:none;"></div>
+                </div>
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Hazard <span style="color:#dc3545;">*</span></label>
+                <div style="position:relative;">
+                    <input type="text" class="hazardTypeDetails chat-floating-input" autocomplete="off" placeholder="Select Hazard Type first..." disabled>
+                    <input type="hidden" class="hazardTypeDetailsValue">
+                    <div class="hazardDetailsDd chat-floating-dd" style="display:none;"></div>
+                </div>
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Hazard Source</label>
+                <input type="text" class="hazardSource" placeholder="e.g. Equipment, Environment, People, Process..."
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Risk Description</label>
+                <textarea class="hazardRiskDesc" rows="3" placeholder="Describe the risk associated with this hazard..."
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+            </div>
+            ${showControl ? `
+            <div style="margin-bottom:10px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">Control Measures</label>
+                <textarea class="hazardControl" rows="2" placeholder="Describe control measures..."
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+            </div>` : ''}
+            ${showCurRA ? `
+            <div style="margin-bottom:12px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:6px;">Current Rating <span style="font-size:11px;color:#6b7280;">(click to set)</span></label>
+                <button type="button" class="hz-cur-matrix-btn"
+                    style="padding:8px 16px;font-size:13px;font-weight:600;color:white;background:#6b7280;border:none;border-radius:6px;cursor:pointer;min-width:130px;">
+                    Select Current Rating
+                </button>
+                <input type="hidden" class="hazardCurRatingName" value="">
+                <input type="hidden" class="hazardCurRatingColor" value="">
+                <input type="hidden" class="hazardCurRatingId" value="">
+            </div>` : ''}
+            ${showNewControl ? `
+            <div style="margin-bottom:10px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:4px;">New Controls</label>
+                <textarea class="hazardNewControl" rows="2" placeholder="Describe any new controls..."
+                    style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+            </div>` : ''}
+            ${showResRA ? `
+            <div style="margin-bottom:12px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:6px;">Res Risk Rating <span style="font-size:11px;color:#6b7280;">(click to set)</span></label>
+                <button type="button" class="hz-res-matrix-btn"
+                    style="padding:8px 16px;font-size:13px;font-weight:600;color:white;background:#6b7280;border:none;border-radius:6px;cursor:pointer;min-width:130px;">
+                    Select Res Rating
+                </button>
+                <input type="hidden" class="hazardResRatingName" value="">
+                <input type="hidden" class="hazardResRatingColor" value="">
+                <input type="hidden" class="hazardResRatingId" value="">
+            </div>` : ''}
+            ${showRA ? `
+            <div style="margin-bottom:12px;">
+                <label style="font-weight:600;font-size:13px;color:#333;display:block;margin-bottom:6px;">Risk Rating ${raBtnLabel}</label>
+                <button type="button" class="hz-matrix-btn"
+                    style="padding:8px 16px;font-size:13px;font-weight:600;color:white;background:#6b7280;border:none;border-radius:6px;cursor:pointer;min-width:130px;">
+                    Select Risk Rating
+                </button>
+                <input type="hidden" class="hazardLikelihoodId" value="">
+                <input type="hidden" class="hazardConsequenceId" value="">
+                <input type="hidden" class="hazardExposureFreqId" value="">
+                <input type="hidden" class="hazardRiskRatingId" value="">
+                <input type="hidden" class="hazardRiskRatingName" value="">
+                <input type="hidden" class="hazardRiskRatingColor" value="">
+            </div>` : `
+            <input type="hidden" class="hazardLikelihoodId" value="">
+            <input type="hidden" class="hazardConsequenceId" value="">
+            <input type="hidden" class="hazardExposureFreqId" value="">
+            <input type="hidden" class="hazardRiskRatingId" value="">
+            <input type="hidden" class="hazardRiskRatingName" value="">
+            <input type="hidden" class="hazardRiskRatingColor" value="">`}
+            <div style="display:flex;gap:8px;">
+                <button class="hazardSaveBtn" style="padding:8px 18px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500;font-size:14px;">${saveBtnLabel}</button>
+            </div>
+            <div class="hazardSaveProgress" style="margin-top:8px;display:none;color:#6b7280;font-size:13px;"></div>`;
+    }
+
+    // ── Risk matrix button popup (generic) ─────────────────────────────────────
+    // cfg: { btnSel, nameSel, colorSel, idSel, title }
+    function _bindMatrixButton(matrixData, ctx, cfg) {
+        cfg = cfg || { btnSel: '.hz-matrix-btn', nameSel: '.hazardRiskRatingName', colorSel: '.hazardRiskRatingColor', idSel: '.hazardRiskRatingId', title: 'Select Risk Rating' };
+        const btn = ctx.querySelector(cfg.btnSel);
+        if (!btn || !matrixData.length) return;
+
+        const byType       = t => matrixData.filter(d => d.CodeType === t);
+        const consequences = byType('CONSEQUENCE').sort((a, b) => (a.DisplayOrder || 0) - (b.DisplayOrder || 0));
+        const likelihoods  = byType('LIKELIHOOD').sort((a, b) => (a.DisplayOrder || 0) - (b.DisplayOrder || 0));
+        const cells        = byType('RISKMATRIX');
+        const ratings      = byType('RISKRATING');
+
+        // DEBUG: log matrix data shape so cell matching can be verified in console
+        console.log('[Matrix] Setup - LIKELIHOOD[0]:', likelihoods[0] && JSON.stringify({CodeId:likelihoods[0].CodeId,CodeValue:likelihoods[0].CodeValue,n:likelihoods[0].CodeName}), 'RISKMATRIX[0]:', cells[0] && JSON.stringify({LId:cells[0].LikelihoodId,CId:cells[0].ConsequenceId,n:cells[0].CodeName}));
+
+        function _getRInfo(codeName) {
+            const r = ratings.find(x => x.CodeName === codeName);
+            return { id: r ? (r.CodeId || r.CodeValue || 0) : 0, color: r ? (r.BgColor || '#6b7280') : '#6b7280' };
+        }
+
+        if (!likelihoods.length || !consequences.length) return;
+
+        btn.addEventListener('click', () => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;display:flex;align-items:stretch;justify-content:flex-end;backdrop-filter:blur(2px);';
+
+            let tbl = `<table style="border-collapse:separate;border-spacing:3px;font-size:12px;width:auto;">`;
+            // corner cell + consequence header
+            tbl += `<tr><td style="padding:6px 10px;font-size:10px;font-weight:600;color:#9ca3af;text-align:right;">Likelihood &darr;</td>`;
+            consequences.forEach(c => {
+                const bg = c.BgColor || '#6b7280';
+                tbl += `<td style="padding:8px 6px;text-align:center;font-weight:700;font-size:11px;background:${bg};color:white;border-radius:6px;min-width:72px;letter-spacing:0.3px;">${escapeHtml(c.CodeName)}</td>`;
+            });
+            tbl += `</tr>`;
+            likelihoods.forEach(l => {
+                const lBg = l.BgColor || '#6b7280';
+                tbl += `<tr><td style="padding:6px 14px;font-weight:700;font-size:11px;background:${lBg};color:white;border-radius:6px;text-align:right;white-space:nowrap;letter-spacing:0.3px;">${escapeHtml(l.CodeName)}</td>`;
+                consequences.forEach(c => {
+                    // Use parseInt() on both sides — matches legacy dynamic.checklist.v4.js approach
+                    // which uses: n.LikelihoodId === parseInt(likelihood) — normalises string/number mismatch
+                    const _liId    = parseInt(l.CodeId) || parseInt(l.CodeValue) || 0;
+                    const _coId    = parseInt(c.CodeId) || parseInt(c.CodeValue) || 0;
+                    const cell     = cells.find(m => parseInt(m.LikelihoodId) === _liId && parseInt(m.ConsequenceId) === _coId);
+                    const cellName = cell ? (cell.CodeName || '') : '';
+                    const rInfo    = _getRInfo(cellName);
+                    tbl += `<td class="hz-matrix-cell"
+                        data-lid="${l.CodeId || l.CodeValue}" data-cid="${c.CodeId || c.CodeValue}"
+                        data-rid="${rInfo.id}" data-rname="${escapeHtml(cellName)}" data-rbg="${rInfo.color}"
+                        style="padding:10px 8px;text-align:center;background:${rInfo.color};color:white;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;transition:transform 0.12s,box-shadow 0.12s;box-shadow:0 1px 3px rgba(0,0,0,0.15);"
+                        title="${escapeHtml(l.CodeName)} &times; ${escapeHtml(c.CodeName)} = ${escapeHtml(cellName)}">${escapeHtml(cellName)}</td>`;
+                });
+                tbl += `</tr>`;
+            });
+            tbl += `</table>`;
+
+            overlay.innerHTML = `
+                <style>
+                  @keyframes hz-slide-in { from { transform:translateX(100%); } to { transform:translateX(0); } }
+                  .hz-matrix-drawer { animation: hz-slide-in 0.28s cubic-bezier(.4,0,.2,1) both; }
+                  .hz-matrix-cell:hover { transform:scale(1.1); box-shadow:0 4px 14px rgba(0,0,0,0.28)!important; z-index:1; position:relative; }
+                  .hz-matrix-close:hover { background:#f3f4f6!important; color:#111!important; }
+                </style>
+                <div class="hz-matrix-drawer" style="background:white;width:auto;max-width:95vw;height:100%;display:flex;flex-direction:column;box-shadow:-8px 0 40px rgba(0,0,0,0.18);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px 12px;border-bottom:1px solid #f3f4f6;flex-shrink:0;">
+                        <div>
+                            <div style="font-weight:800;font-size:15px;color:#1f2937;letter-spacing:-0.2px;">${escapeHtml(cfg.title)}</div>
+                            <div style="font-size:12px;color:#9ca3af;margin-top:3px;">Click a cell to set the rating.</div>
+                        </div>
+                        <button class="hz-matrix-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;line-height:1;padding:4px 8px;border-radius:6px;transition:background 0.15s,color 0.15s;margin-left:16px;">&times;</button>
+                    </div>
+                    <div style="flex:1;overflow:auto;padding:20px 24px;">
+                        ${tbl}
+                    </div>
+                </div>`;
+
+            document.body.appendChild(overlay);
+
+            overlay.querySelector('.hz-matrix-close').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+            overlay.querySelectorAll('.hz-matrix-cell').forEach(cell => {
+                cell.addEventListener('click', () => {
+                    const rName  = cell.dataset.rname;
+                    const rColor = cell.dataset.rbg;
+                    if (cfg.nameSel)  ctx.querySelector(cfg.nameSel).value  = rName;
+                    if (cfg.colorSel) ctx.querySelector(cfg.colorSel).value = rColor;
+                    if (cfg.idSel)    ctx.querySelector(cfg.idSel).value    = cell.dataset.rid;
+                    // Raw only: also store lid/cid
+                    if (cfg.lidSel)   ctx.querySelector(cfg.lidSel).value   = cell.dataset.lid;
+                    if (cfg.cidSel)   ctx.querySelector(cfg.cidSel).value   = cell.dataset.cid;
+                    btn.textContent      = rName || cfg.title;
+                    btn.style.background = rColor || '#6b7280';
+                    overlay.remove();
+                });
+            });
+        });
+    }
+
+    function _bindForm(ctx, mode, editHazard, editIdx) {
+        mode = mode || 'add';
+        const saveBtn  = ctx.querySelector('.hazardSaveBtn');
+        const progress = ctx.querySelector('.hazardSaveProgress');
+
+        saveBtn.onclick = async () => {
+            const typeEl       = ctx.querySelector('.hazardType');
+            const typeValEl    = ctx.querySelector('.hazardTypeValue');
+            const detailsEl    = ctx.querySelector('.hazardTypeDetails');
+            const detailsValEl = ctx.querySelector('.hazardTypeDetailsValue');
+            const sourceEl     = ctx.querySelector('.hazardSource');
+            const riskDescEl   = ctx.querySelector('.hazardRiskDesc');
+            const controlEl    = ctx.querySelector('.hazardControl');
+            const newControlEl = ctx.querySelector('.hazardNewControl');
+
+            const hazardType        = (typeValEl    && typeValEl.value.trim())    ? typeValEl.value.trim()    : (typeEl    ? typeEl.value.trim()    : '');
+            const hazardTypeDetails = (detailsValEl && detailsValEl.value.trim()) ? detailsValEl.value.trim() : (detailsEl ? detailsEl.value.trim() : '');
+
+            if (!hazardType) {
+                if (typeEl) { typeEl.style.borderColor = '#dc3545'; setTimeout(() => typeEl.style.borderColor = '#e5e7eb', 1500); }
+                return;
+            }
+            if (!hazardTypeDetails) {
+                if (detailsEl) { detailsEl.style.borderColor = '#dc3545'; setTimeout(() => detailsEl.style.borderColor = '#e5e7eb', 1500); }
+                return;
+            }
+
+            try {
+                saveBtn.disabled = true; saveBtn.style.opacity = '0.6';
+                progress.style.display = 'block'; progress.textContent = 'Saving hazard...';
+
+                const isEdit = (mode === 'edit');
+                const _saveUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '') +
+                    '/NetServices/POSTDynamicChecklist.asmx/RegisterHazardUpsert';
+                const resp = await fetch(_saveUrl, {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                    body: JSON.stringify({ obj: {
+                        RegOthHazTplID:        isEdit ? (editHazard.RegOthHazTplID || 0) : 0,
+                        RegOthID:              state.regOthId,
+                        RiskDescription:       riskDescEl ? riskDescEl.value.trim() : '',
+                        ExposureFreqID:        parseInt(ctx.querySelector('.hazardExposureFreqId') ? ctx.querySelector('.hazardExposureFreqId').value : 0) || 0,
+                        ExposurePossibilityID: parseInt(ctx.querySelector('.hazardLikelihoodId').value) || 0,
+                        ImpactLevelID:         parseInt(ctx.querySelector('.hazardConsequenceId').value) || 0,
+                        RiskRatingID:          parseInt(ctx.querySelector('.hazardRiskRatingId').value) || 0,
+                        RegOthHazTPLChemID:    0,
+                        HazardType:            hazardType,
+                        HazardTypeDetails:     hazardTypeDetails,
+                        HazardDescription:     sourceEl ? sourceEl.value.trim() : '',
+                        ControlMeasures:       controlEl    ? controlEl.value.trim()    : '',
+                        NewControlMeasures:    newControlEl ? newControlEl.value.trim() : '',
+                        StoreID:               CONFIG.storeId,
+                        ByName:                CONFIG.userProfile.FullName || CONFIG.userName,
+                        HazardTemplateDetID:   hazardInfo.hazardTemplateDetId || 0,
+                        HazardTemplateID:      hazardInfo.hazardTemplateId || 0,
+                        Action:                isEdit ? 'UPDATE' : 'CREATE',
+                        RiskMatrixID:          hazardInfo.riskMatrixId || 0,
+                        RegOthHazTempalteID:   hazardInfo.regOthHazTempalteId || 0,
+                        IsFreeForm:            true
+                    }})
+                });
+
+                if (resp.ok) {
+                    progress.textContent = isEdit ? 'Hazard updated' : 'Hazard saved'; progress.style.color = '#198754';
+                    const cardList = rowBody.querySelector('.hazard-existing-list');
+                    // Try to capture server-returned ID for newly created hazards
+                    let serverReturnedId = 0;
+                    if (!isEdit) {
+                        try {
+                            const rj = await resp.clone().json();
+                            serverReturnedId = (rj && rj.d && rj.d.RegOthHazTplID) ? rj.d.RegOthHazTplID
+                                            : (rj && rj.d && !isNaN(rj.d))           ? parseInt(rj.d) : 0;
+                        } catch(_) {}
+                    }
+                    const ratingName  = (ctx.querySelector('.hazardRiskRatingName')  || {}).value || '';
+                    const ratingColor = (ctx.querySelector('.hazardRiskRatingColor') || {}).value || '#6b7280';
+                    const curRatingName  = (ctx.querySelector('.hazardCurRatingName')  || {}).value || (isEdit ? editHazard.CurrentRiskRating || '' : '');
+                    const curRatingColor = (ctx.querySelector('.hazardCurRatingColor') || {}).value || (isEdit ? editHazard.CurrentBgColor    || '' : '');
+                    const resRatingName  = (ctx.querySelector('.hazardResRatingName')  || {}).value || (isEdit ? editHazard.ResRiskRating     || '' : '');
+                    const resRatingColor = (ctx.querySelector('.hazardResRatingColor') || {}).value || (isEdit ? editHazard.ResBgColor         || '' : '');
+                    const newH = {
+                        RegOthHazTplID:    isEdit ? (editHazard.RegOthHazTplID || 0) : (serverReturnedId || 0),
+                        HazardTypeDetails: hazardTypeDetails,
+                        HazardType:        hazardType,
+                        HazardSource:      sourceEl ? sourceEl.value.trim() : '',
+                        RiskDescription:   riskDescEl ? riskDescEl.value.trim() : '',
+                        RawRiskRating:     ratingName,
+                        RawBgColor:        ratingColor,
+                        CurrentRiskRating: curRatingName,
+                        CurrentBgColor:    curRatingColor,
+                        ResRiskRating:     resRatingName,
+                        ResBgColor:        resRatingColor,
+                        ControlMeasures:   controlEl    ? controlEl.value.trim()    : '',
+                        NewControlMeasures:newControlEl ? newControlEl.value.trim() : '',
+                        RawLikelihoodID:   parseInt(ctx.querySelector('.hazardLikelihoodId').value) || 0,
+                        RawConsequenceID:  parseInt(ctx.querySelector('.hazardConsequenceId').value) || 0,
+                        RawExposureFreqID: parseInt((ctx.querySelector('.hazardExposureFreqId') || {}).value) || (isEdit ? (editHazard.RawExposureFreqID || 0) : 0),
+                        RawRiskRatingID:   parseInt(ctx.querySelector('.hazardRiskRatingId').value) || 0
+                    };
+                    if (cardList) {
+                        if (isEdit && editIdx != null) {
+                            // Replace existing card
+                            existingHazardsList[editIdx] = newH;
+                            const oldCard = cardList.querySelector(`[data-hz-idx="${editIdx}"]`);
+                            if (oldCard) oldCard.outerHTML = _buildHazardCard(newH, editIdx);
+                        } else {
+                            const newIdx = existingHazardsList.length;
+                            existingHazardsList.push(newH);
+                            cardList.insertAdjacentHTML('beforeend', _buildHazardCard(newH, newIdx));
+                            // No _bindTableActions call — event delegation already on cardList
+                        }
+                        const countBadge = rowBody.querySelector('.hazard-existing-count');
+                        if (countBadge) countBadge.textContent = existingHazardsList.length;
+                    }
+                    // Close panel — user clicks  Done button to finish the hazard section
+                    setTimeout(() => { if (panelEl) { panelEl.remove(); panelEl = null; } }, 800);
+                    return;
+                } else {
+                    progress.textContent = `Save failed (HTTP ${resp.status})`; progress.style.color = '#dc3545';
+                    saveBtn.disabled = false; saveBtn.style.opacity = '1'; return;
+                }
+            } catch (err) {
+                progress.textContent = `Error: ${err.message}`; progress.style.color = '#dc3545';
+                saveBtn.disabled = false; saveBtn.style.opacity = '1'; return;
+            }
+        };
+    }
+
+    // ── Tab 2: Add from Site Risk Assessment ─────────────────────────────
+    function _renderSRA(pane, allHazards) {
+        let filteredHazards = allHazards.slice();
+        let selectedIds     = new Set();
+        let pageSize        = 10;
+        let currentPage     = 1;
+        let showSelected    = false;
+
+        function _getDisplayList() {
+            return showSelected ? filteredHazards.filter(h => selectedIds.has(h.RRRAID)) : filteredHazards;
+        }
+
+        function _renderTable() {
+            const list       = _getDisplayList();
+            const totalPages = Math.ceil(list.length / pageSize) || 1;
+            const page       = list.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+            const selCount = pane.querySelector('.sra-sel-count');
+            if (selCount) selCount.textContent = `${selectedIds.size} item(s) selected`;
+
+            const addBtn = pane.querySelector('.sra-add-btn');
+            if (addBtn) { addBtn.textContent = `Add ${selectedIds.size} Selected`; addBtn.disabled = selectedIds.size === 0; addBtn.style.opacity = selectedIds.size === 0 ? '0.5' : '1'; }
+
+            const tbody = pane.querySelector('.sra-tbody');
+            if (!tbody) return;
+            tbody.innerHTML = page.map(h => {
+                const checked  = selectedIds.has(h.RRRAID) ? 'checked' : '';
+                const rawColor = h.RawBGColor || '#6b7280';
+                const resColor = h.ResBGColor || '#6b7280';
+                return `<tr data-id="${h.RRRAID}" style="border-bottom:1px solid #f0f0f0;">
+                    <td style="padding:8px 6px;width:32px;"><input type="checkbox" class="sra-chk" data-id="${h.RRRAID}" ${checked} style="cursor:pointer;width:16px;height:16px;"></td>
+                    <td style="padding:8px 6px;font-size:13px;color:#333;">${escapeHtml(h.HazardFullDesc || '')}</td>
+                    <td style="padding:8px 6px;text-align:center;white-space:nowrap;">
+                        ${h.RawCodeName ? `<span style="font-size:11px;font-weight:600;color:white;background:${rawColor};padding:2px 8px;border-radius:10px;">${escapeHtml(h.RawCodeName)}</span>` : '-'}
+                    </td>
+                    <td style="padding:8px 6px;text-align:center;white-space:nowrap;">
+                        ${h.ResCodeName ? `<span style="font-size:11px;font-weight:600;color:white;background:${resColor};padding:2px 8px;border-radius:10px;">${escapeHtml(h.ResCodeName)}</span>` : '-'}
+                    </td>
+                </tr>`;
+            }).join('');
+
+            tbody.querySelectorAll('.sra-chk').forEach(chk => {
+                chk.addEventListener('change', () => {
+                    const id = parseInt(chk.dataset.id);
+                    if (chk.checked) selectedIds.add(id); else selectedIds.delete(id);
+                    _renderTable();
+                });
+            });
+
+            const pageInfo = pane.querySelector('.sra-page-info');
+            if (pageInfo) pageInfo.textContent = `${currentPage} of ${totalPages}`;
+            const prevBtn = pane.querySelector('.sra-prev');
+            const nextBtn = pane.querySelector('.sra-next');
+            if (prevBtn) prevBtn.disabled = currentPage <= 1;
+            if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+        }
+
+        pane.innerHTML = `
+            <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="sra-sel-count" style="background:#e5e7eb;border-radius:10px;padding:3px 10px;font-size:12px;font-weight:500;color:#333;">0 item(s) selected</span>
+                <button class="sra-unselect-btn" style="padding:4px 12px;border:1px solid #e5e7eb;background:white;border-radius:6px;cursor:pointer;font-size:12px;color:#6b7280;">Unselect all</button>
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#6b7280;cursor:pointer;">
+                    <input type="checkbox" class="sra-show-selected"> Show selected
+                </label>
+                <button class="sra-add-btn" disabled style="margin-left:auto;padding:6px 16px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500;font-size:13px;opacity:0.5;">Add 0 Selected</button>
+            </div>
+            <input type="text" class="sra-search" placeholder="Search hazards..." autocomplete="off"
+                style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:2px solid #e5e7eb;background:#f9fafb;">
+                            <th style="padding:8px 6px;width:32px;"></th>
+                            <th style="padding:8px 6px;font-size:12px;font-weight:600;color:#374151;text-align:left;">Hazard Details</th>
+                            <th style="padding:8px 6px;font-size:12px;font-weight:600;color:#374151;text-align:center;white-space:nowrap;">Risk Rating</th>
+                            <th style="padding:8px 6px;font-size:12px;font-weight:600;color:#374151;text-align:center;white-space:nowrap;">Res Risk Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody class="sra-tbody"></tbody>
+                </table>
+            </div>
+            <div style="overflow-x:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <span style="font-size:12px;color:#6b7280;">Show</span>
+                <select class="sra-page-size" style="padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;font-size:12px;">
+                    <option>10</option><option>25</option><option>50</option>
+                </select>
+                <span style="font-size:12px;color:#6b7280;">Rows</span>
+                <button class="sra-prev" style="padding:4px 10px;border:1px solid #e5e7eb;background:white;border-radius:4px;cursor:pointer;font-size:12px;">Previous</button>
+                <span class="sra-page-info" style="font-size:12px;color:#6b7280;">1 of 1</span>
+                <button class="sra-next" style="padding:4px 10px;border:1px solid #e5e7eb;background:white;border-radius:4px;cursor:pointer;font-size:12px;">Next</button>
+            </div>
+            <div class="sra-save-progress" style="margin-top:8px;display:none;font-size:13px;color:#6b7280;"></div>`;
+
+        _renderTable();
+
+        pane.querySelector('.sra-search').addEventListener('input', e => {
+            const term = e.target.value.trim().toLowerCase();
+            filteredHazards = term ? allHazards.filter(h => (h.HazardFullDesc || '').toLowerCase().includes(term)) : allHazards.slice();
+            currentPage = 1; _renderTable();
+        });
+        pane.querySelector('.sra-show-selected').addEventListener('change', e => { showSelected = e.target.checked; currentPage = 1; _renderTable(); });
+        pane.querySelector('.sra-unselect-btn').addEventListener('click', () => { selectedIds.clear(); _renderTable(); });
+        pane.querySelector('.sra-page-size').addEventListener('change', e => { pageSize = parseInt(e.target.value); currentPage = 1; _renderTable(); });
+        pane.querySelector('.sra-prev').addEventListener('click', () => { if (currentPage > 1) { currentPage--; _renderTable(); } });
+        pane.querySelector('.sra-next').addEventListener('click', () => {
+            const total = Math.ceil(_getDisplayList().length / pageSize);
+            if (currentPage < total) { currentPage++; _renderTable(); }
+        });
+
+        pane.querySelector('.sra-add-btn').addEventListener('click', async () => {
+            if (!selectedIds.size) return;
+            const addBtn = pane.querySelector('.sra-add-btn');
+            const prog   = pane.querySelector('.sra-save-progress');
+            addBtn.disabled = true; addBtn.style.opacity = '0.6';
+            prog.style.display = 'block'; prog.textContent = 'Saving...'; prog.style.color = '#6b7280';
+            try {
+                const _whsBase = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+                const resp = await fetch(`${_whsBase}/NetServices/PostDynamicChecklist.asmx/spChecklistCreateHazardsFromRegister`, {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                    body: JSON.stringify({ data: {
+                        ListOfRRAID:         [...selectedIds],
+                        RiskMatrixID:        hazardInfo.riskMatrixId || 0,
+                        HazardTemplateDetID: hazardInfo.hazardTemplateDetId || 0,
+                        RegOthHazTempalteID: hazardInfo.regOthHazTempalteId || 0,
+                        RegOthID:            state.regOthId,
+                        HazardTemplateID:    hazardInfo.hazardTemplateId || 0
+                    }})
+                });
+                if (resp.ok) {
+                    prog.textContent = `${selectedIds.size} hazard(s) added`; prog.style.color = '#198754';
+                    setTimeout(async () => {
+                        if (panelEl) { panelEl.remove(); panelEl = null; }
+                        await _reloadHazards();
+                        scrollToBottom();
+                    }, 800);
+                } else {
+                    prog.textContent = `Save failed (HTTP ${resp.status})`; prog.style.color = '#dc3545';
+                    addBtn.disabled = false; addBtn.style.opacity = '1';
+                }
+            } catch (err) {
+                prog.textContent = `Error: ${err.message}`; prog.style.color = '#dc3545';
+                addBtn.disabled = false; addBtn.style.opacity = '1';
+            }
+        });
+    }
+
+    async function _loadSRA(pane) {
+        const _whsBase = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+        try {
+            pane.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:12px 0;">Loading site risk assessments...</div>';
+            const raRes  = await fetch(`${_whsBase}/NetServices/POSTDynamicChecklist.asmx/spGetRiskAssessmentFromRegisterByStoreID`, {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ RiskMatrixID: hazardInfo.riskMatrixId || 0 })
+            });
+            const raJson = await raRes.json();
+            const raList = (raJson && raJson.d) ? raJson.d : [];
+
+            if (!raList.length) {
+                pane.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:12px 0;">No site risk assessments available.</div>';
+                return;
+            }
+
+            const allRiskRegIDs = raList.map(r => r.RiskRegID).filter(Boolean);
+            const hRes  = await fetch(`${_whsBase}/NetServices/PostDynamicChecklist.asmx/spGetRiskRegisterHazards`, {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ data: {
+                    ListOfRiskRegID:     allRiskRegIDs,
+                    RiskMatrixID:        hazardInfo.riskMatrixId || 0,
+                    HazardTemplateDetID: hazardInfo.hazardTemplateDetId || 0,
+                    IsFromChecklist:     true
+                }})
+            });
+            const hJson = await hRes.json();
+            const allHazards = (hJson && hJson.d) ? hJson.d : [];
+
+            if (!allHazards.length) {
+                pane.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:12px 0;">No hazards found in site risk assessments.</div>';
+                return;
+            }
+            _renderSRA(pane, allHazards);
+            scrollToBottom();
+        } catch (e) {
+            console.warn('[Hazard] SRA load error:', e);
+            pane.innerHTML = '<div style="color:#dc3545;font-size:13px;padding:12px 0;">Failed to load site risk assessments.</div>';
+        }
+    }
+
+    function _bindTabs(ctx) {
+        let sraLoaded = false;
+        ctx.querySelectorAll('.hz-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                rowBody.querySelectorAll('.hz-tab-btn').forEach(b => { b.style.cssText = TAB_STYLE_INACTIVE; });
+                btn.style.cssText = TAB_STYLE_ACTIVE;
+                const tab = btn.dataset.tab;
+                ctx.querySelectorAll('.hz-pane').forEach(p => p.style.display = 'none');
+                const pane = ctx.querySelector(`#hz-pane-${tab}`);
+                if (pane) pane.style.display = 'block';
+                if (tab === 'sra' && !sraLoaded) { sraLoaded = true; _loadSRA(pane); }
+            });
+        });
+    }
+
+    // ── Panel state ───────────────────────────────────────────────────────
+    let panelEl    = null;
+    let dataReady  = false;
+    let onDataReady = null;
+
+    function _prefillForm(ctx, h) {
+        const set = (sel, val) => { const el = ctx.querySelector(sel); if (el) el.value = val || ''; };
+        set('.hazardType',             h.HazardType        || '');
+        set('.hazardTypeValue',        h.HazardType        || '');
+        set('.hazardTypeDetails',      h.HazardTypeDetails || '');
+        set('.hazardTypeDetailsValue', h.HazardTypeDetails || '');
+        const dtEl = ctx.querySelector('.hazardTypeDetails');
+        if (dtEl) { dtEl.disabled = false; dtEl.style.background = 'white'; }
+        set('.hazardSource',     h.HazardSource    || '');
+        set('.hazardRiskDesc',   h.RiskDescription || '');
+        set('.hazardControl',    h.ControlMeasures    || '');
+        set('.hazardNewControl', h.NewControlMeasures || '');
+        if (h.RawRiskRating) {
+            const bgColor = h.RawBgColor || '#6b7280';
+            set('.hazardRiskRatingName',  h.RawRiskRating);
+            set('.hazardRiskRatingColor', bgColor);
+            set('.hazardLikelihoodId',   h.RawLikelihoodID   || '');
+            set('.hazardConsequenceId',  h.RawConsequenceID  || '');
+            set('.hazardExposureFreqId', h.RawExposureFreqID || '');
+            set('.hazardRiskRatingId',   h.RawRiskRatingID   || '');
+            const matBtn = ctx.querySelector('.hz-matrix-btn');
+            if (matBtn) { matBtn.textContent = h.RawRiskRating; matBtn.style.background = bgColor; }
+        }
+        if (h.CurrentRiskRating) {
+            const bg = h.CurrentBgColor || '#6b7280';
+            set('.hazardCurRatingName',  h.CurrentRiskRating);
+            set('.hazardCurRatingColor', bg);
+            const curBtn = ctx.querySelector('.hz-cur-matrix-btn');
+            if (curBtn) { curBtn.textContent = h.CurrentRiskRating; curBtn.style.background = bg; }
+        }
+        if (h.ResRiskRating) {
+            const bg = h.ResBgColor || '#6b7280';
+            set('.hazardResRatingName',  h.ResRiskRating);
+            set('.hazardResRatingColor', bg);
+            const resBtn = ctx.querySelector('.hz-res-matrix-btn');
+            if (resBtn) { resBtn.textContent = h.ResRiskRating; resBtn.style.background = bg; }
+        }
+    }
+
+    async function _aiAssistFillHazard(ctx, userText) {
+        const statusEl = ctx.querySelector('.hz-ai-status');
+        const fillBtn  = ctx.querySelector('.hz-ai-fill-btn');
+        const showStatus = (msg, color) => {
+            statusEl.textContent = msg;
+            statusEl.style.color = color || '#6b7280';
+            statusEl.style.display = 'inline';
+        };
+        fillBtn.disabled = true;
+        showStatus('Thinking…', '#3B98F1');
+
+        const typeNames  = [...new Set(hazardTypes.map(h => h.HazardTypeDesc).filter(Boolean))];
+        const typePairs  = [...new Set(allSubHazards.map(h => `${h.HazardType} > ${h.HazardTypeDetails}`).filter(Boolean))];
+        const ratings    = [...new Set(matrixRawData.filter(d => d.CodeType === 'RISKRATING').sort((a,b)=>(a.DisplayOrder||0)-(b.DisplayOrder||0)).map(d => d.CodeName))];
+
+        const systemPrompt =
+`You are a WHS (Work Health & Safety) expert. Analyse the hazard description and return ONLY a valid JSON object — no markdown, no code fences, no explanation.
+Fields required:
+{
+  "HazardType": "<one from the list>",
+  "HazardTypeDetails": "<one from the list that belongs to that HazardType>",
+  "HazardSource": "<brief source, e.g. Equipment, Manual handling, Environment>",
+  "RiskDescription": "<clear 1-2 sentence risk description>",
+  "RiskRating": "<one from the list>"
+}
+Available Hazard Types: ${typeNames.join(', ')}
+Available Type > Detail pairs:
+${typePairs.slice(0,100).join('\n')}
+Available Risk Ratings (most severe first): ${ratings.join(', ')}
+Always pick the closest match from the provided lists.`;
+
+        try {
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user',   content: userText }
+                    ],
+                    temperature: 0.2,
+                    max_tokens: 350
+                })
+            });
+            const data = await res.json();
+            if (data.usage) trackCost('gpt-4o-mini', data.usage);
+            const raw     = (data.choices?.[0]?.message?.content || '').trim();
+            const jsonStr = raw.replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'').trim();
+            let parsed;
+            try { parsed = JSON.parse(jsonStr); }
+            catch(e) { showStatus('Could not parse AI response. Try again.', '#dc3545'); fillBtn.disabled=false; return; }
+
+            const matchedRating = matrixRawData.find(d => d.CodeType==='RISKRATING' && d.CodeName===parsed.RiskRating);
+            _prefillForm(ctx, {
+                HazardType:        parsed.HazardType        || '',
+                HazardTypeDetails: parsed.HazardTypeDetails || '',
+                HazardSource:      parsed.HazardSource      || '',
+                RiskDescription:   parsed.RiskDescription   || '',
+                RawRiskRating:     parsed.RiskRating        || '',
+                RawBgColor:        matchedRating ? (matchedRating.BgColor || '#6b7280') : '',
+                RawRiskRatingID:   matchedRating ? (matchedRating.CodeId  || 0)        : 0
+            });
+            showStatus('\u2713 Done! Review and adjust if needed.', '#198754');
+        } catch(e) {
+            console.error('[AI Assist]', e);
+            showStatus('Error contacting AI. Try again.', '#dc3545');
+        }
+        fillBtn.disabled = false;
+    }
+
+    function _bindDropdowns(ctx, hTypes, subHazards) {
+        function _renderDd(ddEl, items, onSelect) {
+            if (!items.length) {
+                ddEl.innerHTML = '<div class="chat-floating-dd-empty">No results found</div>';
+                ddEl.style.display = 'block'; return;
+            }
+            ddEl.innerHTML = items.map((txt, i) =>
+                `<div class="chat-floating-dd-item" data-i="${i}">${escapeHtml(txt)}</div>`
+            ).join('');
+            ddEl.style.display = 'block';
+            ddEl.querySelectorAll('.chat-floating-dd-item').forEach((el, i) => {
+                el.addEventListener('mousedown', e => { e.preventDefault(); onSelect(items[i]); ddEl.style.display = 'none'; });
+            });
+        }
+
+        const typeInput   = ctx.querySelector('.hazardType');
+        const typeValEl   = ctx.querySelector('.hazardTypeValue');
+        const typeDd      = ctx.querySelector('.hazardTypeDd');
+        const detailInput = ctx.querySelector('.hazardTypeDetails');
+        const detailValEl = ctx.querySelector('.hazardTypeDetailsValue');
+        const detailDd    = ctx.querySelector('.hazardDetailsDd');
+
+        if (typeInput && hTypes.length > 0) {
+            typeInput.placeholder = 'Type to search...';
+            typeInput.disabled = false;
+            const allTypeNames = hTypes.map(h => h.HazardTypeDesc || '');
+            typeInput.addEventListener('focus', () => {
+                const term = typeInput.value.trim().toLowerCase();
+                const filtered = term ? allTypeNames.filter(t => t.toLowerCase().includes(term)) : allTypeNames;
+                _renderDd(typeDd, filtered, val => {
+                    typeInput.value = val; typeValEl.value = val;
+                    detailInput.value = ''; detailValEl.value = '';
+                    detailInput.placeholder = 'Type to search...';
+                    detailInput.disabled = false; detailInput.style.background = 'white';
+                    detailDd.style.display = 'none';
+                });
+            });
+            typeInput.addEventListener('input', () => {
+                typeValEl.value = '';
+                const term = typeInput.value.trim().toLowerCase();
+                const filtered = term ? allTypeNames.filter(t => t.toLowerCase().includes(term)) : allTypeNames;
+                _renderDd(typeDd, filtered, val => {
+                    typeInput.value = val; typeValEl.value = val;
+                    detailInput.value = ''; detailValEl.value = '';
+                    detailInput.placeholder = 'Type to search...';
+                    detailInput.disabled = false; detailInput.style.background = 'white';
+                    detailDd.style.display = 'none';
+                });
+            });
+            typeInput.addEventListener('blur', () => setTimeout(() => { typeDd.style.display = 'none'; }, 150));
+        }
+
+        if (detailInput && subHazards.length > 0) {
+            function _getDetailNames() {
+                const selType = typeValEl ? typeValEl.value.trim() : '';
+                const src = selType ? subHazards.filter(h => h.HazardType === selType) : subHazards;
+                return [...new Set(src.map(h => h.HazardTypeDetails || '').filter(Boolean))];
+            }
+            detailInput.addEventListener('focus', () => {
+                if (detailInput.disabled) return;
+                const term = detailInput.value.trim().toLowerCase();
+                const names = _getDetailNames();
+                const filtered = term ? names.filter(t => t.toLowerCase().includes(term)) : names;
+                _renderDd(detailDd, filtered, val => { detailInput.value = val; detailValEl.value = val; });
+            });
+            detailInput.addEventListener('input', () => {
+                if (detailInput.disabled) return;
+                detailValEl.value = '';
+                const term = detailInput.value.trim().toLowerCase();
+                const names = _getDetailNames();
+                const filtered = term ? names.filter(t => t.toLowerCase().includes(term)) : names;
+                _renderDd(detailDd, filtered, val => { detailInput.value = val; detailValEl.value = val; });
+            });
+            detailInput.addEventListener('blur', () => setTimeout(() => { detailDd.style.display = 'none'; }, 150));
+        }
+    }
+
+    function _openPanel(mode, editHazard, editIdx) {
+        // mode: 'add' | 'edit' | 'copy'
+        mode      = mode || 'add';
+        if (panelEl) { panelEl.remove(); panelEl = null; }
+        const title    = mode === 'edit' ? 'Edit Hazard' : mode === 'copy' ? 'Copy Hazard' : 'Add Hazard';
+        const saveLbl  = mode === 'edit' ? 'Update Hazard' : 'Save Hazard';
+        const overlay  = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:8000;';
+        const showTabs = (mode === 'add');   // tabs only for new adds
+        overlay.innerHTML = `
+            <div class="hz-panel" style="position:absolute;right:0;top:0;height:100%;width:460px;background:white;box-shadow:-4px 0 24px rgba(0,0,0,0.18);display:flex;flex-direction:column;overflow:hidden;">
+                <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+                    <span style="font-weight:700;font-size:15px;color:#111;">${title}</span>
+                    <button class="hz-panel-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;padding:0 5px;line-height:1;">&times;</button>
+                </div>
+                <div class="hz-panel-body" style="flex:1;overflow-y:auto;padding:16px;">
+                    ${showTabs ? `<div style="display:flex;border-bottom:1px solid #e5e7eb;margin-bottom:14px;">
+                        <button class="hz-tab-btn" data-tab="register" style="${TAB_STYLE_ACTIVE}">Add from Hazard Register</button>
+                        <button class="hz-tab-btn" data-tab="sra"      style="${TAB_STYLE_INACTIVE}">Add from Site Risk Assessment</button>
+                    </div>` : ''}
+                    <div class="hz-pane" id="hz-pane-register">${_buildRegisterForm(saveLbl)}</div>
+                    ${showTabs ? `<div class="hz-pane" id="hz-pane-sra" style="display:none;"></div>` : ''}
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        panelEl = overlay;
+        const panelBody = overlay.querySelector('.hz-panel-body');
+        overlay.querySelector('.hz-panel-close').addEventListener('click', () => { overlay.remove(); panelEl = null; });
+        overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); panelEl = null; } });
+        _bindForm(panelBody, mode, editHazard, editIdx);
+        if (showTabs) _bindTabs(panelBody);
+        overlay.querySelector('.hz-ai-fill-btn').addEventListener('click', () => {
+            const txt = (overlay.querySelector('.hz-ai-input').value || '').trim();
+            if (!txt) { overlay.querySelector('.hz-ai-status').textContent = 'Please describe the hazard first.'; overlay.querySelector('.hz-ai-status').style.color='#dc3545'; overlay.querySelector('.hz-ai-status').style.display='inline'; return; }
+            _aiAssistFillHazard(overlay.querySelector('#hz-pane-register') || panelBody, txt);
+        });
+        if (dataReady) {
+            _bindMatrixButton(matrixRawData, panelBody, { btnSel: '.hz-matrix-btn',     nameSel: '.hazardRiskRatingName', colorSel: '.hazardRiskRatingColor', idSel: '.hazardRiskRatingId', lidSel: '.hazardLikelihoodId', cidSel: '.hazardConsequenceId', title: 'Select Risk Rating' });
+            _bindMatrixButton(matrixRawData, panelBody, { btnSel: '.hz-cur-matrix-btn', nameSel: '.hazardCurRatingName',  colorSel: '.hazardCurRatingColor',  idSel: '.hazardCurRatingId',  title: 'Select Current Rating' });
+            _bindMatrixButton(matrixRawData, panelBody, { btnSel: '.hz-res-matrix-btn', nameSel: '.hazardResRatingName',  colorSel: '.hazardResRatingColor',  idSel: '.hazardResRatingId',  title: 'Select Res Risk Rating' });
+            _bindDropdowns(panelBody, hazardTypes, allSubHazards);
+        } else {
+            onDataReady = () => {
+                _bindMatrixButton(matrixRawData, panelBody, { btnSel: '.hz-matrix-btn',     nameSel: '.hazardRiskRatingName', colorSel: '.hazardRiskRatingColor', idSel: '.hazardRiskRatingId', lidSel: '.hazardLikelihoodId', cidSel: '.hazardConsequenceId', title: 'Select Risk Rating' });
+                _bindMatrixButton(matrixRawData, panelBody, { btnSel: '.hz-cur-matrix-btn', nameSel: '.hazardCurRatingName',  colorSel: '.hazardCurRatingColor',  idSel: '.hazardCurRatingId',  title: 'Select Current Rating' });
+                _bindMatrixButton(matrixRawData, panelBody, { btnSel: '.hz-res-matrix-btn', nameSel: '.hazardResRatingName',  colorSel: '.hazardResRatingColor',  idSel: '.hazardResRatingId',  title: 'Select Res Risk Rating' });
+                _bindDropdowns(panelBody, hazardTypes, allSubHazards);
+            };
+        }
+        if (editHazard) _prefillForm(panelBody, editHazard);
+    }
+
+    // ── Initial render ────────────────────────────────────────────────────
+    rowBody.innerHTML =
+        `<div class="hazard-existing-section" style="color:#6b7280;font-size:13px;padding:4px 0 8px;">Loading existing hazards...</div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <button class="hz-add-btn" style="padding:8px 20px;background:#3B98F1;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:14px;">+ Add Hazard</button>
+        </div>`;
+    scrollToBottom();
+    rowBody.querySelector('.hz-add-btn').addEventListener('click', () => _openPanel('add', null, null));
+
+    // ── Direct-save from chat text (no panel required) ───────────────────
+    async function _saveFromChatText(userText, onStatus) {
+        onStatus('<span style="color:#6b7280;">\u23F3 Analysing hazard\u2026</span>');
+        // Poll until dropdown data is ready (max 6s)
+        let waited = 0;
+        while (!dataReady && waited < 6000) { await new Promise(r => setTimeout(r, 150)); waited += 150; }
+        if (!dataReady) { onStatus('<span style="color:#dc3545;">\u26A0 Data not ready. Try again.</span>'); return; }
+
+        const typeNames = [...new Set(hazardTypes.map(h => h.HazardTypeDesc).filter(Boolean))];
+        const typePairs = [...new Set(allSubHazards.map(h => h.HazardType + ' > ' + h.HazardTypeDetails).filter(Boolean))];
+        const ratings   = [...new Set(matrixRawData.filter(d => d.CodeType === 'RISKRATING').sort((a, b) => (a.DisplayOrder || 0) - (b.DisplayOrder || 0)).map(d => d.CodeName))];
+        const systemPrompt =
+            'You are a WHS (Work Health & Safety) expert. Analyse the hazard description and return ONLY a valid JSON object with no markdown or code fences.\n' +
+            'Fields required:\n{\n' +
+            '  "HazardType": "<one from the list>",\n' +
+            '  "HazardTypeDetails": "<matching detail>",\n' +
+            '  "HazardSource": "<brief source>",\n' +
+            '  "RiskDescription": "<1-2 sentence description>",\n' +
+            '  "RiskRating": "<one from the list>",\n' +
+            '  "controls": [\n' +
+            '    { "description": "<control measure text>", "hierarchy": "<one of: Elimination|Substitution|Isolation|Engineering|Administrative|PPE>", "isCurrentControl": <default true, only false if text explicitly says future e.g. will implement, plan to, need to add> }\n' +
+            '  ]\n' +
+            '}\n' +
+            'The "controls" array should list any control measures mentioned or implied by the user. If none are mentioned, use an empty array.\n' +
+            'For "isCurrentControl": DEFAULT to true (already in place). Only set false if the user clearly states the control is a future/planned action.\n' +
+            'For "hierarchy": choose the most appropriate level from Elimination, Substitution, Isolation, Engineering, Administrative, PPE.\n' +
+            'Available Hazard Types: ' + typeNames.join(', ') + '\n' +
+            'Available Type > Detail pairs:\n' + typePairs.slice(0, 100).join('\n') + '\n' +
+            'Available Risk Ratings (most severe first): ' + ratings.join(', ');
+
+        let parsed;
+        try {
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CONFIG.openaiApiKey },
+                body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }], temperature: 0.2, max_tokens: 500 })
+            });
+            const data = await res.json();
+            if (data.usage) trackCost('gpt-4o-mini', data.usage);
+            const raw = ((data.choices || [{}])[0].message || {}).content || '';
+            const jsonStr = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+            parsed = JSON.parse(jsonStr);
+        } catch (e) { onStatus('<span style="color:#dc3545;">\u26A0 AI error. Try again.</span>'); return; }
+
+        onStatus('<span style="color:#6b7280;">\u23F3 Saving hazard\u2026</span>');
+        const matchedRating = matrixRawData.find(d => d.CodeType === 'RISKRATING' && d.CodeName === parsed.RiskRating);
+        const riskRatingId  = matchedRating ? (parseInt(matchedRating.CodeId) || 0) : 0;
+        const bgColor       = matchedRating ? (matchedRating.BgColor || '#6b7280') : '#6b7280';
+        const _saveBaseUrl  = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+        const saveUrl       = _saveBaseUrl + '/NetServices/POSTDynamicChecklist.asmx/RegisterHazardUpsert';
+        const controls      = Array.isArray(parsed.controls) ? parsed.controls.filter(c => c && c.description) : [];
+        const _validHier    = ['Elimination','Substitution','Isolation','Engineering','Administrative','PPE'];
+        try {
+            const resp = await fetch(saveUrl, {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ obj: {
+                    RegOthHazTplID: 0, RegOthID: state.regOthId,
+                    RiskDescription: parsed.RiskDescription || '',
+                    ExposureFreqID: 0, ExposurePossibilityID: 0, ImpactLevelID: 0,
+                    RiskRatingID: riskRatingId, RegOthHazTPLChemID: 0,
+                    HazardType: parsed.HazardType || '', HazardTypeDetails: parsed.HazardTypeDetails || '',
+                    HazardDescription: parsed.HazardSource || '',
+                    ControlMeasures: '', NewControlMeasures: '',
+                    StoreID: CONFIG.storeId, ByName: (CONFIG.userProfile && CONFIG.userProfile.FullName) || CONFIG.userName || '',
+                    HazardTemplateDetID: hazardInfo.hazardTemplateDetId || 0,
+                    HazardTemplateID: hazardInfo.hazardTemplateId || 0,
+                    Action: 'CREATE', RiskMatrixID: hazardInfo.riskMatrixId || 0,
+                    RegOthHazTempalteID: hazardInfo.regOthHazTempalteId || 0, IsFreeForm: true
+                }})
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            let serverReturnedId = 0;
+            try {
+                const rj = await resp.clone().json();
+                console.log('[Hazard] RegisterHazardUpsert response:', JSON.stringify(rj));
+                serverReturnedId = (rj && rj.d && rj.d.RegOthHazTplID) ? parseInt(rj.d.RegOthHazTplID)
+                                 : (rj && rj.d && !isNaN(rj.d))         ? parseInt(rj.d) : 0;
+                console.log('[Hazard] serverReturnedId:', serverReturnedId);
+            } catch (_) {}
+
+            const newH = {
+                RegOthHazTplID: serverReturnedId,
+                HazardType: parsed.HazardType || '', HazardTypeDetails: parsed.HazardTypeDetails || '',
+                HazardSource: parsed.HazardSource || '', RiskDescription: parsed.RiskDescription || '',
+                RawRiskRating: parsed.RiskRating || '', RawBgColor: bgColor, RawRiskRatingID: riskRatingId,
+                ControlMeasures: '', NewControlMeasures: '',
+                ControlResponses: [], CurCtrlCount: 0, NewCtrlCount: 0
+            };
+
+            // Save controls via RegisterControlUpsert
+            if (controls.length) {
+                if (!serverReturnedId) {
+                    console.warn('[Hazard] serverReturnedId is 0 — controls cannot be linked to hazard. Check API response above.');
+                    onStatus('<span style="color:#f59e0b;font-weight:600;">\u26A0 Hazard saved but controls skipped</span> \u2014 server did not return a hazard ID.');
+                } else {
+                    onStatus('<span style="color:#6b7280;">\u23F3 Saving ' + controls.length + ' control' + (controls.length > 1 ? 's' : '') + '\u2026</span>');
+                    const ctrlUrl = _saveBaseUrl + '/NetServices/POSTDynamicChecklist.asmx/RegisterControlUpsert';
+                    for (const ctrl of controls) {
+                        const hier = _validHier.includes(ctrl.hierarchy) ? ctrl.hierarchy : 'Administrative';
+                        const isCurrent = ctrl.isCurrentControl !== false; // default to current unless AI explicitly says false
+                        try {
+                            const ctrlResp = await fetch(ctrlUrl, {
+                                method: 'POST', credentials: 'include',
+                                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                                body: JSON.stringify({ obj: {
+                                    RegOthHazTplID: serverReturnedId,
+                                    RegOthHazTplControlID: 0,
+                                    RegOthID: state.regOthId,
+                                    ControlHeirarchy: hier,
+                                    ControlCategory: '',
+                                    ControlComment: '',
+                                    ControlDescription: ctrl.description,
+                                    HazardTemplateDetID: hazardInfo.hazardTemplateDetId || 0,
+                                    HazardTemplateID: hazardInfo.hazardTemplateId || 0,
+                                    Action: 'CREATE',
+                                    ByName: (CONFIG.userProfile && CONFIG.userProfile.FullName) || CONFIG.userName || '',
+                                    Type: 'adhoc',
+                                    IsCurrentControl: isCurrent,
+                                    StartDate: null, EndDate: null, ControlImplementorID: null,
+                                    PriorityID: null, ControlGroups: '',
+                                    RelativeStartDate: 0, RelativeDeadline: 0
+                                }})
+                            });
+                            const ctrlJson = await ctrlResp.json().catch(() => null);
+                            console.log('[Hazard] RegisterControlUpsert response for "' + ctrl.description + '":', JSON.stringify(ctrlJson));
+                            newH.ControlResponses.push({ IsCurrentControl: isCurrent, ControlHeirarchy: hier, ControlDescription: ctrl.description });
+                            if (isCurrent) newH.CurCtrlCount++;
+                            else           newH.NewCtrlCount++;
+                        } catch (_ce) { console.warn('[Hazard] control save error:', _ce); }
+                    }
+                }
+            }
+
+            const newIdx = existingHazardsList.length;
+            existingHazardsList.push(newH);
+            const cardList = rowBody.querySelector('.hazard-existing-list');
+            if (cardList) { cardList.insertAdjacentHTML('beforeend', _buildHazardCard(newH, newIdx)); _bindTableActions(cardList); }
+            const countBadge = rowBody.querySelector('.hazard-existing-count');
+            if (countBadge) countBadge.textContent = existingHazardsList.length;
+
+            const ctrlSavedCount = newH.CurCtrlCount + newH.NewCtrlCount;
+            const ctrlSummary = ctrlSavedCount > 0
+                ? ' \u2014 <span style="color:#198754;">' + ctrlSavedCount + ' control' + (ctrlSavedCount > 1 ? 's' : '') + ' saved</span>'
+                : '';
+            onStatus('<span style="color:#10b981;font-weight:600;">\u2713 Hazard saved</span> \u2014 ' + escapeHtml(parsed.HazardType || '') + ': ' + escapeHtml(parsed.HazardTypeDetails || '') + ctrlSummary);
+
+            // Reload from server so control counts are accurate
+            if (ctrlSavedCount > 0) {
+                await _reloadHazards();
+            }
+            scrollToBottom();
+        } catch (err) { onStatus('<span style="color:#dc3545;">\u26A0 Save failed: ' + escapeHtml(err.message) + '</span>'); }
+    }
+
+    // Load dropdown data + existing hazards in the background
+    let hazardTypes    = [];
+    let allSubHazards  = [];
+    let matrixRawData  = [];
+    (async () => {
+        const _whsBase = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template.*$/i, '');
+        let existingHazards = [];
+
+        await Promise.all([
+            (async () => {
+                try {
+                    const _getUrl = `${_whsBase}/NetServices/DynamicChecklist.asmx/GetHazards` +
+                        `?hazardTemplateDetId=${encodeURIComponent(hazardInfo.hazardTemplateDetId || 0)}` +
+                        `&regOthId=${encodeURIComponent(state.regOthId || 0)}` +
+                        `&regOthHazTempalteID=${encodeURIComponent(hazardInfo.regOthHazTempalteId || 0)}`;
+                    const res  = await fetch(_getUrl, { credentials: 'include' });
+                    const json = await res.json();
+                    const arr  = (json && json.d) ? json.d : (Array.isArray(json) ? json : []);
+                    existingHazards     = arr.map(_mapHazardRow);
+                    existingHazardsList = existingHazards;
+                } catch (_e) { console.warn('[Hazard] GetHazards error:', _e); }
+            })(),
+            (async () => {
+                try {
+                    const res  = await fetch(`${_whsBase}/NetServices/POSTDynamicChecklist.asmx/spChecklistGetHazardTypes`, {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                        body: '{}'
+                    });
+                    const json = await res.json();
+                    hazardTypes = (json && json.d) ? json.d : [];
+                    console.log('[Hazard] spChecklistGetHazardTypes returned', hazardTypes.length, 'items');
+                } catch (_e) { console.warn('[Hazard] spChecklistGetHazardTypes error:', _e); }
+            })(),
+            (async () => {
+                try {
+                    const res  = await fetch(`${_whsBase}/NetServices/POSTDynamicChecklist.asmx/LoadHazards`, {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                        body: JSON.stringify({ data: { RefKey: 'HAZARDREPORT', RegisterTypeID: hazardInfo.regTypeId || 0 } })
+                    });
+                    const json = await res.json();
+                    allSubHazards = (json && json.d) ? json.d : [];
+                    console.log('[Hazard] LoadHazards returned', allSubHazards.length, 'items');
+                } catch (_e) { console.warn('[Hazard] LoadHazards error:', _e); }
+            })(),
+            (async () => {
+                try {
+                    const _startupMatrixId = hazardInfo.riskMatrixId || 37;
+                    const res  = await fetch(`${_whsBase}/NetServices/DynamicChecklist.asmx/GetRiskMatrix?matrixId=${encodeURIComponent(_startupMatrixId)}`, { credentials: 'include' });
+                    const json = await res.json();
+                    matrixRawData = (json && json.d) ? json.d : (Array.isArray(json) ? json : []);
+                    console.log('[Hazard] GetRiskMatrix returned', matrixRawData.length, 'items for matrixId', _startupMatrixId);
+                } catch (_e) { console.warn('[Hazard] GetRiskMatrix error:', _e); }
+            })()
+        ]);
+
+        // Render the existing hazards table
+        _refreshHazardTable(existingHazards);
+
+        // Data is ready — wire up the panel if it was already opened
+        dataReady = true;
+        if (onDataReady) { onDataReady(); onDataReady = null; }
+
+        scrollToBottom();
+    })();
+    return _saveFromChatText;
+}
+
+
 let mapInstance = null;
 let mapMarker = null;
 let mapGeocoder = null;
@@ -2277,20 +6940,20 @@ async function addMapUI(initialLocation = null) {
     mapContainer.innerHTML = `
         <div style="margin-bottom: 12px; position: relative;">
             <input type="text" id="mapSearchInput" placeholder="Search for a location..." 
-                style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 14px;">
         </div>
-        <div id="googleMap" style="width: 100%; height: 400px; border-radius: 8px; border: 2px solid #dee2e6;"></div>
+        <div id="googleMap" style="width: 100%; height: 400px; border-radius: 8px; border: 2px solid #e5e7eb;"></div>
         <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
             <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div>
-                    <label style="display: block; font-size: 12px; color: #6c757d; margin-bottom: 4px;">Latitude</label>
+                    <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Latitude</label>
                     <input type="text" id="mapLatitude" readonly 
-                        style="width: 100%; padding: 6px; border: 1px solid #ced4da; border-radius: 4px; background: #e9ecef; font-size: 13px;">
+                        style="width: 100%; padding: 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: #e9ecef; font-size: 13px;">
                 </div>
                 <div>
-                    <label style="display: block; font-size: 12px; color: #6c757d; margin-bottom: 4px;">Longitude</label>
+                    <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Longitude</label>
                     <input type="text" id="mapLongitude" readonly 
-                        style="width: 100%; padding: 6px; border: 1px solid #ced4da; border-radius: 4px; background: #e9ecef; font-size: 13px;">
+                        style="width: 100%; padding: 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: #e9ecef; font-size: 13px;">
                 </div>
             </div>
            <button id="mapConfirmButton" onclick="handleMapConfirm()" style="padding: 8px 20px;background: #3B98F1;color: white;border: none;border-radius: 4px;cursor: pointer;font-weight: 500;white-space: nowrap;opacity: 1;margin-top: 21px;">
@@ -2352,7 +7015,7 @@ function initializeMap(initialLocation = null) {
         // Create dropdown for suggestions
         const dropdown = document.createElement('div');
         dropdown.id = 'mapSearchDropdown';
-        dropdown.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ced4da; border-top: none; border-radius: 0 0 4px 4px; max-height: 300px; overflow-y: auto; z-index: 1000; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1);';
+        dropdown.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 4px 4px; max-height: 300px; overflow-y: auto; z-index: 1000; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1);';
         autocompleteElement.parentElement.appendChild(dropdown);
         
         // Handle input changes
@@ -2506,13 +7169,14 @@ function initializeMap(initialLocation = null) {
 }
 
 function placeMarker(location, locationName = null) {
+    if (!mapMarker) return;
     mapMarker.setPosition(location);
     mapMarker.setVisible(true);
     
     // Add bounce animation to make the pin obvious
     mapMarker.setAnimation(google.maps.Animation.BOUNCE);
     setTimeout(() => {
-        mapMarker.setAnimation(null);
+        if (mapMarker) mapMarker.setAnimation(null);
     }, 1500);
     
     // Handle both LatLng object and plain {lat, lng} object
@@ -2582,16 +7246,17 @@ async function handleMapConfirm() {
 }
 
 function showFieldsSummary(fields) {
-    if (fields.length === 0) return;
+    // Saved chip disabled — not needed
+}
 
+function showSectionDivider(sectionName, subSectionName) {
     const messagesArea = document.getElementById('messagesArea');
-    const lastMessage = messagesArea.lastElementChild;
+    const label = subSectionName ? `${sectionName} › ${subSectionName}` : sectionName;
 
-    const summary = document.createElement('div');
-    summary.className = 'fields-summary';
-    summary.innerHTML = `<strong>Saved:</strong> ${fields.map(f => f.fieldName).join(', ')}`;
-
-    lastMessage.querySelector('.message-content').appendChild(summary);
+    const divider = document.createElement('div');
+    divider.className = 'section-divider';
+    divider.innerHTML = `<span>${label}</span>`;
+    messagesArea.appendChild(divider);
 }
 
 function showSmartFillTyping() {
@@ -2623,7 +7288,71 @@ function removeSmartFillTyping() {
     if (el) el.remove();
 }
 
-function showTypingIndicator() {
+/**
+ * Generates a short, context-aware "thinking" phrase shown in the typing indicator.
+ * Uses GPT-4o-mini for speed; falls back to a random phrase on timeout/error.
+ */
+async function generateThinkingText(userMessage) {
+    const fallbacks = [
+        'Looking into that for you...',
+        'Thinking that through...',
+        'On it, just a moment...',
+        'Let me check that...',
+        'Working on it...',
+        'Processing your request...'
+    ];
+    const fallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+
+    if (!CONFIG.openaiApiKey || !userMessage) return fallback;
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2500);
+
+        const recentHistory = state.conversationHistory.slice(-4)
+            .map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content.substring(0, 80)}`)
+            .join('\n');
+
+        const systemPrompt = `You are an AI assistant helping with workplace health & safety forms and compliance.
+The user just sent a message and you are processing their request.
+Generate ONE short, engaging "thinking" sentence (5-12 words) that reflects what you are about to do, based on what they said.
+Good examples: "Looking into workplace safety requirements for you...", "Checking your incident report details...", "Reviewing the compliance checklist...", "Analysing your workplace hazard description...", "Let me find the right template for you..."
+Rules: Match the context. End with "...". Do NOT answer the question. No quotation marks in output.`;
+
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${CONFIG.openaiApiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 35,
+                temperature: 0.85,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: `User said: "${userMessage.substring(0, 150)}"${recentHistory ? '\n\nRecent chat:\n' + recentHistory : ''}` }
+                ]
+            })
+        });
+
+        clearTimeout(timeout);
+
+        if (res.ok) {
+            const data = await res.json();
+            trackCost('gpt-4o-mini', data.usage);
+            const phrase = data.choices?.[0]?.message?.content?.trim();
+            if (phrase) return phrase;
+        }
+    } catch (e) {
+        // Timeout or network error — fall through to fallback
+    }
+
+    return fallback;
+}
+
+function showTypingIndicator(userMessage) {
     const messagesArea = document.getElementById('messagesArea');
 
     const messageDiv = document.createElement('div');
@@ -2643,6 +7372,22 @@ function showTypingIndicator() {
 
     messagesArea.appendChild(messageDiv);
     scrollToBottom();
+
+    // Asynchronously fetch a context-aware thinking phrase and inject it
+    if (userMessage) {
+        generateThinkingText(userMessage).then(text => {
+            const indicator = document.getElementById('typingIndicator');
+            if (!indicator) return; // already removed before response came back
+            const content = indicator.querySelector('.message-content');
+            if (content) {
+                content.innerHTML =
+                    '<div class="typing-thinking-wrap">' +
+                    `<span class="thinking-text">${escapeHtml(text)}</span>` +
+                    '<div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>' +
+                    '</div>';
+            }
+        });
+    }
 }
 
 function removeTypingIndicator() {
@@ -2650,8 +7395,10 @@ function removeTypingIndicator() {
     if (indicator) indicator.remove();
 }
 
-function updateProgress(percentage) {
+function updateProgress(percentage, totalFields, answeredFields) {
     state.completionPercentage = percentage;
+    if (totalFields !== undefined && totalFields !== null) state.totalFieldCount = totalFields;
+    if (answeredFields !== undefined && answeredFields !== null) state.answeredFieldCount = answeredFields;
     document.getElementById('progressBar').style.width = `${percentage}%`;
     document.getElementById('debugProgress').textContent = `${Math.round(percentage)}%`;
 
@@ -2665,6 +7412,72 @@ function updateProgress(percentage) {
     if (percentage >= 50 && !state.sessionCompleted) {
         completeBtn.disabled = false;
     }
+
+    if (percentage >= 100 && !state.sessionCompleted && !state._collectingHeaderDetails && Number(state.totalFieldCount || 0) > 0) {
+        setChatInputState(true, 'All questions covered — complete the session to submit the form.');
+        if (!document.getElementById('completionPrompt')) {
+            setTimeout(() => {
+                if (isAwaitingCompletion()) promptCompletion();
+            }, 100);
+        }
+    } else if (!state.sessionCompleted) {
+        setChatInputState(false, 'Type your message...');
+    }
+
+    // Update inline progress widget in the chat
+    updateInlineChatProgress(percentage);
+}
+
+function updateInlineChatProgress(percentage) {
+    if (state._replayMode) return;
+
+    const widget = document.getElementById('chatInlineProgress');
+    if (!widget) return;
+
+    // Show it the first time
+    widget.style.display = 'block';
+
+    const pct = Math.round(percentage);
+    const statusMessages = [
+        [0,  1,   'Just getting started.'],
+        [1,  25,  'Just getting started on the details.'],
+        [25, 50,  'Making good progress.'],
+        [50, 75,  'More than halfway through!'],
+        [75, 100, 'Just adding some finishing touches.']
+    ];
+    let statusText = 'Working through the form.';
+    for (const [lo, hi, msg] of statusMessages) {
+        if (pct >= lo && pct < hi) { statusText = msg; break; }
+    }
+    if (pct >= 100) statusText = 'All details collected!';
+
+    // Build "7/10 (70%) Complete" using server-sent askable counts
+    // Server returns totalFields (askable only: excludes headings, auto-answer, unmet conditionals)
+    // and answeredFields (answered askable). These are dynamic — they change as conditions are met.
+    const answered = state.answeredFieldCount || 0;
+    const total = (state.totalFieldCount > 0) ? state.totalFieldCount : null;
+    const progressLabel = total
+        ? `${answered}/${total} (${pct}%) Complete.`
+        : `${pct}% Complete.`;
+
+    document.getElementById('chatInlineProgressText').innerHTML =
+        `<strong>${progressLabel}</strong> ${statusText}`;
+    document.getElementById('chatInlineProgressFill').style.width = `${pct}%`;
+
+    const formUrl = getFormUrl();
+    const linkRow = document.getElementById('chatInlineProgressLink');
+    if (formUrl) {
+        const recordName = state.chatName || state.templateName || 'Record';
+        document.getElementById('chatInlineProgressLinkText').textContent = `View the ${recordName}`;
+        linkRow.style.display = 'inline-flex';
+    } else {
+        linkRow.style.display = 'none';
+    }
+}
+
+function _openFormFromWidget() {
+    const url = getFormUrl();
+    if (url) window.open(url, '_blank');
 }
 
 function updateDebugInfo() {
@@ -2742,31 +7555,45 @@ async function completeSession() {
 
         const data = await response.json();
 
+        const completeUrl = buildCompleteUrl(state.regOthId, state.templateName, state.moduleName);
+
         if (data.success) {
+            await registerOthHdrFinish();
             state.sessionCompleted = true;
+            saveTranscript(); // mark as complete in localStorage
+            _markSessionCompleteLocally(state.regOthId);
             // Disable the chat input
             setChatInputState(true, 'Session completed.');
             // Disable the panel button
             const btn = document.getElementById('completeBtnPanel');
             btn.disabled = true;
             btn.textContent = 'Session Completed';
-            // Show completion UI in chat
-            showCompletionUI(data.missingFields);
+            if (completeUrl) {
+                window.location.href = completeUrl;
+                return;
+            }
+            await showCompletionUI(data.missingFields);
         } else {
             // Missing required fields — warn and show which ones
             const missing = data.missingFields?.length
                 ? `\n\nMissing: ${data.missingFields.join(', ')}`
                 : '';
-            const proceed = confirm(
-                `Some required fields are incomplete.${missing}\n\nYou can still complete and edit them in the form.\n\nProceed anyway?`
-            );
+            const proceed = true;
+
             if (!proceed) return;
             // Force-complete by calling again (backend may block — just show UI)
+            await registerOthHdrFinish();
             state.sessionCompleted = true;
+            saveTranscript();
+            _markSessionCompleteLocally(state.regOthId);
             document.getElementById('completeBtnPanel').disabled = true;
             document.getElementById('completeBtnPanel').textContent = 'Session Completed';
             setChatInputState(true, 'Session completed.');
-            showCompletionUI(data.missingFields);
+            if (completeUrl) {
+                window.location.href = completeUrl;
+                return;
+            }
+            await showCompletionUI(data.missingFields);
         }
     } catch (error) {
         console.error('Error completing session:', error);
@@ -2774,7 +7601,25 @@ async function completeSession() {
     }
 }
 
-function showCompletionUI(missingFields) {
+async function showCompletionUI(missingFields) {
+    // Ensure we have regTypeId before showing the button
+    if (!state.regTypeId && state.regOthId) {
+        try {
+            console.log('⏳ regTypeId is missing, fetching from transcript API...');
+            const transcriptUrl = `${TRANSCRIPT_API_URL}/${state.regOthId}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`;
+            const res = await fetch(transcriptUrl);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.regTypeID) {
+                    state.regTypeId = data.regTypeID;
+                    console.log('✅ Fetched and set state.regTypeId to:', state.regTypeId);
+                }
+            }
+        } catch (e) {
+            console.warn('Could not fetch regTypeId from transcript API:', e);
+        }
+    }
+
     const messagesArea = document.getElementById('messagesArea');
 
     const messageDiv = document.createElement('div');
@@ -2795,29 +7640,38 @@ function showCompletionUI(missingFields) {
 
     // Two action buttons
     const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'suggestions';
-    actionsDiv.style.marginTop = '14px';
+    actionsDiv.className = 'suggestions row g-2 mt-3';
 
     const openBtn = document.createElement('button');
-    openBtn.className = 'suggestion-pill';
+    openBtn.className = 'btn btn-primary w-100';
     openBtn.innerHTML = '<i class="ph-thin ph-arrow-square-out" style="margin-right:4px"></i>Open Form';
-    openBtn.onclick = () => { const url = getFormUrl(); if (url) window.open(url, '_blank'); };
-
-    const printBtn = document.createElement('button');
-    printBtn.className = 'suggestion-pill';
-    printBtn.style.background = '#0d6efd';
-    printBtn.innerHTML = '<i class="ph-thin ph-printer" style="margin-right:4px"></i>Print PDF';
-    printBtn.onclick = () => printChatAsPDF();
+    openBtn.onclick = () => { 
+        console.log('🔵 Chat completion "Open Form" button clicked');
+        const url = getFormUrl(); 
+        console.log('📍 getFormUrl() returned:', url);
+        if (url) {
+            console.log('✅ Opening URL:', url);
+            window.open(url, '_blank'); 
+        } else {
+            console.log('⚠️  getFormUrl() returned empty/null');
+        }
+    };
 
     const newBtn = document.createElement('button');
-    newBtn.className = 'suggestion-pill';
-    newBtn.style.background = '#6b7280';
+    newBtn.className = 'btn btn-outline-secondary w-100';
     newBtn.innerHTML = '<i class="ph-thin ph-plus" style="margin-right:4px"></i>Start New';
     newBtn.onclick = () => startNewSession();
 
-    actionsDiv.appendChild(openBtn);
-    actionsDiv.appendChild(printBtn);
-    actionsDiv.appendChild(newBtn);
+    const openCol = document.createElement('div');
+    openCol.className = 'col-12 col-sm-6';
+    openCol.appendChild(openBtn);
+
+    const newCol = document.createElement('div');
+    newCol.className = 'col-12 col-sm-6';
+    newCol.appendChild(newBtn);
+
+    actionsDiv.appendChild(openCol);
+    actionsDiv.appendChild(newCol);
     contentDiv.appendChild(actionsDiv);
 
     messageDiv.appendChild(icon);
@@ -2826,89 +7680,6 @@ function showCompletionUI(missingFields) {
     scrollToBottom();
 
     if (state.voiceMode) speakText(msg);
-}
-
-function printChatAsPDF() {
-    const messages = document.querySelectorAll('#messagesArea .message');
-    const sessionDate = new Date().toLocaleString();
-    const templateName = state.templateName || '-';
-    const internalNo = state.internalNo || state.regOthId || '-';
-    const userName = CONFIG.userName || 'User';
-
-    // Build extracted fields table
-    let fieldsHtml = '';
-    if (state.extractedFieldsMap.size > 0) {
-        fieldsHtml = '<table class="fields-table"><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>';
-        state.extractedFieldsMap.forEach((field) => {
-            const name = field.fieldName || '';
-            const value = field.extractedValue || field.value || '';
-            fieldsHtml += `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(value)}</td></tr>`;
-        });
-        fieldsHtml += '</tbody></table>';
-    }
-
-    // Build messages HTML
-    let messagesHtml = '';
-    messages.forEach(msg => {
-        const isUser = msg.classList.contains('user');
-        const contentEl = msg.querySelector('.message-content');
-        if (!contentEl) return;
-        // Clone content and remove suggestion pills / fields-summary noise
-        const clone = contentEl.cloneNode(true);
-        clone.querySelectorAll('.suggestions, .fields-summary, .file-upload-container, .map-container, .typing-indicator').forEach(el => el.remove());
-        const html = clone.innerHTML.trim();
-        if (!html) return;
-        const senderLabel = isUser ? escapeHtml(userName) : 'Assistant';
-        messagesHtml += `<div class="msg ${isUser ? 'msg-user' : 'msg-ai'}"><span class="msg-sender">${senderLabel}</span><div class="msg-body">${html}</div></div>`;
-    });
-
-    const printHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Chat Session — ${escapeHtml(templateName)}</title>
-<style>
-  body { font-family: Arial, sans-serif; font-size: 13px; color: #1f2937; margin: 0; padding: 24px; }
-  h1 { font-size: 18px; margin: 0 0 4px; color: #111827; }
-  .meta { font-size: 12px; color: #6b7280; margin-bottom: 20px; }
-  .meta span { margin-right: 16px; }
-  h2 { font-size: 14px; color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; margin: 20px 0 10px; }
-  .msg { margin-bottom: 12px; }
-  .msg-sender { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin-bottom: 3px; }
-  .msg-user .msg-sender { color: #2563eb; }
-  .msg-ai .msg-sender { color: #7c3aed; }
-  .msg-body { background: #f9fafb; border-left: 3px solid #e5e7eb; padding: 8px 12px; border-radius: 0 6px 6px 0; }
-  .msg-user .msg-body { border-left-color: #2563eb; }
-  .msg-ai .msg-body { border-left-color: #7c3aed; }
-  .msg-body p { margin: 0 0 6px; }
-  .msg-body p:last-child { margin: 0; }
-  .fields-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-  .fields-table th, .fields-table td { text-align: left; padding: 6px 10px; border: 1px solid #e5e7eb; font-size: 12px; }
-  .fields-table th { background: #f3f4f6; font-weight: 600; }
-  .fields-table tr:nth-child(even) td { background: #f9fafb; }
-  @media print { body { padding: 0; } }
-</style>
-</head>
-<body>
-<h1>${escapeHtml(templateName)}</h1>
-<div class="meta">
-  <span><strong>Internal No:</strong> ${escapeHtml(String(internalNo))}</span>
-  <span><strong>User:</strong> ${escapeHtml(userName)}</span>
-  <span><strong>Date:</strong> ${sessionDate}</span>
-</div>
-${fieldsHtml ? '<h2>Extracted Fields</h2>' + fieldsHtml : ''}
-<h2>Conversation</h2>
-${messagesHtml}
-</body>
-</html>`;
-
-    const win = window.open('', '_blank');
-    if (!win) { alert('Please allow pop-ups to print the PDF.'); return; }
-    win.document.write(printHtml);
-    win.document.close();
-    win.focus();
-    // Give the browser a moment to render before opening print dialog
-    setTimeout(() => win.print(), 400);
 }
 
 function startNewSession() {
@@ -2924,22 +7695,47 @@ function startNewSession() {
     state.templateName = '';
     state.moduleName = '';
     state.conversationHistory = [];
+    state.displayMessages = [];
     state.extractedFieldsMap = new Map();
     state.completionPercentage = 0;
     state.initialMessage = '';
     state.awaitingTemplateSelection = false;
     state.availableTemplates = [];
+    state.additionalTemplateChoices = [];
     state.pendingResponse = null;
     state.sessionCost = { totalUSD: 0 };
+    state.templateTypeId = null;
+    state.regTypeId = null;
+    state.pageId = null;
+    state._headerData     = null;
+    state._headerFields   = null;
+    state._hdrAiQuestions = {};
+    state._hdrLocTypeId   = null;
+    state._hdrLocTypeName = null;
+    state.chatName = '';
+    state.awaitingChatName = false;
+    state._pendingSessionData = null;
+    state._chatCreatedAt = null;
+    state._replayMode = false;
+    state._serverMarkedComplete = false;
+    state._isDashboardSession = false;
+    state.awaitingHeaderField = false;
+    state._headerFieldCallback = null;
+    state.chatConfirmedFieldIds = []; // clear confirmed IDs — new session starts fresh
     updateCostDisplay();
 
     // Reset UI
-    document.getElementById('messagesArea').innerHTML = '';
-    document.getElementById('messagesArea').classList.remove('active');
+    const messagesAreaEl = document.getElementById('messagesArea');
+    messagesAreaEl.innerHTML = '';
+    messagesAreaEl.classList.remove('active');
     document.getElementById('chatInputArea').style.display = 'none';
     document.getElementById('emptyState').style.display = '';
     setChatInputState(false, 'Type your message...');
     clearAllInputs();
+    const existingWidget = document.getElementById('chatInlineProgress');
+    if (existingWidget) existingWidget.style.display = 'none';
+    state.totalFieldCount = 0;
+    state.answeredFieldCount = 0;
     document.getElementById('progressBar').style.width = '0%';
     document.getElementById('panelProgressBar').style.width = '0%';
     document.getElementById('panelProgressText').textContent = '0% complete';
@@ -2952,12 +7748,21 @@ function startNewSession() {
     btn.textContent = 'Complete Session';
     document.getElementById('progressPanel').classList.remove('show');
     document.getElementById('debugInfo').classList.remove('show');
+    document.getElementById('progressToggle').style.display = 'flex';
+
+    // Clear topbar title and read-only banner
+    setTopbarTitle('');
+    const banner = document.getElementById('readonlyBanner');
+    if (banner) banner.remove();
+
+    // Re-render sidebar to deselect any active item
+    renderSidebarChats();
+
     _historyState.loaded = false; // force refresh next time panel opens
 }
 
 function scrollToBottom() {
-    const messagesArea = document.getElementById('messagesArea');
-    messagesArea.scrollTop = messagesArea.scrollHeight;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2973,8 +7778,1630 @@ const _historyState = {
     expandedId: null   // regOthId whose fields panel is open
 };
 
-const SESSION_HISTORY_URL = CONFIG.apiUrl.replace('/chat-template', '/session-history');
-const SMART_FILL_URL      = CONFIG.apiUrl.replace('/chat-template', '/smart-fill');
+const SESSION_HISTORY_URL  = CONFIG.apiUrl.replace('/chat-template', '/session-history');
+const TRANSCRIPT_API_URL   = CONFIG.apiUrl.replace('/chat-template', '/chat-transcript');
+const SMART_FILL_URL       = CONFIG.apiUrl.replace('/chat-template', '/smart-fill');
+
+// In-memory cache of sidebar items — populated from API on load, updated locally on save.
+let _sidebarItems = [];
+
+// Base URL for the WHSMonitor ASMX web services (same host, session-cookie auth)
+const ASMX_BASE_URL = (() => {
+    try {
+        const u = new URL(CONFIG.apiUrl);
+        return `${u.protocol}//${u.host}/NetServices/POSTDynamicChecklist.asmx`;
+    } catch { return '/NetServices/POSTDynamicChecklist.asmx'; }
+})();
+
+// Base URL for the session-free ASHX handlers (replaces GET-based ASMX calls)
+const ASHX_BASE_URL = (() => {
+    try {
+        const u = new URL(CONFIG.apiUrl);
+        return `${u.protocol}//${u.host}/App/NetServices`;
+    } catch { return '/App/NetServices'; }
+})();
+
+// ═══════════════════════════════════════════════════════════
+//  HEADER DETAILS COLLECTION
+//  After naming a session, ask the "header" fields (Title, Date,
+//  Location, Reported By, Division, Department, etc.) that come
+//  from GetDetailProperties for the template's PageId.
+// ═══════════════════════════════════════════════════════════
+
+// Fields that are either auto-set or not supported in chat UI
+const _HDR_SKIP_IDS = new Set([
+    'wcIDTB',          // auto-number
+    'wcCreatedBy',     // auto-set from session
+    'wcDraft',         // auto
+    'wcAttachUpld',    // file upload — not supported
+    'wcLocationTB',    // auto-filled after location selection
+    'wcTitleDesc',     // already collected as session name at chat start
+    'wcTitleTB',       // alternate FieldControlID for title — same skip reason
+]);
+
+/**
+ * Loads visible header fields for the current template's PageId via GetDetailProperties,
+ * then walks the user through each field one at a time as inline cards.
+ * Calls onComplete() when done (or immediately if no fields / no pageId).
+ */
+async function collectHeaderDetails(onComplete) {
+    state._collectingHeaderDetails = true;
+    state._headerDetailsReadyForChecklist = false;
+
+    // Remove any stale checklist UI affordances while details flow is active.
+    document.querySelectorAll('.suggestions, .checklist-skip-chip').forEach(el => el.remove());
+
+    const transcriptPageId = state.regOthId ? (loadTranscript(state.regOthId)?.pageId || null) : null;
+    const mappedPageId = (state.templateTypeId && TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId])
+        ? TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId]
+        : null;
+    const pageId = state.pageId || mappedPageId || transcriptPageId || getCurrentPageId();
+    if (!pageId) {
+        console.warn('[Header] Skipping header questions: no PageId available.');
+        state._collectingHeaderDetails = false;
+        state._headerDetailsReadyForChecklist = true;
+        onComplete();
+        return;
+    }
+    state.pageId = pageId;
+
+    try {
+        let allFields = [];
+
+        // Preferred source: GetDetailProperties.ashx
+        const appName = 'WHSMONITOR';
+        const detailPropsUrl = `${ASHX_BASE_URL}/GetDetailProperties.ashx?parentpage=${pageId}&ucpageid=${pageId}&memberId=${CONFIG.userId}&storeId=${CONFIG.storeId || 0}&applicationName=${encodeURIComponent(appName)}`;
+        try {
+            const detailResp = await fetch(detailPropsUrl, { method: 'GET', credentials: 'same-origin' });
+            if (!detailResp.ok) throw new Error(`GetDetailProperties returned ${detailResp.status}`);
+            const detailJson = await detailResp.json();
+            allFields = (
+                detailJson.d?.recordlist ||
+                detailJson.d?.recordList ||
+                detailJson.recordlist ||
+                detailJson.recordList ||
+                detailJson.data ||
+                []
+            );
+        } catch (detailErr) {
+            console.warn('[Header] GetDetailProperties failed, falling back to API:', detailErr);
+
+            // Fallback: our API proxy
+            const baseApi = CONFIG.apiUrl.replace(/\/chat-template.*$/, '');
+            const proxyUrl = `${baseApi}/chat-template/header-fields?pageId=${pageId}&memberId=${CONFIG.userId}&regTypeId=${state.regTypeId || 0}&storeId=${CONFIG.storeId || 0}`;
+            const resp = await fetch(proxyUrl, { method: 'GET', credentials: 'same-origin' });
+            if (!resp.ok) throw new Error(`header-fields returned ${resp.status}`);
+            const json = await resp.json();
+            allFields = (json.d?.recordlist || json.d?.recordList || []);
+        }
+
+        const coreHeaderIds = new Set([
+            'wcStartDtPkr', 'wcStartDtPkrFrom', 'wcStartDt',
+            'wcLocationIDRadCombo', 'wcLocType', 'wcLocAddr', 'wcLocDet',
+            'wcPersonRespCmb', 'wcDivisionCmb', 'wcDivision',
+            'wcDepartmentCmb', 'wcDepartment', 'wcProgrammeCmb', 
+            'wcRegRecTypeCombo', 'wcType',
+            'wcRegRecSubTypeCombo', 'wcSubType',
+            'wcCommTB', 'wcComm', 'wcReportsTo', 'wcProjectCombo',
+            'wcContractorCompanyCMB', 'wcStatusCmb', 'wcSpecificLocTB', 
+            'wcDescTB', 'wcStatusCombo'
+
+        ]);
+        const fields = allFields.filter(f => {
+            const fieldId = String(f.FieldControlID || '');
+            const caption = String(f.ColCaption || '');
+            const isTitleField = /title/i.test(fieldId) || /title/i.test(caption);
+            const isRequired = _isHeaderRequired(f);
+
+            if (!f.ColVisible) return false;
+            if (_HDR_SKIP_IDS.has(fieldId)) return false;
+            if (isTitleField) return false;
+            if (f.ControlType === 'Hidden' || f.ControlType === 'RadAsyncUpload') return false;
+
+            // Ask only required fields (plus a small core set) on details stage.
+            return isRequired || coreHeaderIds.has(fieldId);
+        });
+
+        if (!fields.length) {
+            console.warn(`[Header] No visible header fields returned for PageId ${pageId}.`);
+            state._collectingHeaderDetails = false;
+            state._headerDetailsReadyForChecklist = true;
+            onComplete();
+            return;
+        }
+
+        const cachedHeaderData = state._headerData
+            || (state.regOthId ? loadTranscript(state.regOthId)?.headerData : null)
+            || {};
+
+        state._headerData     = cachedHeaderData;
+        state._headerFields   = fields;
+        state._hdrAiQuestions = {};
+
+        // Single batch AI call to rephrase all field labels into conversational questions
+        const aiQ = await _loadAiHeaderQuestions(fields);
+        if (aiQ) state._hdrAiQuestions = aiQ;
+
+        const firstPendingIndex = _getNextPendingHeaderIndex(fields, 0);
+        if (firstPendingIndex >= fields.length) {
+            await _saveHeaderDetails(onComplete);
+            return;
+        }
+
+        addMessage('assistant',
+            aiQ?._intro ||
+            `Before we start on the checklist, I just need a few quick details about this ${state.templateName || 'record'}.`
+        );
+        scrollToBottom();
+
+        await _showAllHeaderFieldsCard(fields, onComplete);
+    } catch (err) {
+        console.warn('[Header] Could not load field schema — skipping:', err);
+        state._collectingHeaderDetails = false;
+        state._headerDetailsReadyForChecklist = true;
+        onComplete();
+    }
+}
+
+/**
+ * Shows all header detail fields (date, location, type, subtype, division etc.) in a
+ * single grouped form card — same pattern as addClusterFormCard for checklist questions.
+ * Replaces the old one-at-a-time _askNextHeaderField flow.
+ */
+async function _showAllHeaderFieldsCard(fields, onComplete) {
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMessage  = messagesArea.lastElementChild;
+    if (!lastMessage) { onComplete(); return; }
+
+    // Pre-fetch independent combo options in parallel before rendering
+    const comboCache = {};
+    const independentFids = ['wcRegRecTypeCombo', 'wcDivisionCmb', 'wcStatusCombo', 'wcProjectCombo', 'wcContractorCompanyCMB'];
+    await Promise.allSettled(independentFids.map(async fid => {
+        if (fields.some(f => _normalizeHeaderFieldId(f.FieldControlID) === fid))
+            comboCache[fid] = await _fetchHeaderComboOptions(fid, '');
+    }));
+
+    // Pre-fetch location types
+    let locTypes = [];
+    if (fields.some(f => _isHeaderLocationField(f))) {
+        try {
+            const baseApi = CONFIG.apiUrl.replace(/\/chat-template.*$/, '');
+            const r = await fetch(`${baseApi}/chat-template/location-types?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            locTypes = j.d?.recordlist || [];
+            if (locTypes.length) {
+                state._hdrLocTypeId   = locTypes[0].id;
+                state._hdrLocTypeName = locTypes[0].name;
+                if (!state._headerData['_locationTypeId'])
+                    state._headerData['_locationTypeId'] = { value: locTypes[0].id, displayText: locTypes[0].name };
+            }
+        } catch(e) { console.warn('[Header card] location types error:', e); }
+    }
+
+    const card = document.createElement('div');
+    card.className = 'hdr-details-card';
+
+    const fieldEls = [];
+
+    // ── Material outlined always-notched label wrapper
+    const makeMdField = (labelText, req, inputEl) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'md-field mb-3';
+        const lbl = document.createElement('label');
+        lbl.className = 'md-label';
+        lbl.textContent = labelText + (req ? ' *' : '');
+        inputEl.classList.add('md-input');
+        // Label is always notched — no focus/blur class toggling needed
+        wrap.appendChild(inputEl);
+        wrap.appendChild(lbl);
+        return wrap;
+    };
+
+    // ── Searchable combo widget
+    const makeSearchSelect = (options, fetchFn) => {
+        let allOptions = options || [];
+        let _selVal = '', _selText = '', _fetchTimer = null;
+        const outer = document.createElement('div');
+        outer.className = 'md-search-select';
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.className = 'md-input';
+        inp.placeholder = 'Select or search…'; inp.autocomplete = 'off';
+        const arrow = document.createElement('span');
+        arrow.className = 'md-select-arrow'; arrow.innerHTML = '&#9662;';
+        arrow.addEventListener('mousedown', e => { e.preventDefault(); inp.focus(); });
+        const dd = document.createElement('div');
+        dd.className = 'chat-floating-dd';
+        dd.style.cssText = 'display:none;position:absolute;z-index:1000;width:100%;max-height:200px;overflow-y:auto;';
+        const renderOpts = (filter) => {
+            const q = (filter || '').trim().toLowerCase();
+            const filtered = q ? allOptions.filter(o => o.text.toLowerCase().includes(q)) : allOptions;
+            dd.innerHTML = filtered.length
+                ? filtered.map(o =>
+                    `<div class="chat-floating-dd-item" data-id="${escapeHtml(String(o.id))}" data-text="${escapeHtml(o.text)}">${escapeHtml(o.text)}</div>`
+                  ).join('')
+                : '<div class="chat-floating-dd-empty">No results</div>';
+            dd.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                el.addEventListener('mousedown', e => {
+                    e.preventDefault();
+                    _selVal = el.dataset.id; _selText = el.dataset.text;
+                    inp.value = _selText;
+                    inp.classList.remove('md-input--error');
+                    dd.style.display = 'none';
+                    outer.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            });
+        };
+        const doLiveFetch = async (q) => {
+            if (!fetchFn) return;
+            inp.placeholder = 'Searching…';
+            try {
+                const results = await fetchFn(q);
+                allOptions = results;
+            } catch(e) { /* ignore */ }
+            inp.placeholder = 'Select or search…';
+            renderOpts(q);
+            dd.style.display = 'block';
+        };
+        inp.addEventListener('focus', () => {
+            if (fetchFn && allOptions.length === 0) { doLiveFetch(''); }
+            else { renderOpts(inp.value); dd.style.display = 'block'; }
+        });
+        inp.addEventListener('blur',  () => { if (!_selVal) inp.value = ''; });
+        inp.addEventListener('input', () => {
+            _selVal = ''; _selText = '';
+            if (fetchFn) {
+                clearTimeout(_fetchTimer);
+                _fetchTimer = setTimeout(() => doLiveFetch(inp.value.trim()), 300);
+            } else {
+                renderOpts(inp.value); dd.style.display = 'block';
+            }
+        });
+        document.addEventListener('click', e => { if (!outer.contains(e.target)) dd.style.display = 'none'; }, { passive: true });
+        outer.appendChild(inp); outer.appendChild(arrow); outer.appendChild(dd);
+        outer.getValue       = () => _selVal;
+        outer.getDisplayText = () => _selText;
+        outer.getInputEl     = () => inp;
+        outer.reload = async (fid) => {
+            allOptions = []; _selVal = ''; _selText = ''; inp.value = '';
+            inp.placeholder = 'Loading…'; inp.disabled = true;
+            const opts = await _fetchHeaderComboOptions(fid, '');
+            allOptions = opts; inp.placeholder = 'Select or search…'; inp.disabled = false;
+        };
+        return outer;
+    };
+
+    for (const field of fields) {
+        const rawFid = field.FieldControlID;
+        const fid    = _normalizeHeaderFieldId(rawFid);
+        const req    = _isHeaderRequired(field);
+        const question = state._hdrAiQuestions?.[rawFid] || field.ColCaption || rawFid;
+
+        const group = document.createElement('div');
+        group.className = 'mb-3';
+        group.dataset.fid = fid;
+
+        let getVal, getDisplayVal, mainEl;
+
+        // ── Date ──────────────────────────────────────────────────────────
+        if (_isHeaderDateField(field)) {
+            const inp = document.createElement('input');
+            inp.type = 'date';
+            inp.className = 'md-input';
+            inp.value = new Date().toISOString().split('T')[0];
+            mainEl = inp;
+            getVal        = () => inp.value || null;
+            getDisplayVal = () => { if (!inp.value) return null; const [y,m,d] = inp.value.split('-'); return `${d}/${m}/${y}`; };
+            group.appendChild(makeMdField(question, req, inp));
+
+        // ── Location ──────────────────────────────────────────────────────
+        } else if (_isHeaderLocationField(field)) {
+            let selectedLoc = null;
+            const wrap = document.createElement('div');
+            if (locTypes.length > 1) {
+                const typesWrap = document.createElement('div');
+                typesWrap.className = 'hdr-loc-types mb-2';
+                locTypes.forEach((t, i) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = `btn btn-sm ${i === 0 ? 'btn-primary' : 'btn-outline-secondary'}`;
+                    btn.dataset.id = t.id; btn.dataset.name = t.name;
+                    btn.textContent = t.name;
+                    btn.onclick = () => {
+                        typesWrap.querySelectorAll('button').forEach(b => {
+                            b.classList.replace('btn-primary', 'btn-outline-secondary');
+                        });
+                        btn.classList.replace('btn-outline-secondary', 'btn-primary');
+                        state._hdrLocTypeId   = t.id;
+                        state._hdrLocTypeName = t.name;
+                        state._headerData['_locationTypeId'] = { value: t.id, displayText: t.name };
+                        selectedLoc = null;
+                        searchEl.value = '';
+                        ddEl.style.display = 'none';
+                    };
+                    typesWrap.appendChild(btn);
+                });
+                wrap.appendChild(typesWrap);
+            }
+
+            const searchWrap = document.createElement('div');
+            searchWrap.style.position = 'relative';
+            const searchEl = document.createElement('input');
+            searchEl.type = 'text';
+            searchEl.className = 'md-input';
+            searchEl.placeholder = 'Type to search location…';
+            searchEl.autocomplete = 'off';
+            const ddEl = document.createElement('div');
+            ddEl.className = 'chat-floating-dd';
+            ddEl.style.cssText = 'display:none;position:absolute;z-index:1000;width:100%;max-height:200px;overflow-y:auto;';
+            let locTimer = null;
+
+            const renderLocList = (items) => {
+                ddEl.innerHTML = items.length
+                    ? items.map(x =>
+                        `<div class="chat-floating-dd-item" style="cursor:pointer;padding:8px 12px;"
+                            data-id="${escapeHtml(String(x.IDNo))}"
+                            data-name="${escapeHtml(x.RowDescription)}"
+                            data-addr="${escapeHtml(x.Address || '')}">${escapeHtml(x.RowDescription)}</div>`
+                      ).join('')
+                    : '<div class="chat-floating-dd-empty">No results</div>';
+                ddEl.style.display = 'block';
+                ddEl.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                    el.addEventListener('mousedown', e => {
+                        e.preventDefault();
+                        selectedLoc = { id: el.dataset.id, name: el.dataset.name, address: el.dataset.addr, locTypeId: state._hdrLocTypeId };
+                        searchEl.value = el.dataset.name;
+                        ddEl.style.display = 'none';
+                    });
+                });
+            };
+
+            searchEl.addEventListener('input', () => {
+                selectedLoc = null;
+                clearTimeout(locTimer);
+                const q = searchEl.value.trim();
+                if (q.length < 2) { ddEl.style.display = 'none'; return; }
+                locTimer = setTimeout(async () => {
+                    try {
+                        const r = await fetch(`${ASMX_BASE_URL}/GetLocationTypeAddressListv2`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ locRequest: { StoreID: CONFIG.storeId, LocType: state._hdrLocTypeId, MemberId: CONFIG.userId, Condition: q, TotalCount: 20 } })
+                        });
+                        const j = await r.json();
+                        renderLocList(j.d?.recordList || []);
+                    } catch(e) { console.warn('[Header card] location search error', e); }
+                }, 250);
+            });
+
+            document.addEventListener('click', e => {
+                if (!searchWrap.contains(e.target)) ddEl.style.display = 'none';
+            }, { passive: true });
+
+            searchWrap.appendChild(searchEl);
+            searchWrap.appendChild(ddEl);
+            wrap.appendChild(searchWrap);
+
+            // Wrap in notched md-field
+            const locFieldWrap = document.createElement('div');
+            locFieldWrap.className = 'md-field mb-3';
+            const locLbl = document.createElement('label');
+            locLbl.className = 'md-label';
+            locLbl.textContent = question + (req ? ' *' : '');
+            locFieldWrap.appendChild(wrap);
+            locFieldWrap.appendChild(locLbl);
+            group.appendChild(locFieldWrap);
+
+            mainEl        = searchEl;
+            getVal        = () => selectedLoc?.id   || null;
+            getDisplayVal = () => selectedLoc?.name || null;
+
+            fieldEls.push({ rawFid, fid, isRequired: req, getVal, getDisplayVal, mainEl, group,
+                _getLocData: () => selectedLoc });
+            card.appendChild(group);
+            continue; // skip the common fieldEls.push below
+
+        // ── Combo / dropdown ──────────────────────────────────────────────
+        } else if (_isHeaderComboField(field)) {
+            const _liveSearchFids = ['wcPersonRespCmb', 'wcReportsTo'];
+            const _liveFetch = _liveSearchFids.includes(fid)
+                ? (q) => _fetchHeaderComboOptions(fid, q)
+                : null;
+            const widget = makeSearchSelect(comboCache[fid] || [], _liveFetch);
+            group._searchSelectWidget = widget;
+            mainEl        = widget.getInputEl();
+            getVal        = () => widget.getValue()       || null;
+            getDisplayVal = () => widget.getDisplayText() || null;
+            if (fid === 'wcRegRecTypeCombo') {
+                widget.addEventListener('change', async () => {
+                    state._headerData['wcRegRecTypeCombo'] = { value: widget.getValue(), displayText: widget.getDisplayText() };
+                    state._headerData['wcType'] = state._headerData['wcRegRecTypeCombo'];
+                    const sg = card.querySelector('[data-fid="wcRegRecSubTypeCombo"]');
+                    if (sg?._searchSelectWidget) await sg._searchSelectWidget.reload('wcRegRecSubTypeCombo');
+                });
+            }
+            if (fid === 'wcDivisionCmb') {
+                widget.addEventListener('change', async () => {
+                    state._headerData['wcDivisionCmb'] = { value: widget.getValue(), displayText: widget.getDisplayText() };
+                    state._headerData['wcDivision'] = state._headerData['wcDivisionCmb'];
+                    const dg = card.querySelector('[data-fid="wcDepartmentCmb"]');
+                    if (dg?._searchSelectWidget) await dg._searchSelectWidget.reload('wcDepartmentCmb');
+                });
+            }
+            if (fid === 'wcDepartmentCmb') {
+                widget.addEventListener('change', async () => {
+                    state._headerData['wcDepartmentCmb'] = { value: widget.getValue(), displayText: widget.getDisplayText() };
+                    state._headerData['wcDepartment'] = state._headerData['wcDepartmentCmb'];
+                    const pg = card.querySelector('[data-fid="wcProgrammeCmb"]');
+                    if (pg?._searchSelectWidget) await pg._searchSelectWidget.reload('wcProgrammeCmb');
+                });
+            }
+            // Wrap combo widget in notched md-field
+            const comboWrap = document.createElement('div');
+            comboWrap.className = 'md-field';
+            const comboLbl = document.createElement('label');
+            comboLbl.className = 'md-label';
+            comboLbl.textContent = question + (req ? ' *' : '');
+            comboWrap.appendChild(widget);
+            comboWrap.appendChild(comboLbl);
+            group.appendChild(comboWrap);
+
+        // ── Text / Textarea ───────────────────────────────────────────────
+        } else {
+            const ct  = String(field.ControlType || '').toLowerCase();
+            const cap = String(field.ColCaption  || '').toLowerCase();
+            const isLong = ct.includes('multiline') || ct.includes('textar') ||
+                           cap.includes('desc') || cap.includes('detail') || cap.includes('comment');
+            if (isLong) {
+                const ta = document.createElement('textarea');
+                ta.rows = 2; ta.style.resize = 'vertical';
+                mainEl        = ta;
+                getVal        = () => ta.value.trim() || null;
+                getDisplayVal = () => ta.value.trim() || null;
+                group.appendChild(makeMdField(question, req, ta));
+            } else {
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                mainEl        = inp;
+                getVal        = () => inp.value.trim() || null;
+                getDisplayVal = () => inp.value.trim() || null;
+                group.appendChild(makeMdField(question, req, inp));
+            }
+        }
+
+        fieldEls.push({ rawFid, fid, isRequired: req, getVal, getDisplayVal, mainEl, group });
+        card.appendChild(group);
+    }
+
+    // ── Submit ──────────────────────────────────────────────────────────────
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'btn btn-primary hdr-submit-btn w-100 mt-2';
+    submitBtn.textContent = 'Save Details';
+    submitBtn.onclick = async () => {
+        let hasError = false;
+        fieldEls.forEach(item => {
+            const val = item.getVal();
+            if (!val && item.isRequired) {
+                hasError = true;
+                if (item.mainEl) item.mainEl.classList.add('md-input--error');
+            } else {
+                if (item.mainEl) item.mainEl.classList.remove('md-input--error');
+            }
+        });
+        if (hasError) { scrollToBottom(); return; }
+
+        fieldEls.forEach(item => {
+            const val  = item.getVal();
+            const disp = item.getDisplayVal ? item.getDisplayVal() : val;
+            if (val !== null && val !== undefined && val !== '') {
+                state._headerData[item.rawFid] = { value: val, displayText: disp || val };
+                if (item.fid !== item.rawFid)
+                    state._headerData[item.fid] = { value: val, displayText: disp || val };
+            }
+            if (item._getLocData) {
+                const loc = item._getLocData();
+                if (loc) _doSelectLocation(loc.id, loc.name, loc.address || '', loc.locTypeId,
+                    (locId, locName) => {
+                        state._headerData[item.rawFid] = { value: locId, displayText: locName };
+                        if (item.fid !== item.rawFid)
+                            state._headerData[item.fid] = { value: locId, displayText: locName };
+                    });
+            }
+        });
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving…';
+        await _saveHeaderDetailsProgress({ finalize: true, announce: false });
+        markHeaderDetailsCompleted(state.regOthId);
+        saveTranscript();
+        card.remove();
+        state._collectingHeaderDetails = false;
+        state._headerDetailsReadyForChecklist = true;
+        addMessage('assistant', 'Details saved — let\'s move on to the checklist.');
+        scrollToBottom();
+        onComplete();
+    };
+    card.appendChild(submitBtn);
+
+    lastMessage.querySelector('.message-content').appendChild(card);
+    scrollToBottom();
+}
+
+function _askNextHeaderField(fields, index, onComplete) {
+    const nextIndex = _getNextPendingHeaderIndex(fields, index);
+    if (nextIndex >= fields.length) {
+        _saveHeaderDetails(onComplete);
+        return;
+    }
+
+    const currentField = fields[nextIndex];
+
+    _showHeaderFieldCard(
+        currentField,
+        async (value, displayText) => {
+            state._headerData[currentField.FieldControlID] = { value, displayText: displayText || value };
+            saveTranscript();
+            await _saveHeaderDetailsProgress();
+            _askNextHeaderField(fields, nextIndex + 1, onComplete);
+        },
+        () => {
+            // Hard guard: required header/details fields can never be skipped,
+            // even if a nested control accidentally routes to onSkip.
+            if (_isHeaderRequired(currentField)) {
+                addMessage('assistant', "This detail is required, so we need to complete it before moving on.");
+                scrollToBottom();
+                return _askNextHeaderField(fields, nextIndex, onComplete);
+            }
+
+            _askNextHeaderField(fields, nextIndex + 1, onComplete);
+        }
+    );
+}
+
+/**
+ * Single batch OpenAI call: convert all field labels into conversational questions.
+ * Returns { _intro: '...', fieldControlId: 'question...', ... } or null on failure.
+ */
+async function _loadAiHeaderQuestions(fields) {
+    if (!CONFIG.openaiApiKey || !fields.length) return null;
+    const templateName = state.chatName || state.templateName || 'this record';
+    const fieldList = fields.map(f => `${f.FieldControlID}|${f.ColCaption}|${f.ControlType}`).join('\n');
+    try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 600,
+                temperature: 0.7,
+                messages: [{
+                    role: 'system',
+                    content: `You are an AI assistant helping a worker fill in a "${templateName}" form via chat.\nConvert each field label into a short, warm, conversational question (max 10 words).\nAlso write a one-sentence friendly intro (key: "_intro") for starting the form section.\nReturn ONLY valid JSON: { "_intro": "...", "<FieldControlID>": "question...", ... }\nNo markdown or explanation.`
+                }, {
+                    role: 'user',
+                    content: `Fields (id|label|type):\n${fieldList}`
+                }]
+            })
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        trackCost('gpt-4o-mini', data.usage);
+        const text = data.choices?.[0]?.message?.content?.trim();
+        return text ? JSON.parse(text) : null;
+    } catch (e) { console.warn('[Header] AI question rephrase failed:', e); return null; }
+}
+
+/** Parse a date from natural language or common formats. Returns Date or null. */
+function _parseHdrDate(val) {
+    const lower = (val || '').toLowerCase().trim();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    // Simple keywords
+    if (['today', 'now', "today's date", "today's"].includes(lower)) return today;
+    if (lower === 'yesterday') { const d = new Date(today); d.setDate(d.getDate() - 1); return d; }
+    if (lower === 'tomorrow')  { const d = new Date(today); d.setDate(d.getDate() + 1); return d; }
+
+    // "N days/weeks/months ago" or "N days/weeks/months ago"
+    const agoMatch = lower.match(/^(\d+)\s+(day|days|week|weeks|month|months)\s+ago$/);
+    if (agoMatch) {
+        const n = parseInt(agoMatch[1], 10);
+        const unit = agoMatch[2];
+        const d = new Date(today);
+        if (unit.startsWith('day'))   d.setDate(d.getDate() - n);
+        if (unit.startsWith('week'))  d.setDate(d.getDate() - n * 7);
+        if (unit.startsWith('month')) d.setMonth(d.getMonth() - n);
+        return d;
+    }
+
+    // "last week", "last month"
+    if (lower === 'last week')  { const d = new Date(today); d.setDate(d.getDate() - 7); return d; }
+    if (lower === 'last month') { const d = new Date(today); d.setMonth(d.getMonth() - 1); return d; }
+
+    // dd/mm/yyyy or dd/mm/yy
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(val)) {
+        const [dd, mm, yy] = val.split('/');
+        const yyyy = yy.length === 2 ? '20' + yy : yy;
+        const d = new Date(`${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    // dd-mm-yyyy
+    if (/^\d{1,2}-\d{1,2}-\d{2,4}$/.test(val)) {
+        const [dd, mm, yy] = val.split('-');
+        const yyyy = yy.length === 2 ? '20' + yy : yy;
+        const d = new Date(`${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    // Native parse (ISO, "21 Apr 2026", month names, etc.)
+    const native = new Date(val);
+    return isNaN(native.getTime()) ? null : native;
+}
+
+/**
+ * _hdrPick — called from onclick in chip buttons rendered inside chat messages.
+ * Resolves the current awaiting header field callback.
+ */
+function _hdrPick(value, displayText) {
+    if (!state._headerFieldCallback) return;
+    document.querySelectorAll('.hf-opts button').forEach(b => b.disabled = true);
+    state.awaitingHeaderField = false;
+    const cb = state._headerFieldCallback;
+    state._headerFieldCallback = null;
+    if (value === '__skip__') {
+        addMessage('user', 'Skip');
+        scrollToBottom();
+        cb(null, null, true);
+        return;
+    }
+    addMessage('user', displayText || value);
+    scrollToBottom();
+    cb(value, displayText || value, false);
+}
+
+/** Chip HTML helper — returns a Bootstrap col-wrapped btn */
+function _hdrChip(value, label, extra, colClass) {
+    const v = escapeHtml(String(value));
+    const l = escapeHtml(String(label));
+    const col = colClass || 'col-12 col-sm-12 col-md-4 col-lg-4';
+    const isSkip = String(value) === '__skip__';
+    const btnClass = isSkip ? 'btn btn-outline-primary w-100' : 'btn btn-primary w-100';
+    return `<div class="${col}"><button class="hf-opt ${btnClass}" onclick="_hdrPick('${v}','${l}')" ${extra || ''}>${l}</button></div>`;
+}
+
+/** Set awaiting header field intercept */
+function _awaitHdrText(cb) {
+    state.awaitingHeaderField = true;
+    state._headerFieldCallback = cb;
+}
+
+function _isHeaderRequired(field) {
+    const required = field?.ColRequired;
+    return required === true
+    || required === 1
+    || String(required).toLowerCase() === 'true'
+    || String(required).toLowerCase() === '1'
+    || String(required).toLowerCase() === 'yes'
+    || String(required).toLowerCase() === 'y';
+}
+
+function _isSkipIntentText(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return false;
+
+    const skipPhrases = new Set([
+        'skip',
+        'skip this',
+        'skip for now',
+        'later',
+        'do later',
+        'next',
+        'next question',
+        'move on',
+        'pass',
+        'leave blank',
+        'leave it blank',
+        'not now'
+    ]);
+
+    return skipPhrases.has(text);
+}
+
+function _containsSkipCueText(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return false;
+
+    return /\b(skip|later|next|pass|move on|leave blank|leave it blank|not now|not applicable|n\/a)\b/i.test(text);
+}
+
+async function _analyzeHeaderSkipIntentWithAI(userInput, questionText, isRequired) {
+    const text = String(userInput || '').trim();
+    const deterministicSkip = _isSkipIntentText(text);
+    const hasSkipCue = _containsSkipCueText(text);
+    if (!text) {
+        return { isSkipIntent: false, reply: '' };
+    }
+
+    // Normal answers should never be routed through skip classification.
+    // Only analyze with AI when the text actually contains skip/defer language.
+    if (!deterministicSkip && !hasSkipCue) {
+        return { isSkipIntent: false, reply: '' };
+    }
+
+    if (!CONFIG.openaiApiKey) {
+        return {
+            isSkipIntent: deterministicSkip,
+            reply: isRequired
+                ? "I still need this required detail before we continue."
+                : "No problem — we can skip this for now."
+        };
+    }
+
+    try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${CONFIG.openaiApiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                temperature: 0.2,
+                max_tokens: 120,
+                response_format: { type: 'json_object' },
+                messages: [
+                    {
+                        role: 'system',
+                        content:
+`Classify whether the user wants to skip the current form field.
+Return ONLY JSON with:
+- isSkipIntent: boolean
+- confidence: number
+- reply: string
+
+Rules:
+- If user clearly means skip/defer/move on, set isSkipIntent=true.
+- If uncertain, set isSkipIntent=false.
+- If the user's text could reasonably be the actual answer to the field, set isSkipIntent=false.
+- Never treat a normal field answer as skip intent.
+- If isRequired=true and isSkipIntent=true, reply must politely say it cannot be skipped and ask for this same detail.
+- If isRequired=false and isSkipIntent=true, reply should briefly acknowledge skipping.
+- Keep reply natural and concise (one sentence).`
+                    },
+                    {
+                        role: 'user',
+                        content: JSON.stringify({
+                            userInput: text,
+                            fieldQuestion: questionText || '',
+                            isRequired: !!isRequired
+                        })
+                    }
+                ]
+            })
+        });
+
+        if (!res.ok) {
+            return {
+                isSkipIntent: deterministicSkip,
+                reply: isRequired
+                    ? "I still need this required detail before we continue."
+                    : "No problem — we can skip this for now."
+            };
+        }
+
+        const data = await res.json();
+        trackCost('gpt-4o-mini', data.usage);
+        const raw = data?.choices?.[0]?.message?.content || '{}';
+
+        let parsed = {};
+        try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+
+        const aiConfidence = Number(parsed?.confidence || 0);
+        const aiSkipIntent = parsed?.isSkipIntent === true && aiConfidence >= 0.9;
+        const isSkipIntent = deterministicSkip || aiSkipIntent;
+        return {
+            isSkipIntent,
+            reply: isSkipIntent ? String(parsed?.reply || '').trim() : ''
+        };
+    } catch {
+        return {
+            isSkipIntent: deterministicSkip,
+            reply: isRequired
+                ? "I still need this required detail before we continue."
+                : "No problem — we can skip this for now."
+        };
+    }
+}
+
+function _normalizeHeaderFieldId(fid) {
+    const id = String(fid || '');
+    const map = {
+        wcType: 'wcRegRecTypeCombo',
+        wcSubType: 'wcRegRecSubTypeCombo',
+        wcDivision: 'wcDivisionCmb',
+        wcDepartment: 'wcDepartmentCmb',
+        wcContractor: 'wcContractorCompanyCMB',
+        wcLocType: 'wcLocationIDRadCombo',
+        wcLocAddr: 'wcLocationTB',
+        wcLocDet: 'wcSpecificLocTB',
+        wcStartDt: 'wcStartDtPkr',
+        wcComm: 'wcCommTB'
+    };
+    return map[id] || id;
+}
+
+function _getHeaderDataValue(...keys) {
+    for (const key of keys) {
+        const val = state._headerData?.[key]?.value;
+        if (val !== undefined && val !== null && String(val) !== '') return val;
+    }
+    return null;
+}
+
+function _isHeaderValueMissing(field) {
+    if (!field) return true;
+
+    if (_isHeaderLocationField(field)) {
+        const locationId = _getHeaderDataValue('wcLocationIDRadCombo', 'wcLocType');
+        return locationId === null || locationId === undefined || String(locationId).trim() === '';
+    }
+
+    const fieldId = String(field.FieldControlID || '');
+    const normalizedFieldId = _normalizeHeaderFieldId(fieldId);
+
+    const directValue = state._headerData?.[fieldId]?.value;
+    const normalizedValue = state._headerData?.[normalizedFieldId]?.value;
+    const resolved = directValue !== undefined && directValue !== null ? directValue : normalizedValue;
+
+    return resolved === undefined || resolved === null || String(resolved).trim() === '';
+}
+
+function _getFirstMissingRequiredHeaderIndex() {
+    const fields = Array.isArray(state._headerFields) ? state._headerFields : [];
+    for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        if (_isHeaderRequired(field) && _isHeaderValueMissing(field)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+function _getNextPendingHeaderIndex(fields, startIndex = 0) {
+    const list = Array.isArray(fields) ? fields : [];
+    for (let i = Math.max(0, Number(startIndex) || 0); i < list.length; i++) {
+        if (_isHeaderValueMissing(list[i])) {
+            return i;
+        }
+    }
+    return list.length;
+}
+
+function _buildHeaderDetailsPayload(finalize = false) {
+    const d   = state._headerData || {};
+    const val = (id) => d[id]?.value || null;
+    const int = (id) => {
+        const v = val(id);
+        return (v !== null && v !== undefined && String(v).trim() !== '' && parseInt(v, 10) > 0)
+            ? parseInt(v, 10)
+            : null;
+    };
+
+    const today = new Date().toISOString().split('T')[0];
+
+    return {
+        regOthID:       state.regOthId,
+        storeID:        CONFIG.storeId,
+        updatedByID:    CONFIG.userId,
+
+        titleDesc:      val('wcTitleTB') || val('wcTitle') || (finalize ? (state.chatName || state.templateName || '') : null),
+        startDt:        val('wcStartDtPkr') || val('wcStartDtPkrFrom') || val('wcStartDt') || null,
+        endDt:          finalize ? today : null,
+
+        locationTypeID: int('_locationTypeId') || int('wcLocType'),
+        locationID:     int('wcLocationIDRadCombo'),
+        locationName:   val('_locationName'),
+        locationAddr:   val('wcLocationTB') || val('wcLocAddr'),
+        locationDet:    val('wcSpecificLocTB') || val('wcLocDet'),
+
+        responsibleID:  int('wcPersonRespCmb'),
+        reportsToID:    int('wcReportsTo'),
+        divisionID:     int('wcDivisionCmb') || int('wcDivision'),
+        departmentID:   int('wcDepartmentCmb') || int('wcDepartment'),
+        statusID:       int('wcStatusCombo'),
+
+        othTypeID:      int('wcRegRecTypeCombo') || int('wcType'),
+        othSubTypeID:   int('wcRegRecSubTypeCombo') || int('wcSubType'),
+        projectID:      int('wcProjectCombo'),
+        programme:      val('wcProgrammeCmb'),
+        extDesc:        val('wcDescTB'),
+        comments:       val('wcCommTB') || val('wcComm')
+    };
+}
+
+async function _saveHeaderDetailsProgress({ finalize = false, announce = false } = {}) {
+    if (!state.regOthId || !state._headerData) return false;
+
+    try {
+        const HEADER_DETAILS_URL = CONFIG.apiUrl.replace('/chat-template', '/chat-template/header-details');
+        const resp = await fetch(HEADER_DETAILS_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_buildHeaderDetailsPayload(finalize))
+        });
+        const result = await resp.json();
+        if (!result.success) {
+            console.warn('[Header] save returned:', result.message);
+            return false;
+        }
+
+        if (finalize) {
+            markHeaderDetailsCompleted(state.regOthId);
+            saveTranscript();
+        }
+
+        if (announce) {
+            addMessage('assistant', finalize
+                ? 'Header details saved. Now let\'s complete the checklist.'
+                : 'Saved that detail.');
+        }
+
+        return true;
+    } catch (e) {
+        console.warn('[Header] save error:', e);
+        if (announce) {
+            addMessage('assistant', finalize
+                ? 'Could not save header details right now, but let\'s continue.'
+                : 'I captured that detail, but couldn\'t save it yet.');
+        }
+        return false;
+    }
+}
+
+function _isHeaderDateField(field) {
+    const ct = String(field?.ControlType || '').toLowerCase();
+    const fid = String(field?.FieldControlID || '');
+    return ct === 'raddatetimepicker' || ['wcStartDtPkr', 'wcStartDtPkrFrom', 'wcStartDt'].includes(fid);
+}
+
+function _isHeaderLocationField(field) {
+    const fid = String(field?.FieldControlID || '');
+    return ['wcLocationIDRadCombo', 'wcLocType', 'wcLocAddr'].includes(fid);
+}
+
+function _isHeaderComboField(field) {
+    const ct = String(field?.ControlType || '').toLowerCase();
+    const fid = _normalizeHeaderFieldId(field?.FieldControlID || '');
+    return ct.includes('combo') || ct.includes('dropdown') || [
+        'wcLocationIDRadCombo',
+        'wcPersonRespCmb',
+        'wcReportsTo',
+        'wcDivisionCmb',
+        'wcDepartmentCmb',
+        'wcRegRecTypeCombo',
+        'wcRegRecSubTypeCombo',
+        'wcProjectCombo',
+        'wcProgrammeCmb',
+        'wcStatusCombo',
+        'wcContractorCompanyCMB'
+    ].includes(fid);
+}
+
+
+function _hdrArmComboChatInput(msgId) {
+    _awaitHdrText(async (val, display, isSkip) => {
+        const ctx = window._hdrComboCtx;
+        if (!ctx || ctx.msgId !== msgId) return;
+        if (isSkip) {
+            _hdrSkipCombo();
+            return;
+        }
+        const input = document.getElementById(`${msgId}-input`);
+        if (input) input.value = val || '';
+        await _hdrRunComboSearch(msgId, val || '');
+        if (window._hdrComboCtx && window._hdrComboCtx.msgId === msgId) {
+            _hdrArmComboChatInput(msgId);
+        }
+    });
+}
+
+function _hdrRenderComboResults(msgId, results, emptyText) {
+    const target = document.getElementById(`${msgId}-results`);
+    if (!target) return;
+    if (!results || !results.length) {
+        target.innerHTML = `<div style="color:#9ca3af;font-size:12px;padding:4px 0;">${emptyText || 'No results found'}</div>`;
+        return;
+    }
+    target.innerHTML = results.map(o =>
+        `<button class="hf-opt" style="padding:6px 14px;border-radius:20px;border:1px solid #2d8eff;
+            background:white;color:#2d8eff;cursor:pointer;font-size:13px;transition:all .15s;"
+            onmouseover="this.style.background='#2d8eff';this.style.color='white'"
+            onmouseout="this.style.background='white';this.style.color='#2d8eff'"
+            onclick="_hdrChooseCombo(${JSON.stringify(String(o.id))}, ${JSON.stringify(String(o.text))})">${escapeHtml(String(o.text))}</button>`
+    ).join(' ');
+}
+
+async function _hdrRunComboSearch(msgId, forcedQuery) {
+    const ctx = window._hdrComboCtx;
+    if (!ctx || ctx.msgId !== msgId) return;
+
+    const input = document.getElementById(`${msgId}-input`);
+    const query = (forcedQuery !== undefined ? forcedQuery : (input?.value || '')).trim();
+
+    if (!ctx.preload && !query) {
+        _hdrRenderComboResults(msgId, [], 'Type in the field above to search');
+        return;
+    }
+
+    const results = await _fetchHeaderComboOptions(ctx.fid, query);
+    ctx.results = results || [];
+
+    if (!ctx.results.length) {
+        _hdrRenderComboResults(msgId, [], `No matches found${query ? ` for "${escapeHtml(query)}"` : ''}`);
+        return;
+    }
+
+    if (!ctx.preload && ctx.results.length === 1) {
+        _hdrChooseCombo(String(ctx.results[0].id), ctx.results[0].text);
+        return;
+    }
+
+    _hdrRenderComboResults(msgId, ctx.results.slice(0, 20), 'No results found');
+}
+
+function _hdrChooseCombo(value, text) {
+    const ctx = window._hdrComboCtx;
+    if (!ctx) return;
+    document.querySelectorAll('.hf-opts button').forEach(b => b.disabled = true);
+    const input = document.getElementById(`${ctx.msgId}-input`);
+    const searchBtn = document.getElementById(`${ctx.msgId}-search`);
+    const skipBtn = document.getElementById(`${ctx.msgId}-skip`);
+    if (input) input.disabled = true;
+    if (searchBtn) searchBtn.disabled = true;
+    if (skipBtn) skipBtn.disabled = true;
+    state.awaitingHeaderField = false;
+    state._headerFieldCallback = null;
+    addMessage('user', text || value);
+    scrollToBottom();
+    const onSave = ctx.onSave;
+    window._hdrComboCtx = null;
+    onSave(String(value), text || String(value));
+}
+
+function _hdrSkipCombo() {
+    const ctx = window._hdrComboCtx;
+    if (!ctx) return;
+    state.awaitingHeaderField = false;
+    state._headerFieldCallback = null;
+    addMessage('user', 'Skip');
+    scrollToBottom();
+    const onSkip = ctx.onSkip;
+    window._hdrComboCtx = null;
+    onSkip();
+}
+
+/** Fetch combo options for a given field */
+async function _fetchHeaderComboOptions(fid, query) {
+    fid = _normalizeHeaderFieldId(fid);
+    const q = (query || '').trim();
+    try {
+        if (fid === 'wcPersonRespCmb' || fid === 'wcReportsTo') {
+            const locTypeId = state._headerData?.['_locationTypeId']?.value || 0;
+            const locId     = _getHeaderDataValue('wcLocationIDRadCombo', 'wcLocType') || 0;
+            const r = await fetch(`${ASMX_BASE_URL}/GetAuditedLimit`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: { StoreID: CONFIG.storeId, LocType: locTypeId, LocID: locId, MemberId: CONFIG.userId, Search: q } })
+            });
+            const j = await r.json();
+            return (j.d?.recordList || j.d || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+        if (fid === 'wcDivisionCmb') {
+            const r = await fetch(`${ASHX_BASE_URL}/GetDivision.ashx?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+        if (fid === 'wcDepartmentCmb') {
+            const divId = _getHeaderDataValue('wcDivisionCmb', 'wcDivision') || 0;
+            const r = await fetch(`${ASHX_BASE_URL}/GetDepartment.ashx?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}&parentId=${divId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+        if (fid === 'wcRegRecTypeCombo') {
+            const r = await fetch(`${ASHX_BASE_URL}/GetRegisterRecTypes.ashx?storeId=${CONFIG.storeId}&regtype=${state.regTypeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+        if (fid === 'wcRegRecSubTypeCombo') {
+            const typeId = _getHeaderDataValue('wcRegRecTypeCombo', 'wcType') || 0;
+            const r = await fetch(`${ASHX_BASE_URL}/GetRegisterSubTypes.ashx?storeId=${CONFIG.storeId}&regtype=${state.regTypeId}&parent=${typeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+        if (fid === 'wcStatusCombo') {
+            const r = await fetch(`${ASHX_BASE_URL}/GetStatus.ashx?regTypeId=${state.regTypeId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+        if (fid === 'wcProjectCombo') {
+            const r = await fetch(`${ASHX_BASE_URL}/GetProjects.ashx?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.Value, text: x.Text }));
+        }
+        if (fid === 'wcProgrammeCmb') {
+            const deptId = _getHeaderDataValue('wcDepartmentCmb', 'wcDepartment') || 0;
+            const r = await fetch(`${ASHX_BASE_URL}/GetProgrammes.ashx?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}&parentId=${deptId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.RowDescription, text: x.RowDescription }));
+        }
+        if (fid === 'wcContractorCompanyCMB') {
+            const r = await fetch(`${ASHX_BASE_URL}/GetJSMSContractorList.ashx?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            return (j.data || []).map(x => ({ id: x.IDNo, text: x.RowDescription }));
+        }
+    } catch (e) { console.warn(`[Header] combo fetch error (${fid}):`, e); }
+    return [];
+}
+
+/** Deterministic combo UI — uses the same search/dropdown/button design as the checklist. */
+async function _showHeaderComboField(field, onSave, onSkip) {
+    const rawFid   = field.FieldControlID;
+    const fid      = _normalizeHeaderFieldId(rawFid);
+    const label    = escapeHtml(field.ColCaption);
+    const question = state._hdrAiQuestions?.[rawFid] || state._hdrAiQuestions?.[fid] || label;
+    const req      = _isHeaderRequired(field);
+
+    if (_isHeaderLocationField(field)) {
+        await _showHeaderLocationField(onSave, onSkip, req);
+        return;
+    }
+
+    // Preload fids: load all options on focus; search fids: debounce search on input
+    const preloadFids = ['wcDivisionCmb','wcDepartmentCmb','wcRegRecTypeCombo',
+                         'wcStatusCombo','wcProjectCombo','wcProgrammeCmb',
+                         'wcRegRecSubTypeCombo','wcContractorCompanyCMB'];
+    const isPreload = preloadFids.includes(fid);
+
+    // Show the AI question as a plain assistant message first
+    addMessage('assistant', question);
+    scrollToBottom();
+
+    // Append the checklist-style container directly into the last message bubble
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMsg = messagesArea.lastElementChild;
+    const msgContent = lastMsg?.querySelector('.message-content');
+    if (!msgContent) { onSkip(); return; }
+
+    const container = document.createElement('div');
+    //container.style.cssText = 'margin-top:12px;padding:16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;width:100%;max-width:520px;box-sizing:border-box;';
+    container.innerHTML = `
+        <div class="chat-floating-select-wrap" style="margin-top:0;">
+            <span class="chat-floating-label">Select an option</span>
+            <div style="position:relative;">
+                <input type="text" class="hdr-cmb-search chat-floating-input" autocomplete="off"
+                       placeholder="Type to search...">
+                <input type="hidden" class="hdr-cmb-value" value="">
+                <div class="hdr-cmb-dd chat-floating-dd" style="display:none;"></div>
+            </div>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+            <button class="hdr-cmb-confirm btn btn-primary">Confirm Selection</button>
+            ${!req ? _skipChipButtonHtml({ className: 'hdr-cmb-skip', label: 'Skip (optional)' }) : ''}
+        </div>
+        <div class="hdr-cmb-err" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;">Please choose a value from the list.</div>
+    `;
+    msgContent.appendChild(container);
+    scrollToBottom();
+
+    const searchEl  = container.querySelector('.hdr-cmb-search');
+    const valueEl   = container.querySelector('.hdr-cmb-value');
+    const ddEl      = container.querySelector('.hdr-cmb-dd');
+    const confirmBtn= container.querySelector('.hdr-cmb-confirm');
+    const skipBtn   = container.querySelector('.hdr-cmb-skip');
+    const errEl     = container.querySelector('.hdr-cmb-err');
+    let timer = null;
+    let cachedItems = [];
+
+    const disable = () => [searchEl, confirmBtn, skipBtn].forEach(x => { if (x) x.disabled = true; });
+
+    const renderDropdown = (items) => {
+        cachedItems = items || [];
+        if (!cachedItems.length) {
+            ddEl.innerHTML = '<div class="chat-floating-dd-empty">No results found</div>';
+            ddEl.style.display = 'block';
+            return;
+        }
+        ddEl.innerHTML = cachedItems.map((o, idx) =>
+            `<div class="chat-floating-dd-item hdr-dd-item" data-idx="${idx}">${escapeHtml(String(o.text))}</div>`
+        ).join('');
+        ddEl.style.display = 'block';
+        ddEl.querySelectorAll('.hdr-dd-item').forEach(el => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const item = cachedItems[parseInt(el.dataset.idx)];
+                valueEl.value  = String(item.id);
+                searchEl.value = String(item.text);
+                ddEl.style.display = 'none';
+                errEl.style.display = 'none';
+            });
+        });
+    };
+
+    // Preload: fetch all options on focus; search: debounce on input
+    searchEl.addEventListener('focus', async () => {
+        if (isPreload && ddEl.style.display === 'none') {
+            ddEl.innerHTML = '<div class="chat-floating-dd-empty">Loading...</div>';
+            ddEl.style.display = 'block';
+            renderDropdown(await _fetchHeaderComboOptions(fid, ''));
+        }
+    });
+
+    searchEl.addEventListener('input', () => {
+        valueEl.value = '';
+        clearTimeout(timer);
+        const q = searchEl.value.trim();
+        if (isPreload) {
+            // Filter already-loaded items client-side
+            const filtered = cachedItems.filter(o => String(o.text).toLowerCase().includes(q.toLowerCase()));
+            renderDropdown(filtered.length ? filtered : cachedItems);
+            return;
+        }
+        if (q.length < 2) { ddEl.style.display = 'none'; return; }
+        ddEl.innerHTML = '<div class="chat-floating-dd-empty">Searching...</div>';
+        ddEl.style.display = 'block';
+        timer = setTimeout(async () => renderDropdown(await _fetchHeaderComboOptions(fid, q)), 300);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!container.contains(e.target)) ddEl.style.display = 'none';
+    }, { passive: true });
+
+    if (skipBtn) skipBtn.onclick = () => { disable(); onSkip(); };
+
+    confirmBtn.onclick = () => {
+        if (!valueEl.value) { errEl.style.display = 'block'; return; }
+        errEl.style.display = 'none';
+        disable();
+        onSave(String(valueEl.value), searchEl.value.trim());
+    };
+
+    setTimeout(() => searchEl.focus(), 60);
+}
+
+/** Called from location type chip onclick — updates the active location type in state */
+function _hdrLocTypeSelect(id, name) {
+    state._hdrLocTypeId   = id;
+    state._hdrLocTypeName = name;
+    // Update visual selection
+    document.querySelectorAll('.hf-loc-type').forEach(b => {
+        const active = b.dataset.id == id;
+        b.style.borderColor = active ? '#2d8eff' : '#d1d5db';
+        b.style.background  = active ? '#2d8eff' : 'white';
+        b.style.color       = active ? 'white'   : '#374151';
+    });
+}
+
+/** Deterministic location field: location type buttons + inline search field + Save. */
+async function _showHeaderLocationField(onSave, onSkip, isRequired = false) {
+    const question = state._hdrAiQuestions?.['wcLocationIDRadCombo'] || 'Where is this taking place?';
+    const effectiveIsRequired = !!isRequired;
+    const msgId = `hdr-loc-${Date.now()}`;
+    let locTypes = [];
+
+    try {
+        const baseApi = CONFIG.apiUrl.replace(/\/chat-template.*$/, '');
+        const r = await fetch(`${baseApi}/chat-template/location-types?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}`);
+        const j = await r.json();
+        locTypes = j.d?.recordlist || [];
+    } catch (e) { console.warn('[Header] location types error:', e); }
+
+    if (locTypes.length) {
+        state._hdrLocTypeId = locTypes[0].id;
+        state._hdrLocTypeName = locTypes[0].name;
+        state._headerData['_locationTypeId'] = { value: locTypes[0].id, displayText: locTypes[0].name };
+    }
+
+    addMessage('assistant',
+        `<div style="margin-bottom:8px;">${question}</div>
+         <div id="${msgId}-types" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+             ${locTypes.map((t, i) => `<button type="button" class="hf-loc-type btn btn-sm ${i===0 ? 'btn-primary' : 'btn-outline-secondary'}" data-id="${t.id}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`).join('')}
+         </div>
+         <div class="chat-floating-select-wrap" style="margin-top:0;">
+             <span class="chat-floating-label">Location</span>
+             <div style="position:relative;">
+                 <input id="${msgId}-search" type="text" class="chat-floating-input" autocomplete="off" placeholder="Find a location...">
+                 <input id="${msgId}-value" type="hidden" value="">
+                 <div id="${msgId}-dd" class="chat-floating-dd" style="display:none;"></div>
+             </div>
+         </div>
+         <div style="display:flex;gap:8px;margin-top:10px;">
+             <button id="${msgId}-save" class="btn btn-primary">Save</button>
+             ${!effectiveIsRequired ? _skipChipButtonHtml({ id: `${msgId}-skip`, label: 'Skip (optional)' }) : ''}
+         </div>
+         <div id="${msgId}-err" style="display:none;color:#ef4444;font-size:12px;margin-top:6px;">Please choose a location from the list.</div>`);
+    scrollToBottom();
+
+    const typesEl = document.getElementById(`${msgId}-types`);
+    const searchEl = document.getElementById(`${msgId}-search`);
+    const valueEl = document.getElementById(`${msgId}-value`);
+    const ddEl = document.getElementById(`${msgId}-dd`);
+    const saveBtn = document.getElementById(`${msgId}-save`);
+    const skipBtn = document.getElementById(`${msgId}-skip`);
+    const err = document.getElementById(`${msgId}-err`);
+    let timer = null;
+    let selected = null;
+
+    const disable = () => [searchEl, saveBtn, skipBtn].forEach(x => { if (x) x.disabled = true; });
+    const renderList = (items) => {
+        if (!items.length) {
+            ddEl.innerHTML = '<div class="chat-floating-dd-empty">No results</div>';
+            ddEl.style.display = 'block';
+            return;
+        }
+        ddEl.innerHTML = items.map(x =>
+            `<div class="chat-floating-dd-item hf-loc-item" data-id="${escapeHtml(String(x.IDNo))}" data-name="${escapeHtml(x.RowDescription)}" data-address="${escapeHtml(x.Address || '')}">${escapeHtml(x.RowDescription)}</div>`
+        ).join('');
+        ddEl.style.display = 'block';
+        ddEl.querySelectorAll('.hf-loc-item').forEach(item => {
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                selected = {
+                    id: item.dataset.id,
+                    name: item.dataset.name,
+                    address: item.dataset.address,
+                    locTypeId: state._hdrLocTypeId
+                };
+                valueEl.value = selected.id;
+                searchEl.value = selected.name;
+                ddEl.style.display = 'none';
+                err.style.display = 'none';
+            });
+        });
+    };
+
+    typesEl.querySelectorAll('.hf-loc-type').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            typesEl.querySelectorAll('.hf-loc-type').forEach(b => {
+                b.classList.remove('btn-primary');
+                b.classList.add('btn-outline-secondary');
+            });
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-primary');
+            state._hdrLocTypeId = btn.dataset.id;
+            state._hdrLocTypeName = btn.dataset.name;
+            state._headerData['_locationTypeId'] = { value: btn.dataset.id, displayText: btn.dataset.name };
+            selected = null;
+            valueEl.value = '';
+            searchEl.value = '';
+            ddEl.style.display = 'none';
+            searchEl.focus();
+        });
+    });
+
+    searchEl.addEventListener('input', () => {
+        selected = null;
+        valueEl.value = '';
+        clearTimeout(timer);
+        const q = searchEl.value.trim();
+        if (q.length < 2) {
+            ddEl.style.display = 'none';
+            return;
+        }
+        timer = setTimeout(async () => {
+            try {
+                const r = await fetch(`${ASMX_BASE_URL}/GetLocationTypeAddressListv2`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ locRequest: {
+                        StoreID: CONFIG.storeId,
+                        LocType: state._hdrLocTypeId,
+                        MemberId: CONFIG.userId,
+                        Condition: q,
+                        TotalCount: 20
+                    }})
+                });
+                const j = await r.json();
+                renderList(j.d?.recordList || []);
+            } catch (e) {
+                console.warn('[Header] location search error:', e);
+                ddEl.style.display = 'none';
+            }
+        }, 250);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!searchEl.contains(e.target) && !ddEl.contains(e.target)) ddEl.style.display = 'none';
+    }, { passive: true });
+
+    const clearHeaderAwait = () => {
+        state.awaitingHeaderField = false;
+        state._headerFieldCallback = null;
+    };
+
+    if (skipBtn) skipBtn.onclick = () => {
+        clearHeaderAwait();
+        disable();
+        onSkip();
+    };
+
+    saveBtn.onclick = () => {
+        if (!selected || !valueEl.value) {
+            err.style.display = 'block';
+            return;
+        }
+        err.style.display = 'none';
+        clearHeaderAwait();
+        disable();
+        _doSelectLocation(selected.id, selected.name, selected.address || '', selected.locTypeId, onSave);
+    };
+
+    const armTypedLocationInput = () => {
+        _awaitHdrText(async (val, display, isSkip) => {
+            const intent = await _analyzeHeaderSkipIntentWithAI(val, question, effectiveIsRequired);
+            const typedSkipIntent = intent.isSkipIntent;
+
+            if (isSkip || typedSkipIntent) {
+                if (effectiveIsRequired) {
+                    addMessage('assistant', intent.reply || "I still need this required location detail before we continue.");
+                    scrollToBottom();
+                    return armTypedLocationInput();
+                }
+
+                if (intent.reply) {
+                    addMessage('assistant', intent.reply);
+                    scrollToBottom();
+                }
+
+                clearHeaderAwait();
+                disable();
+                onSkip();
+                return;
+            }
+
+            const typed = String(val || '').trim();
+            if (!typed) {
+                return armTypedLocationInput();
+            }
+
+            searchEl.value = typed;
+            searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+            armTypedLocationInput();
+        });
+    };
+
+    armTypedLocationInput();
+    setTimeout(() => searchEl.focus(), 60);
+}
+
+/** Called from location result chip onclick */
+function _hdrLocPick(id, name, address, locTypeId) {
+    document.querySelectorAll('.hf-opts button').forEach(b => b.disabled = true);
+    state.awaitingHeaderField = false;
+    state._headerFieldCallback = null;
+    addMessage('user', name);
+    scrollToBottom();
+    _doSelectLocation(id, name, address, locTypeId, window._hdrLocOnSave);
+    window._hdrLocOnSave = null;
+}
+
+function _doSelectLocation(id, name, address, locTypeId, onSave) {
+    state._headerData['wcLocationTB']    = { value: address,  displayText: address };
+    state._headerData['_locationName']   = { value: name,     displayText: name };
+    state._headerData['_locationTypeId'] = { value: locTypeId, displayText: '' };
+    onSave(String(id), name);
+}
+
+/** Renders a single header field as a chat question with appropriate interaction */
+async function _showHeaderFieldCard(field, onSave, onSkip) {
+    const label    = escapeHtml(field.ColCaption);
+    const question = state._hdrAiQuestions?.[field.FieldControlID] || label;
+    const req      = _isHeaderRequired(field);
+    const ct       = field.ControlType;
+
+    if (_isHeaderDateField(field)) {
+        const today     = new Date();
+        const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+        const fmt        = d => d.toISOString().split('T')[0];
+        const fmtDisplay = d => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        const todayLabel     = 'Today — ' + fmtDisplay(today);
+        const yesterdayLabel = 'Yesterday — ' + fmtDisplay(yesterday);
+        const dateLabels = req ? [todayLabel, yesterdayLabel] : [todayLabel, yesterdayLabel, 'Skip (optional)'];
+        const dateColClass = getSuggestionColClass(dateLabels);
+        addMessage('assistant',
+            `<div style="margin-top:12px;padding:16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;width:100%;max-width:520px;box-sizing:border-box;">
+                <div style="margin-bottom:8px;color:#374151;">${question}</div>
+                <div class="hf-opts row g-2">
+                    ${_hdrChip(fmt(today),     todayLabel, undefined, dateColClass)}
+                    ${_hdrChip(fmt(yesterday), yesterdayLabel, undefined, dateColClass)}
+                    ${req ? '' : _hdrChip('__skip__', 'Skip (optional)', undefined, dateColClass)}
+                </div>
+                <div style="color:#9ca3af;font-size:12px;margin-top:6px;">Or type a date (e.g. today, yesterday, 3 days ago, 21/04/2026)</div>
+            </div>`);
+
+        _awaitHdrText(async (val, display, isSkip) => {
+            const intent = await _analyzeHeaderSkipIntentWithAI(val, question, req);
+            const typedSkipIntent = intent.isSkipIntent;
+
+            if (isSkip || typedSkipIntent) {
+                if (req) {
+                    addMessage('assistant', intent.reply || "I still need this required date before we continue.");
+                    return _showHeaderFieldCard(field, onSave, onSkip);
+                }
+
+                if (intent.reply) addMessage('assistant', intent.reply);
+                onSkip();
+                return;
+            }
+
+            const d = _parseHdrDate(val);
+            if (!d) {
+                addMessage('assistant', `I couldn't understand that date. Try: "today", "yesterday", "3 days ago", "last week", or 21/04/2026:`);
+                return _showHeaderFieldCard(field, onSave, onSkip);
+            }
+            onSave(d.toISOString().split('T')[0], display || val);
+        });
+
+    } else if (_isHeaderComboField(field)) {
+        await _showHeaderComboField(field, onSave, onSkip);
+        return;
+
+    } else {
+        // RadTextBox (or unknown) — ask question, user types in chat box
+        addMessage('assistant',
+            `<div>${question}</div>
+             ${ !req ? `<div class="hf-opts row g-2 mt-1">${_hdrChip('__skip__','Skip (optional)', undefined, 'col-12 col-sm-12 col-md-12 col-lg-12')}</div>` : '' }`);
+
+        _awaitHdrText(async (val, display, isSkip) => {
+            const intent = await _analyzeHeaderSkipIntentWithAI(val, question, req);
+            const typedSkipIntent = intent.isSkipIntent;
+
+            if (isSkip || typedSkipIntent) {
+                if (req) {
+                    addMessage('assistant', intent.reply || "I still need this required detail before we continue.");
+                    return _showHeaderFieldCard(field, onSave, onSkip);
+                }
+
+                if (intent.reply) addMessage('assistant', intent.reply);
+                onSkip();
+                return;
+            }
+
+            if (req && !val.trim()) {
+                addMessage('assistant', `This field is required — please enter a value:`);
+                return _showHeaderFieldCard(field, onSave, onSkip);
+            }
+            onSave(val.trim(), val.trim());
+        });
+    }
+    scrollToBottom();
+}
+
+/**
+ * Saves collected header data via DynamicChecklistUpdateHeaderStart ASMX.
+ * Converts date format from yyyy-MM-dd → M/d/yyyy as expected by the SP.
+ */
+async function _saveHeaderDetails(onComplete) {
+    if (!state.regOthId || !state._headerData) {
+        state._collectingHeaderDetails = false;
+        state._headerDetailsReadyForChecklist = true;
+        onComplete();
+        return;
+    }
+
+    // Hard gate: never continue to checklist while required header/details fields are missing.
+    const firstMissingRequiredIndex = _getFirstMissingRequiredHeaderIndex();
+    if (firstMissingRequiredIndex >= 0) {
+        state._collectingHeaderDetails = true;
+        state._headerDetailsReadyForChecklist = false;
+        addMessage('assistant', 'We still need a required detail before moving on.');
+        scrollToBottom();
+        _askNextHeaderField(state._headerFields || [], firstMissingRequiredIndex, onComplete);
+        return;
+    }
+
+    await _saveHeaderDetailsProgress({ finalize: true, announce: true });
+
+    state._collectingHeaderDetails = false;
+    state._headerDetailsReadyForChecklist = true;
+    onComplete();
+}
 
 // ── Smart Fill ────────────────────────────────────────────────────────────────
 
@@ -3004,6 +9431,12 @@ async function runSmartFill() {
         const data = await response.json();
         if (!data.success) {
             removeSmartFillTyping();
+            console.warn('[SmartFill] returned unsuccessful response:', data.message || data);
+
+            if (handleCompletedSessionRefusal(data.message)) return;
+
+            // Do not block checklist progression when Smart Fill is unavailable/fails.
+            setTimeout(() => continueFromSmartFill(), 300);
             return;
         }
 
@@ -3011,10 +9444,15 @@ async function runSmartFill() {
             showSmartFillCard(data.proposals);
         } else {
             removeSmartFillTyping();
+            // No proposals found — proceed directly to asking the first question
+            setTimeout(() => continueFromSmartFill(), 300);
         }
     } catch (err) {
         removeSmartFillTyping();
         console.warn('[SmartFill] API error:', err);
+
+        // Fail open: continue checklist flow even if Smart Fill call fails.
+        setTimeout(() => continueFromSmartFill(), 300);
     }
 }
 
@@ -3071,10 +9509,11 @@ function showSmartFillCard(proposals) {
                 style="flex:1;padding:8px 14px;background:#2d8eff;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
                 Confirm Selected
             </button>
-            <button onclick="document.getElementById('smartFillCard').remove()"
-                style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:8px;font-size:13px;cursor:pointer;">
-                Skip
-            </button>
+            ${_skipChipButtonHtml({
+                label: 'Skip',
+                extraStyle: 'padding:8px 14px;font-style:normal;',
+                extraAttrs: `onclick="document.getElementById('smartFillCard').remove(); continueFromSmartFill();"`
+            })}
         </div>
     `;
 
@@ -3112,6 +9551,8 @@ async function confirmSmartFill(proposals) {
 
     if (confirmed.length === 0) {
         if (card) card.remove();
+        // Nothing confirmed — still need to ask the first question
+        setTimeout(() => continueFromSmartFill(), 300);
         return;
     }
 
@@ -3137,6 +9578,8 @@ async function confirmSmartFill(proposals) {
                     extractedValue: f.value
                 });
             });
+            // Mark smart-fill-confirmed fields so the server doesn't re-ask them
+            markFieldsConfirmed(confirmed.map(f => ({ fieldID: f.fieldID })));
             updateFieldsList();
 
             if (card) card.remove();
@@ -3172,7 +9615,8 @@ async function continueFromSmartFill() {
     // Add to history so AI has context, but do NOT show in chat UI
     state.conversationHistory.push({ role: 'user', content: silentMessage });
 
-    showTypingIndicator();
+    const _lastReal = [...state.conversationHistory].reverse().find(m => m.role === 'user' && m.content !== silentMessage)?.content || '';
+    showTypingIndicator(_lastReal);
 
     try {
         const response = await fetch(`${CONFIG.apiUrl}/chat`, {
@@ -3189,7 +9633,8 @@ async function continueFromSmartFill() {
                 userTimezone:           Intl.DateTimeFormat().resolvedOptions().timeZone,
                 userDateFormat:         getUserDateFormat(),
                 memoryConfidence:       localStorage.getItem('memoryConfidence') || 'medium',
-                userProfile:            CONFIG.userProfile
+                userProfile:            CONFIG.userProfile,
+                confirmedFieldIds:      state.chatConfirmedFieldIds
             })
         });
 
@@ -3197,45 +9642,77 @@ async function continueFromSmartFill() {
         removeTypingIndicator();
 
         if (data.success) {
-            addMessage('assistant', data.aiMessage);
             state.conversationHistory.push({ role: 'assistant', content: data.aiMessage });
             trackServerCost(data.tokenUsage);
 
             state.currentFieldID   = data.currentFieldID;
             state.currentFieldType = data.currentFieldType;
+            state.currentFieldRequired = data.isCurrentFieldRequired !== false;
+            state.currentFieldDynamicFilter = data.currentFieldDynamicFilter || null;
+
+            // Track any fields saved in this continuation call
+            if (data.extractedFields && data.extractedFields.length > 0) {
+                markFieldsConfirmed(data.extractedFields);
+            }
 
             if (state.currentFieldType !== '10016' && state.lastMapData) {
                 state.lastMapData = null;
             }
 
+            // Helper: show the AI message + next field UI
+            const showNextQuestionAndFieldUI = () => {
+                addMessage('assistant', data.aiMessage);
+
+                setTimeout(() => {
+                    const existingFileUpload = document.querySelector('.file-upload-container');
+                    const existingMapContainer = document.querySelector('.map-container');
+                    const existingDynamicData = document.querySelector('.dynamic-data-container');
+
+                    if (state.currentFieldType !== '10013' && existingFileUpload) existingFileUpload.remove();
+                    if (state.currentFieldType !== '10016' && existingMapContainer) existingMapContainer.remove();
+                    if (state.currentFieldType !== '10020' && state.currentFieldType !== '10037' && existingDynamicData) existingDynamicData.remove();
+
+                    if (data.clusterFormFields && data.clusterFormFields.length >= 1) {
+                        addClusterFormCard(data.clusterFormFields);
+                    } else {
+                        if (state.currentFieldType === '10013') {
+                            addFileUploadUI();
+                        } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
+                            addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
+                        } else if (state.currentFieldType === '10016') {
+                            addMapUI(null);
+                        }
+                        if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0
+                            && state.currentFieldType !== '10016') {
+                            addSuggestions(data.nextSuggestedQuestions);
+                        }
+                        addSkipChipIfOptional();
+                    }
+                }, 50);
+            };
+
             setTimeout(() => {
-                const existingFileUpload = document.querySelector('.file-upload-container');
-                const existingMapContainer = document.querySelector('.map-container');
-
-                if (state.currentFieldType !== '10013' && existingFileUpload) existingFileUpload.remove();
-                if (state.currentFieldType !== '10016' && existingMapContainer) existingMapContainer.remove();
-
-                if (state.currentFieldType === '10013') {
-                    addFileUploadUI();
-                } else if (state.currentFieldType === '10016') {
-                    addMapUI(null);
-                }
-
-                if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0
-                    && state.currentFieldType !== '10016') {
-                    addSuggestions(data.nextSuggestedQuestions);
-                }
+                addSupplementaryPromptUI(
+                    data.showPhotoFieldIds,
+                    data.showCommentFieldIds,
+                    data.showActionFieldIds,
+                    data.showHazardInfo || null,
+                    data.extractedFields,
+                    data,
+                    showNextQuestionAndFieldUI
+                );
             }, 50);
 
             if (data.completionPercentage !== undefined) {
-                updateProgress(data.completionPercentage);
+                updateProgress(data.completionPercentage, data.totalFields, data.answeredFields);
             }
-            if (data.isComplete && !state.sessionCompleted) {
-                setTimeout(() => promptCompletion(), 600);
-            }
+            if (data.isComplete) state._serverMarkedComplete = true;
+            setTimeout(() => { if (_shouldAutoPromptCompletion(data)) promptCompletion(); }, 600);
             updateDebugInfo();
         } else {
-            addMessage('assistant', data.errorMessage || 'Unable to continue.');
+            if (!handleCompletedSessionRefusal(data.errorMessage)) {
+                addMessage('assistant', data.errorMessage || 'Unable to continue.');
+            }
         }
     } catch (err) {
         removeTypingIndicator();
@@ -3538,30 +10015,37 @@ function renderHistoryItems(items) {
     items.forEach(item => {
         const card = document.createElement('div');
         card.className = 'history-card';
-        const id = item.regOthID;
+        const id = item.regOthID || item.RegOthID;
+        const isInProgress = item.isInProgress ?? item.IsInProgress;
+        const createdDateValue = item.createdDate || item.CreatedDate;
+        const templateName = item.templateName || item.TemplateName || 'Unnamed';
+        const internalNo = item.internalNo || item.InternalNo || String(id);
+        const savedFieldCount = item.savedFieldCount ?? item.SavedFieldCount ?? 0;
+        const formUrl = item.formUrl || item.FormUrl || '';
+        const itemRegTypeId = Number(item.regTypeID || item.regTypeId || item.RegTypeID || 0);
         card.dataset.regOthId = id;
 
-        const badgeClass = item.isInProgress ? 'in-progress' : 'completed';
-        const badgeText  = item.isInProgress ? 'In Progress' : 'Completed';
+        const badgeClass = isInProgress ? 'in-progress' : 'completed';
+        const badgeText  = isInProgress ? 'In Progress' : 'Completed';
 
-        const createdDate = item.createdDate
-            ? new Date(item.createdDate).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })
+        const createdDate = createdDateValue
+            ? new Date(createdDateValue).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })
             : '-';
 
         card.innerHTML = `
             <div class="history-card-top">
-                <div class="history-template-name">${escapeHtml(item.templateName || 'Unnamed')}</div>
+                <div class="history-template-name">${escapeHtml(templateName)}</div>
                 <span class="history-badge ${badgeClass}">${badgeText}</span>
             </div>
             <div class="history-meta">
-                <span>#${escapeHtml(item.internalNo || String(id))}</span>
+                <span>#${escapeHtml(internalNo)}</span>
                 <span>${createdDate}</span>
-                <span>${item.savedFieldCount || 0} field${item.savedFieldCount !== 1 ? 's' : ''} saved</span>
+                <span>${savedFieldCount} field${savedFieldCount !== 1 ? 's' : ''} saved</span>
             </div>
             <div class="history-actions">
-                <button class="history-btn" onclick="openHistoryForm(${id}, '${escapeHtml(item.formUrl || '')}')">Open Form</button>
+                <button class="history-btn" onclick="openHistoryForm(${id}, '${escapeHtml(formUrl)}', ${itemRegTypeId})">Open Form</button>
                 <button class="history-btn" onclick="toggleHistoryDetail(${id})">View Fields</button>
-                ${item.isInProgress ? `<button class="history-btn primary" onclick="resumeSession(${id})">Resume</button>` : ''}
+                ${isInProgress ? `<button class="history-btn primary" onclick="resumeSession(${id})">Resume</button>` : ''}
             </div>
             <div class="history-fields-panel" id="historyFields_${id}" style="display:none"></div>
         `;
@@ -3623,14 +10107,128 @@ async function toggleHistoryDetail(regOthId) {
 }
 
 // ── Open form in new tab ─────────────────────────────────────
-function openHistoryForm(regOthId, formUrl) {
-    const url = formUrl || `https://beta.whsmonitor.com.au/App/RiskAssessor/ChecklistV2.aspx?regothId=${regOthId}&IsEdit=1`;
-    window.open(url, '_blank');
+async function openHistoryForm(regOthId, formUrl, regTypeIdFromItem = 0) {
+    console.log('🔵 openHistoryForm called with:', { regOthId, formUrl, regTypeIdFromItem });
+    
+    const decodedFormUrl = String(formUrl || '')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+    
+    console.log('📝 Decoded formUrl:', decodedFormUrl);
+
+    const initialUrl = appendCurrentPageId(decodedFormUrl || buildChecklistUrl(regOthId, state.templateName, state.moduleName));
+    console.log('🔗 Initial URL:', initialUrl);
+    
+    const newTab = window.open('about:blank', '_blank');
+
+    const navigate = (url) => {
+        console.log('✅ NAVIGATING TO:', url);
+        if (newTab && !newTab.closed) {
+            newTab.location.href = url;
+        } else {
+            window.open(url, '_blank');
+        }
+    };
+
+    let urlObj;
+    try {
+        urlObj = new URL(initialUrl, window.location.origin);
+    } catch {
+        console.error('❌ Failed to parse URL:', initialUrl);
+        navigate(initialUrl);
+        return;
+    }
+
+    const existingGt = (urlObj.searchParams.get('gt') || '').trim();
+    console.log('🔎 Existing gt in URL:', existingGt || '(empty)');
+    if (existingGt && existingGt !== '0') {
+        console.log('✅ URL already has gt, navigating with existing value');
+        navigate(urlObj.toString());
+        return;
+    }
+
+    const itemGt = Number(regTypeIdFromItem || 0);
+    console.log('📌 itemGt from parameter:', itemGt);
+    if (itemGt > 0) {
+        urlObj.searchParams.set('gt', String(itemGt));
+        console.log('✅ Set gt from itemGt, navigating:', urlObj.toString());
+        navigate(urlObj.toString());
+        return;
+    }
+
+    const stateGt = Number(state.regTypeId || 0);
+    console.log('📌 stateGt from state:', stateGt);
+    if (stateGt > 0) {
+        urlObj.searchParams.set('gt', String(stateGt));
+        console.log('✅ Set gt from stateGt, navigating:', urlObj.toString());
+        navigate(urlObj.toString());
+        return;
+    }
+
+    console.log('🔄 Attempting to fetch from transcript API...');
+    try {
+        const transcriptUrls = [
+            `${TRANSCRIPT_API_URL}/${regOthId}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`,
+            `${window.location.origin}/affinda/api/chat-transcript/${regOthId}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`
+        ];
+        
+        console.log('📡 Transcript URLs to try:', transcriptUrls);
+
+        for (const transcriptUrl of transcriptUrls) {
+            console.log(`🌐 Fetching: ${transcriptUrl}`);
+            const transcriptRes = await fetch(transcriptUrl);
+            console.log(`📊 Response status: ${transcriptRes.status}`);
+            if (!transcriptRes.ok) {
+                console.log(`⏭️  Skipping failed response (${transcriptRes.status})`);
+                continue;
+            }
+
+            const transcript = await transcriptRes.json();
+            console.log('📦 Transcript response:', transcript);
+            const transcriptGt = Number(transcript?.regTypeID || transcript?.regTypeId || transcript?.RegTypeID || 0);
+            console.log('🔢 Extracted transcriptGt:', transcriptGt);
+            if (transcriptGt > 0) {
+                urlObj.searchParams.set('gt', String(transcriptGt));
+                console.log('✅ Set gt from transcript, breaking loop');
+                break;
+            }
+        }
+
+        if (!(urlObj.searchParams.get('gt') || '').trim()) {
+            console.log('⚠️  Still no gt, trying session-history fallback...');
+            const detailUrl = `${SESSION_HISTORY_URL}/${regOthId}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`;
+            console.log(`🌐 Fetching session-history: ${detailUrl}`);
+            const res = await fetch(detailUrl);
+            console.log(`📊 Session-history response status: ${res.status}`);
+            if (res.ok) {
+                const detail = await res.json();
+                console.log('📦 Session-history response:', detail);
+                const detailGt = Number(detail?.regTypeID || detail?.regTypeId || detail?.RegTypeID || 0);
+                console.log('🔢 Extracted detailGt from session-history:', detailGt);
+                if (detailGt > 0) {
+                    urlObj.searchParams.set('gt', String(detailGt));
+                    console.log('✅ Set gt from session-history');
+                }
+            }
+        }
+    } catch (err) {
+        console.error('❌ Error resolving regTypeID for history form URL:', err);
+    }
+
+    const finalUrl = urlObj.toString();
+    const finalGt = urlObj.searchParams.get('gt') || '(BLANK!)';
+    console.log('🎯 FINAL URL:', finalUrl);
+    console.log('🎯 FINAL gt value:', finalGt);
+    navigate(finalUrl);
 }
 
 // ── Resume session ───────────────────────────────────────────
 async function resumeSession(regOthId) {
     try {
+        const preResumeTranscript = loadTranscript(regOthId);
         const url = `${SESSION_HISTORY_URL}/${regOthId}?userId=${CONFIG.userId}&storeId=${CONFIG.storeId}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3638,11 +10236,27 @@ async function resumeSession(regOthId) {
         const detail = await res.json();
 
         // ── Restore state ────────────────────────────────────
-        state.regOthId         = detail.regOthID;
-        state.internalNo       = detail.internalNo || '';
-        state.templateName     = detail.templateName || '';
+        state.regOthId         = detail.regOthID || detail.RegOthID;
+        state.regTypeId        = detail.regTypeID || detail.regTypeId || detail.RegTypeID || state.regTypeId || null;
+        state.templateTypeId   = Number(detail.templateTypeID || detail.TemplateTypeID || detail.templateTypeId || preResumeTranscript?.templateTypeId || state.templateTypeId || 0) || null;
+        state.pageId           = Number(detail.pageId || detail.PageId || detail.pageID || detail.PageID || preResumeTranscript?.pageId || state.pageId || 0) || null;
+        state.internalNo       = detail.internalNo || detail.InternalNo || '';
+        state.templateName     = detail.templateName || detail.TemplateName || '';
+        state.chatName         = detail.chatName || detail.ChatName || detail.templateName || detail.TemplateName || '';
+        state._replayMode      = false;
         state.sessionStarted   = true;
-        state.sessionCompleted = !detail.isInProgress;
+        const rawIsInProgress = detail?.isInProgress ?? detail?.IsInProgress;
+        const rawIsComplete = detail?.isComplete ?? detail?.IsComplete ?? detail?.sessionCompleted ?? detail?.SessionCompleted;
+        if (typeof rawIsInProgress === 'boolean') {
+            state.sessionCompleted = !rawIsInProgress;
+        } else if (typeof rawIsComplete === 'boolean') {
+            state.sessionCompleted = rawIsComplete;
+        } else {
+            state.sessionCompleted = false;
+        }
+        // Restore confirmed field IDs from localStorage — these are fields the user
+        // already answered in a prior session visit (not just SP defaults)
+        state.chatConfirmedFieldIds = loadConfirmedFieldIds(detail.regOthID || detail.RegOthID);
 
         // Restore extracted fields map
         state.extractedFieldsMap.clear();
@@ -3668,14 +10282,53 @@ async function resumeSession(regOthId) {
         switchPanelTab('progress');
         updateProgressPanel();
 
+        // Restore progress widget — real % will arrive from autoResumeNext in 500ms
+        const savedTranscript = loadTranscript(regOthId);
+        // Only restore totalFieldCount if it's reliably from template selection (not just filled count)
+        if (savedTranscript?.totalFieldCount && savedTranscript.totalFieldCount !== filledFields.length) {
+            state.totalFieldCount = savedTranscript.totalFieldCount;
+        } else {
+            state.totalFieldCount = 0; // will be updated once autoResumeNext returns real data
+        }
+        updateInlineChatProgress(savedTranscript?.completionPercentage || 0);
+
+        // Update topbar title
+        setTopbarTitle(state.chatName || state.templateName || '');
+        const banner = document.getElementById('readonlyBanner');
+        if (banner) banner.remove();
+        renderSidebarChats();
+
         // Ensure chat view is visible (same as when a new session starts)
         document.getElementById('emptyState').style.display = 'none';
         document.getElementById('messagesArea').classList.add('active');
         document.getElementById('chatInputArea').style.display = 'block';
 
-        // ── Clear chat and render resume card ────────────────
+        // ── Clear chat, replay saved history, then render resume card ──
         const messagesArea = document.getElementById('messagesArea');
         messagesArea.innerHTML = '';
+        state.displayMessages = [];
+
+        // Restore previous conversation from DB (preferred) or localStorage
+        const dbTranscript = await _loadTranscriptFromDb(regOthId);
+        const localTranscript = loadTranscript(regOthId);
+        const savedTranscript2 = dbTranscript || localTranscript;
+        if (savedTranscript2?.templateTypeId && !state.templateTypeId) {
+            state.templateTypeId = Number(savedTranscript2.templateTypeId) || null;
+        }
+        if (savedTranscript2?.pageId && !state.pageId) {
+            state.pageId = Number(savedTranscript2.pageId) || null;
+        }
+        if (!state.pageId && state.templateTypeId && TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId]) {
+            state.pageId = TEMPLATE_TYPE_PAGE_MAP[state.templateTypeId];
+        }
+        if (savedTranscript2 && savedTranscript2.messages && savedTranscript2.messages.length > 0) {
+            // Replay into DOM without re-recording (set _replayMode temporarily)
+            state._replayMode = true;
+            savedTranscript2.messages.forEach(msg => addMessage(msg.role, msg.content));
+            state._replayMode = false;
+            // Seed displayMessages with the restored history so new messages append correctly
+            state.displayMessages = savedTranscript2.messages.map(m => ({ role: m.role, content: m.content }));
+        }
 
         const createdDate = detail.createdDate
             ? new Date(detail.createdDate).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -3685,8 +10338,8 @@ async function resumeSession(regOthId) {
         const fieldRowsHtml = filledFields.length
             ? filledFields.map(f => `
                 <div class="resume-field-row">
-                    <span class="resume-field-name">${escapeHtml(f.fieldName)}</span>
-                    <span class="resume-field-value">${escapeHtml(f.fieldValue)}</span>
+                    <span class="resume-field-name">${escapeHtml(stripHtml(f.fieldName))}</span>
+                    <span class="resume-field-value">${formatFieldValue(f.fieldValue)}</span>
                 </div>`).join('')
             : '<div style="color:#9ca3af;font-size:12px;padding:4px 0;">No fields saved yet.</div>';
 
@@ -3706,11 +10359,26 @@ async function resumeSession(regOthId) {
                     <div class="resume-fields-label">${filledFields.length} field${filledFields.length !== 1 ? 's' : ''} already captured</div>
                     <div class="resume-fields-list">${fieldRowsHtml}</div>
                 </div>
-                <div class="resume-continue-msg">Let's pick up where you left off — what would you like to fill in next? Or just say <strong>"next"</strong> and I'll ask you the remaining fields one by one.</div>
+                <div class="resume-continue-msg">Let me check what's still needed…</div>
             </div>
         `;
         messagesArea.appendChild(messageDiv);
         scrollToBottom();
+
+        // Ensure detail/header questions are completed first (required fields especially)
+        // before continuing checklist questions on resume.
+        const continueChecklist = () => setTimeout(() => {
+            if (!state._headerDetailsReadyForChecklist) return;
+            if (state._collectingHeaderDetails || state.awaitingHeaderField) return;
+            autoResumeNext();
+        }, 300);
+        const shouldAskHeaderDetails = !hasCompletedHeaderDetails(state.regOthId);
+        if (shouldAskHeaderDetails) {
+            collectHeaderDetails(continueChecklist);
+        } else {
+            state._headerDetailsReadyForChecklist = true;
+            continueChecklist();
+        }
 
         // Close panel on mobile
         if (window.innerWidth < 768) {
@@ -3723,7 +10391,150 @@ async function resumeSession(regOthId) {
     }
 }
 
+/**
+ * Silently fires "next" to the chat API after a session is resumed.
+ * No user bubble is added — just shows the AI response + real progress %.
+ */
+async function autoResumeNext() {
+    if (!state.regOthId) return;
+
+    // Never progress checklist while header/details collection is active.
+    if (state._collectingHeaderDetails) return;
+
+    // Add to history so the AI has context
+    state.conversationHistory.push({ role: 'user', content: 'next' });
+
+    const _lastReal2 = [...state.conversationHistory].reverse().find(m => m.role === 'user' && m.content !== 'next')?.content || '';
+    showTypingIndicator(_lastReal2);
+    try {
+        const response = await fetch(`${CONFIG.apiUrl}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                regOthID: state.regOthId,
+                storeID: CONFIG.storeId,
+                userMessage: 'next',
+                userID: CONFIG.userId,
+                conversationHistory: state.conversationHistory.slice(-10),
+                fullConversationHistory: state.conversationHistory,
+                currentDateTime: new Date().toISOString(),
+                userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                userDateFormat: getUserDateFormat(),
+                memoryConfidence: localStorage.getItem('memoryConfidence') || 'medium',
+                userProfile: CONFIG.userProfile
+            })
+        });
+        const data = await response.json();
+        removeTypingIndicator();
+
+        if (data.success) {
+            trackServerCost(data.tokenUsage);
+            state.currentFieldID   = data.currentFieldID;
+            state.currentFieldType = data.currentFieldType;
+            state.currentFieldRequired = data.isCurrentFieldRequired !== false;
+            state.currentFieldDynamicFilter = data.currentFieldDynamicFilter || null;
+
+            state.conversationHistory.push({ role: 'assistant', content: data.aiMessage });
+
+            if (data.completionPercentage !== undefined) updateProgress(data.completionPercentage, data.totalFields, data.answeredFields);
+
+            // Helper: show the AI message + field-specific UI
+            const showNextQuestionAndFieldUI = () => {
+                addMessage('assistant', data.aiMessage);
+
+                setTimeout(() => {
+                    const existingFileUpload = document.querySelector('.file-upload-container');
+                    const existingMapContainer = document.querySelector('.map-container');
+                    const existingDynamicData = document.querySelector('.dynamic-data-container');
+
+                    if (state.currentFieldType !== '10013' && existingFileUpload) existingFileUpload.remove();
+                    if (state.currentFieldType !== '10016' && existingMapContainer) existingMapContainer.remove();
+                    if (state.currentFieldType !== '10020' && state.currentFieldType !== '10037' && existingDynamicData) existingDynamicData.remove();
+
+                    if (data.clusterFormFields && data.clusterFormFields.length >= 1) {
+                        addClusterFormCard(data.clusterFormFields);
+                    } else {
+                        if (state.currentFieldType === '10013') {
+                            addFileUploadUI();
+                        } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
+                            addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
+                        } else if (state.currentFieldType === '10016') {
+                            addMapUI(null);
+                        }
+                        if (data.nextSuggestedQuestions?.length && state.currentFieldType !== '10016') {
+                            addSuggestions(data.nextSuggestedQuestions);
+                        }
+                        addSkipChipIfOptional();
+                    }
+                }, 50);
+            };
+
+            setTimeout(() => {
+                addSupplementaryPromptUI(
+                    data.showPhotoFieldIds,
+                    data.showCommentFieldIds,
+                    data.showActionFieldIds,
+                    data.showHazardInfo || null,
+                    data.extractedFields,
+                    data,
+                    showNextQuestionAndFieldUI
+                );
+            }, 50);
+
+            if (data.isComplete) state._serverMarkedComplete = true;
+            setTimeout(() => { if (_shouldAutoPromptCompletion(data)) promptCompletion(); }, 600);
+
+            saveTranscript();
+            updateDebugInfo();
+        } else {
+            if (!handleCompletedSessionRefusal(data.errorMessage)) {
+                addMessage('assistant', data.errorMessage || 'Unable to get next question.');
+            }
+        }
+    } catch (err) {
+        removeTypingIndicator();
+        addMessage('assistant', 'Error resuming session — please type "next" to continue.');
+    }
+
+    // Close panel on mobile
+    if (window.innerWidth < 768) {
+        document.getElementById('progressPanel').classList.remove('show');
+    }
+}
+
 // ── Utility ──────────────────────────────────────────────────
+/** Strip HTML tags and decode entities to plain text */
+function stripHtml(str) {
+    if (!str) return '';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = str;
+    return (tmp.textContent || tmp.innerText || '').trim();
+}
+
+/** Format a field value for display — unwrap JSON dataset answers to readable text, file paths to links */
+function formatFieldValue(val) {
+    if (!val) return '';
+    // JSON dataset answers
+    try {
+        const obj = JSON.parse(val);
+        if (obj && obj.Text !== undefined) {
+            if (Array.isArray(obj.Text)) return escapeHtml(obj.Text.join(', '));
+            return escapeHtml(String(obj.Text));
+        }
+    } catch (e) { /* not JSON — fall through */ }
+    // File path — ~/App/Docs/... or similar
+    const plain = stripHtml(val);
+    if (/^~\/App\/Docs\//i.test(plain) || /\.(pdf|doc|docx|xls|xlsx|csv|txt|png|jpg|jpeg|gif|bmp|zip)$/i.test(plain)) {
+        const href = plain.replace(/^~\//, '../../');
+        const fileName = plain.split('/').pop();
+        return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" `
+             + `style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#3B98F1;color:#fff;`
+             + `border-radius:4px;font-size:12px;text-decoration:none;font-weight:500;" `
+             + `title="${escapeHtml(plain)}"><i class="ph-thin ph-file-arrow-down"></i>${escapeHtml(fileName)}</a>`;
+    }
+    return escapeHtml(plain);
+}
+
 function escapeHtml(str) {
     if (!str) return '';
     return String(str)

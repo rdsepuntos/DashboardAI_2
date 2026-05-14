@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>Clean Branded Report Template</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&amp;family=Poppins:wght@700;800&amp;display=swap" rel="stylesheet"/>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --primary:#3B98F1;
+    --secondary:#212950;
+    --bg:#F8F7F5;
+    --white:#FFFFFF;
+    --text:#231F21;
+    --muted:#6F7482;
+    --line:#ECEEF2;
+    --soft-blue:#EEF6FF;
+    --success:#12A37F;
+    --warning:#F59E0B;
+    --danger:#E45E5E;
+    --radius:10px;
+    --shadow:0 10px 25px rgba(33,41,80,.06);
+  }
+
+  body{
+    min-height:100vh;
+    background:var(--bg);
+    font-family:'Nunito',Arial,sans-serif;
+    color:var(--text);
+    padding:32px 20px 56px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:28px;
+  }
+
+  h1,h2,h3,.metric-value,.cover-title{font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+  p{line-height:1.65;color:var(--muted)}
+
+  .print-bar{
+    width:min(960px,100%);
+    background:var(--white);
+    border:1px solid var(--line);
+    box-shadow:0 6px 18px rgba(33,41,80,.05);
+    border-radius:8px;
+    padding:10px 12px 10px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    position:sticky;
+    top:16px;
+    z-index:20;
+  }
+  .print-bar-title{font-size:13px;color:var(--secondary);font-weight:600;display:flex;gap:10px;align-items:center}
+  .ai-badge{background:var(--soft-blue);color:var(--primary);font-size:11px;font-weight:600;padding:5px 10px;border-radius:8px}
+  .print-btn{border:0;background:var(--primary);color:white;border-radius:8px;padding:11px 18px;font-weight:600;font-family:'Nunito';cursor:pointer;box-shadow:0 8px 20px rgba(59,152,241,.25)}
+
+  .page{
+    width:min(960px,100%);
+    min-height:1120px;
+    background:var(--white);
+    border:1px solid var(--line);
+    border-radius:12px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .cover{
+    padding:54px 56px 44px;
+    background:#fff;
+  }
+  .brand-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:90px}
+  .logo-mark{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--secondary)}
+  .logo-dot{width:36px;height:36px;border-radius:12px;background:var(--primary);box-shadow:12px 0 0 rgba(59,152,241,.18)}
+  .cover-chip{border:1px solid var(--line);border-radius:8px;padding:8px 14px;color:var(--secondary);font-weight:600;font-size:12px;background:white}
+  .cover-eyebrow{font-size:13px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
+  .cover-title{font-size:56px;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px}
+  .cover-sub{font-size:17px;max-width:520px;color:var(--muted)}
+  .cover-meta-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 56px 56px;background:white}
+  .cover-meta-item{background:var(--bg);border-radius:10px;padding:22px 24px;border:1px solid #F0EFED}
+  .cover-meta-val{font-family:'Poppins';font-size:34px;line-height:1;color:var(--secondary);font-weight:600;margin-bottom:8px}
+  .cover-meta-val.accent{color:var(--primary)}
+  .cover-meta-val.date{font-size:20px;letter-spacing:-.03em}
+  .cover-meta-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+
+  .content{padding:34px 40px 30px;display:flex;flex-direction:column;gap:24px;flex:1}
+  .section-header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:4px 0 2px}
+  .section-kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);font-weight:700;margin-bottom:4px}
+  .section-title{font-size:25px;letter-spacing:-.03em}
+  .section-date{font-size:13px;color:var(--muted);font-weight:600}
+
+  .kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .kpi-card{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:20px;position:relative;overflow:hidden}
+  .kpi-card::after{content:'';position:absolute;right:18px;top:18px;width:10px;height:10px;background:var(--primary);border-radius:50%;opacity:.25}
+  .metric-value{font-size:34px;letter-spacing:-.05em;margin-bottom:4px}
+  .metric-label{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-height:32px}
+  .trend{margin-top:12px;font-size:12px;color:var(--success);font-weight:700}.trend.down{color:var(--danger)}.trend.warn{color:var(--warning)}
+
+  .cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .wc{background:var(--white);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:330px}
+  .wc.wide{grid-column:1/-1;min-height:300px}
+  .wc-head{padding:22px 24px 12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .wc-head-title{font-family:'Poppins';font-weight:600;color:var(--secondary);font-size:20px;line-height:1.2;letter-spacing:-.03em}
+  .wc-head-tag{font-size:11px;white-space:nowrap;background:var(--bg);color:var(--muted);border-radius:8px;padding:7px 10px;font-weight:700}
+  .wc-head-desc{margin-top:6px;font-size:13px;color:var(--muted)}
+  .wc-body-right,.wc-body-left{display:grid;grid-template-columns:1.55fr 1fr;gap:0;flex:1}
+  .wc-body-left{grid-template-columns:1fr 1.55fr}.wc-body-left .wc-img{order:2}.wc-body-left .insight-panel{order:1}
+  .wc-body-bottom{display:flex;flex-direction:column;flex:1}
+  .wc-img{background:#FCFCFD;padding:14px 18px 20px;display:flex;align-items:center;justify-content:center}.wc-img svg{width:100%;height:auto;display:block}
+  .insight-panel{background:var(--bg);padding:28px 26px;display:flex;align-items:center}
+  .insight-panel p{font-size:14px;color:#545A6B}
+  .wc-note{border-top:1px solid var(--line);background:var(--bg);padding:18px 22px;color:#545A6B;font-size:13px;line-height:1.6}
+  .note-label{display:block;color:var(--primary);text-transform:uppercase;letter-spacing:.1em;font-size:10px;font-weight:700;margin-bottom:6px}
+
+  .table-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:white}
+  .table-banner{padding:24px 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:white;border-radius:2px}
+  .table-banner .tit{font-family:'Poppins';font-size:23px;color:var(--secondary);font-weight:600;letter-spacing:-.03em}.cnt{background:var(--soft-blue);color:var(--primary);padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700}
+  .table-insight{margin:20px 24px;background:var(--bg);border-radius:8px;padding:18px 20px;color:#545A6B;font-size:14px;line-height:1.65;border-left:4px solid var(--primary)}
+  .data-table-wrap{padding:0 24px 26px;overflow-x:auto}.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}.data-table th{padding:13px 14px;text-align:left;background:var(--secondary);color:white;font-weight:700}.data-table th:first-child{border-radius:4px 0 0 4px}.data-table th:last-child{border-radius:0 4px 4px 0}.data-table td{padding:14px;border-bottom:1px solid var(--line);color:#3D4250}.badge{display:inline-block;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700}.red{background:#FFF0F0;color:var(--danger)}.green{background:#EAF8F4;color:var(--success)}.amber{background:#FFF7E8;color:var(--warning)}
+
+  .page-footer{margin-top:auto;padding:18px 40px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:700}.brand{color:var(--secondary)}
+
+  .axis{stroke:#E5E8EF;stroke-width:1}.grid{stroke:#E5E8EF;stroke-width:.8;stroke-dasharray:4 4}.chart-label{font-family:'Nunito';font-size:10px;fill:#7A8090}.chart-title{font-family:'Poppins';font-size:15px;font-weight:600;fill:#212950}
+
+  @media print{
+    body{background:white;padding:0;gap:0}.print-bar{display:none}.page{width:100%;min-height:100vh;border:0;border-radius:0;box-shadow:none;page-break-after:always}.page:last-child{page-break-after:auto}
+  }
+
+  .cover-meta-item{
+    min-height:120px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    text-align:center;
+  }
+  .cover-meta-val{
+    margin:auto 0;
+  }
+  .cover-meta-lbl{
+    margin-top:auto;
+  }
+
+  .kpi-card::after{
+    display:none;
+  }
+</style>
+</head>
+<body>
+<div class="print-bar">
+<span class="print-bar-title">Hazard Report — 28 April 2026 <span class="ai-badge">AI annotated</span></span>
+<button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+</div>
+<section class="page">
+<div class="cover">
+<div class="brand-row">
+<div class="logo-mark"><img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" style="height:32px;width:auto;"/></div>
+<div class="cover-chip">DashboardAI report</div>
+</div>
+<div class="cover-eyebrow">Workplace Health &amp; Safety</div>
+<h1 class="cover-title">Hazard Report</h1>
+<p class="cover-sub">A clean, executive-ready snapshot of hazard activity, risk status and priority actions.</p>
+</div>
+<div class="cover-meta-strip">
+<div class="cover-meta-item"><div class="cover-meta-val accent">6</div><div class="cover-meta-lbl">Total widgets</div></div>
+<div class="cover-meta-item"><div class="cover-meta-val">1</div><div class="cover-meta-lbl">Data table</div></div>
+<div class="cover-meta-item"><div class="cover-meta-val date">28 Apr 2026</div><div class="cover-meta-lbl">Report date</div></div>
+</div>
+<div class="page-footer"><span class="brand">WHS Monitor</span><span>Cover</span></div>
+</section>
+<section class="page">
+<main class="content">
+<header class="section-header"><div><div class="section-kicker">Overview</div><h2 class="section-title">Key Metrics</h2></div><span class="section-date">28 April 2026</span></header>
+<div class="kpi-strip">
+<div class="kpi-card"><div class="metric-value">103</div><div class="metric-label">Total hazards reported</div><div class="trend">▲ 12% vs last month</div></div>
+<div class="kpi-card"><div class="metric-value">88</div><div class="metric-label">Open hazards</div><div class="trend down">▲ 5 new this week</div></div>
+<div class="kpi-card"><div class="metric-value">15</div><div class="metric-label">Closed hazards</div><div class="trend">Resolved this period</div></div>
+<div class="kpi-card"><div class="metric-value">6.8</div><div class="metric-label">Avg risk score</div><div class="trend warn">High risk</div></div>
+</div>
+<header class="section-header"><div><div class="section-kicker">Dashboard widgets</div><h2 class="section-title">Trends and distribution</h2></div></header>
+<div class="cards-grid">
+<article class="wc wide">
+<div class="wc-head"><div><div class="wc-head-title">Hazards Reported by Hazard Type</div><div class="wc-head-desc">Bar chart summary by category</div></div><span class="wc-head-tag">Chart + insight</span></div>
+<div class="wc-body-right"><div class="wc-img"><svg viewbox="0 0 520 260" xmlns="http://www.w3.org/2000/svg"><rect fill="#FCFCFD" height="260" rx="2" width="520"></rect><line class="axis" x1="58" x2="58" y1="36" y2="214"></line><line class="axis" x1="58" x2="490" y1="214" y2="214"></line><line class="grid" x1="58" x2="490" y1="170" y2="170"></line><line class="grid" x1="58" x2="490" y1="126" y2="126"></line><line class="grid" x1="58" x2="490" y1="82" y2="82"></line><rect fill="#3B98F1" height="110" rx="2" width="42" x="82" y="104"></rect><rect fill="#7CC1FF" height="88" rx="2" width="42" x="154" y="126"></rect><rect fill="#B7DCF9" height="66" rx="2" width="42" x="226" y="148"></rect><rect fill="#212950" height="144" rx="2" width="42" x="298" y="70"></rect><rect fill="#8EA0C8" height="82" rx="2" width="42" x="370" y="132"></rect><rect fill="#CED8EB" height="49" rx="2" width="42" x="442" y="165"></rect><text class="chart-label" text-anchor="middle" x="103" y="236">Slip/Trip</text><text class="chart-label" text-anchor="middle" x="175" y="236">Chemical</text><text class="chart-label" text-anchor="middle" x="247" y="236">Ergo</text><text class="chart-label" text-anchor="middle" x="319" y="236">Electrical</text><text class="chart-label" text-anchor="middle" x="391" y="236">Equip.</text><text class="chart-label" text-anchor="middle" x="463" y="236">Other</text></svg></div><div class="insight-panel"><p>Electrical hazards are the clear outlier. Prioritise an electrical safety audit and confirm controls across all active work zones before the next reporting cycle.</p></div></div>
+</article>
+<article class="wc wide">
+<div class="wc-head"><div><div class="wc-head-title">Hazard Reports Trend Over Time</div><div class="wc-head-desc">Monthly reporting volume</div></div><span class="wc-head-tag">Insight + chart</span></div>
+<div class="wc-body-left"><div class="insight-panel"><p>Reporting spiked through the maintenance period, then eased but remained above baseline. Seasonal controls should be reviewed before the next high-activity period.</p></div><div class="wc-img"><svg viewbox="0 0 520 260" xmlns="http://www.w3.org/2000/svg"><rect fill="#FCFCFD" height="260" rx="2" width="520"></rect><line class="axis" x1="52" x2="52" y1="36" y2="214"></line><line class="axis" x1="52" x2="490" y1="214" y2="214"></line><line class="grid" x1="52" x2="490" y1="170" y2="170"></line><line class="grid" x1="52" x2="490" y1="126" y2="126"></line><line class="grid" x1="52" x2="490" y1="82" y2="82"></line><path d="M78 172 L158 150 L238 82 L318 116 L398 104 L478 126 L478 214 L78 214 Z" fill="#3B98F1" opacity=".10"></path><path d="M78 172 L158 150 L238 82 L318 116 L398 104 L478 126" fill="none" stroke="#3B98F1" stroke-linecap="butt" stroke-linejoin="round" stroke-width="5"></path><circle cx="78" cy="172" fill="#3B98F1" r="6"></circle><circle cx="158" cy="150" fill="#3B98F1" r="6"></circle><circle cx="238" cy="82" fill="#212950" r="7"></circle><circle cx="318" cy="116" fill="#3B98F1" r="6"></circle><circle cx="398" cy="104" fill="#3B98F1" r="6"></circle><circle cx="478" cy="126" fill="#3B98F1" r="6"></circle><text class="chart-label" text-anchor="middle" x="78" y="236">Nov</text><text class="chart-label" text-anchor="middle" x="158" y="236">Dec</text><text class="chart-label" text-anchor="middle" x="238" y="236">Jan</text><text class="chart-label" text-anchor="middle" x="318" y="236">Feb</text><text class="chart-label" text-anchor="middle" x="398" y="236">Mar</text><text class="chart-label" text-anchor="middle" x="478" y="236">Apr</text></svg></div></div>
+</article>
+<article class="wc"><div class="wc-head"><div><div class="wc-head-title">Hazard Status Breakdown</div><div class="wc-head-desc">Open vs closed</div></div></div><div class="wc-body-bottom"><div class="wc-img"><svg viewbox="0 0 360 230" xmlns="http://www.w3.org/2000/svg"><rect fill="#FCFCFD" height="230" rx="2" width="360"></rect><circle cx="150" cy="110" fill="none" r="70" stroke="#E9EEF6" stroke-width="24"></circle><circle cx="150" cy="110" fill="none" r="70" stroke="#3B98F1" stroke-dasharray="360 440" stroke-linecap="butt" stroke-width="24" transform="rotate(-90 150 110)"></circle><circle cx="150" cy="110" fill="none" r="70" stroke="#212950" stroke-dasharray="70 440" stroke-dashoffset="-360" stroke-linecap="butt" stroke-width="24" transform="rotate(-90 150 110)"></circle><text fill="#212950" font-family="Poppins" font-size="32" font-weight="800" text-anchor="middle" x="150" y="105">103</text><text class="chart-label" text-anchor="middle" x="150" y="126">TOTAL</text><rect fill="#3B98F1" height="10" rx="2" width="10" x="250" y="76"></rect><text class="chart-label" x="268" y="85">Open 88</text><rect fill="#212950" height="10" rx="2" width="10" x="250" y="102"></rect><text class="chart-label" x="268" y="111">Closed 15</text></svg></div><div class="wc-note"><span class="note-label">Insight</span>85% of hazards remain open, indicating resolution capacity may be constrained.</div></div></article>
+<article class="wc"><div class="wc-head"><div><div class="wc-head-title">Risk Score Distribution</div><div class="wc-head-desc">Average risk score</div></div></div><div class="wc-body-bottom"><div class="wc-img"><svg viewbox="0 0 360 230" xmlns="http://www.w3.org/2000/svg"><rect fill="#FCFCFD" height="230" rx="2" width="360"></rect><path d="M78 160 A102 102 0 0 1 282 160" fill="none" stroke="#E9EEF6" stroke-linecap="butt" stroke-width="26"></path><path d="M78 160 A102 102 0 0 1 240 75" fill="none" stroke="#3B98F1" stroke-linecap="butt" stroke-width="26"></path><line stroke="#212950" stroke-linecap="butt" stroke-width="4" x1="180" x2="236" y1="160" y2="82"></line><circle cx="180" cy="160" fill="#212950" r="7"></circle><text fill="#212950" font-family="Poppins" font-size="38" font-weight="800" text-anchor="middle" x="180" y="140">6.8</text><text class="chart-label" text-anchor="middle" x="180" y="188">Avg risk score</text></svg></div></div></article>
+</div>
+</main>
+<div class="page-footer"><span class="brand">WHS Monitor</span><span>1</span></div>
+</section>
+<section class="page">
+<main class="content">
+<div class="table-card">
+<div class="table-banner"><span class="tit">Hazard Report Details</span><span class="cnt">7 records · 28 April 2026</span></div>
+<div class="table-insight">This table lists seven active hazard reports. High-risk open items should be prioritised before the end of the reporting period.</div>
+<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Hazard ID</th><th>Location</th><th>Type</th><th>Risk</th><th>Status</th><th>Reported</th><th>Responsible</th></tr></thead><tbody><tr><td>HZ-1042</td><td>Warehouse A</td><td>Electrical</td><td><span class="badge red">High</span></td><td><span class="badge red">Open</span></td><td>02/04/2026</td><td>J. Smith</td></tr><tr><td>HZ-1039</td><td>Loading Bay</td><td>Slip/Trip</td><td><span class="badge amber">Medium</span></td><td><span class="badge green">Closed</span></td><td>28/03/2026</td><td>K. Lee</td></tr><tr><td>HZ-1035</td><td>Office Level 2</td><td>Ergonomic</td><td><span class="badge amber">Medium</span></td><td><span class="badge amber">In Review</span></td><td>21/03/2026</td><td>M. Brown</td></tr><tr><td>HZ-1028</td><td>Car Park</td><td>Slip/Trip</td><td><span class="badge red">High</span></td><td><span class="badge red">Open</span></td><td>12/03/2026</td><td>J. Smith</td></tr><tr><td>HZ-1021</td><td>Chemical Store</td><td>Chemical</td><td><span class="badge red">High</span></td><td><span class="badge red">Open</span></td><td>04/03/2026</td><td>A. Patel</td></tr><tr><td>HZ-1018</td><td>Workshop</td><td>Equipment</td><td><span class="badge amber">Medium</span></td><td><span class="badge green">Closed</span></td><td>27/02/2026</td><td>D. Nguyen</td></tr><tr><td>HZ-1009</td><td>Roof Access</td><td>Electrical</td><td><span class="badge red">High</span></td><td><span class="badge amber">Pending</span></td><td>10/02/2026</td><td>K. Lee</td></tr></tbody></table></div>
+</div>
+</main>
+<div class="page-footer"><span class="brand">WHS Monitor</span><span>Table</span></div>
+</section>
+</body>
+</html>

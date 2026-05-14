@@ -247,10 +247,10 @@
           const isDown   = /▼|down|decr|-\d/i.test(trendRaw);
           const trend    = esc(trendRaw);
           const cc       = COLORS[idx % COLORS.length];
-          kpiStripHtml  += `<div class="kpi-mini${cc ? ' '+cc : ''}">
-            <div class="kpi-mini-val">${val}</div>
-            <div class="kpi-mini-lbl">${lbl}</div>
-            ${trend ? `<div class="kpi-mini-trend${isDown ? ' down' : ''}">${trend}</div>` : ''}
+          kpiStripHtml  += `<div class="kpi-card">
+            <div class="metric-value">${val}</div>
+            <div class="metric-label">${lbl}</div>
+            ${trend ? `<div class="trend${isDown ? ' down' : ''}">${trend}</div>` : ''}
           </div>`;
         });
 
@@ -289,31 +289,31 @@
             layout = lastSideLayout;
           }
           if (layout === 'right') {
-            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}" style="grid-column:1/-1">
+            cardsHtml += `<div class="wc wide">
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
               <div class="wc-body-right">
                 <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
-                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+                <div class="insight-panel"><p>${esc(insight.description)}</p></div>
               </div>
             </div>`;
           } else if (layout === 'left') {
-            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}" style="grid-column:1/-1">
+            cardsHtml += `<div class="wc wide">
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
               <div class="wc-body-left">
-                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+                <div class="insight-panel"><p>${esc(insight.description)}</p></div>
                 <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
               </div>
             </div>`;
           } else if (layout === 'bottom' && insight?.description) {
-            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}"${spanFull}>
+            cardsHtml += `<div class="wc${item.gsW >= 10 ? ' wide' : ''}">
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
               <div class="wc-body-bottom">
                 <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
-                <div class="wc-note">${esc(insight.description)}</div>
+                <div class="wc-note"><span class="note-label">Insight</span>${esc(insight.description)}</div>
               </div>
             </div>`;
           } else {
-            cardsHtml += `<div class="wc${cc ? ' '+cc : ''}"${spanFull}>
+            cardsHtml += `<div class="wc${item.gsW >= 10 ? ' wide' : ''}">
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Widget'}</span></div>
               <div class="wc-body-bottom">
                 <div class="wc-img"><img src="${img}" style="width:100%;display:block" /></div>
@@ -333,12 +333,12 @@
           const isDown   = /▼|down|decr|-\d/i.test(trendRaw);
           const trend    = esc(trendRaw);
           const cc       = COLORS[cIdx % COLORS.length];
-          cardsHtml += `<div class="wc${cc ? ' '+cc : ''}">
+          cardsHtml += `<div class="wc">
             <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'KPI'}</span></div>
-            <div class="widget-card-body">
-              <div class="kpi-value">${val}</div>
-              ${lbl ? `<div class="kpi-label">${lbl}</div>` : ''}
-              ${trend ? `<div class="kpi-trend${isDown ? ' down' : ''}">${trend}</div>` : ''}
+            <div class="wc-body-bottom" style="padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center">
+              <div class="metric-value">${val}</div>
+              ${lbl ? `<div class="metric-label">${lbl}</div>` : ''}
+              ${trend ? `<div class="trend${isDown ? ' down' : ''}">${trend}</div>` : ''}
             </div>
           </div>`;
           cIdx++;
@@ -382,37 +382,29 @@
               <tbody>${rows}</tbody>
             </table></div>`;
           }
-          const tableNote = aiMode && getInsight(widget.title || 'Table Data').description ? `<div class="table-insight"><div class="table-insight-text">${esc(getInsight(widget.title || 'Table Data').description)}</div></div>` : '';
-          tablePagesHtml += `<div class="page">
-            <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
-            <div class="table-banner">
-              <span class="tit">&#128203; ${esc(widget.title || 'Table Data')}</span>
-              ${data && data.length ? `<span class="cnt">${data.length} records &middot; ${printDate}</span>` : ''}
-            </div>
-            ${tableNote}
-            ${bodyHtml}
-            <div class="page-footer">
-              <span class="doc-title">${esc(printTitle)}</span>
-              <span class="pg">Table</span>
-            </div>
-          </div>`;
+          const tableNote = aiMode && getInsight(widget.title || 'Table Data').description ? `<div class="table-insight">${esc(getInsight(widget.title || 'Table Data').description)}</div>` : '';
+          tablePagesHtml += `<section class="page">
+            <main class="content">
+              <div class="table-card">
+                <div class="table-banner"><span class="tit">${esc(widget.title || 'Table Data')}</span>${data && data.length ? `<span class="cnt">${data.length} records &middot; ${printDate}</span>` : ''}</div>
+                ${tableNote}
+                ${bodyHtml}
+              </div>
+            </main>
+            <div class="page-footer"><span class="brand">WHS Monitor</span><span>${esc(printTitle)}</span></div>
+          </section>`;
         });
 
         // ── Widget overview page ───────────────────────────────────────────────
-        const kpiCols        = Math.min(Math.max(kpiItems.length, 1), 4);
-        const widgetPageHtml = gridItems.length > 0 ? `<div class="page">
-          <div class="run-header"><span class="rh-title">${esc(printTitle)}</span><span class="rh-date">${printDate}</span></div>
-          <div class="table-banner">
-            <span class="tit">Dashboard Overview</span>
-            <span class="cnt">${esc(printTitle)} &mdash; ${printDate}</span>
-          </div>
-          ${kpiStripHtml ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${kpiCols},1fr)">${kpiStripHtml}</div>` : ''}
-          ${cardsHtml    ? `<div class="cards-grid">${cardsHtml}</div>` : ''}
-          <div class="page-footer">
-            <span class="doc-title">${esc(printTitle)}</span>
-            <span class="pg">1</span>
-          </div>
-        </div>` : '';
+        const widgetPageHtml = gridItems.length > 0 ? `<section class="page">
+          <main class="content">
+            <header class="section-header"><div><div class="section-kicker">Overview</div><h2 class="section-title">Key Metrics</h2></div><span class="section-date">${printDate}</span></header>
+            ${kpiStripHtml ? `<div class="kpi-strip">${kpiStripHtml}</div>` : ''}
+            <header class="section-header"><div><div class="section-kicker">Dashboard Widgets</div><h2 class="section-title">${esc(printTitle)}</h2></div></header>
+            ${cardsHtml ? `<div class="cards-grid">${cardsHtml}</div>` : ''}
+          </main>
+          <div class="page-footer"><span class="brand">WHS Monitor</span><span>1</span></div>
+        </section>` : '';
 
         // ── Logo ───────────────────────────────────────────────────────────────
         const logoSrc  = document.querySelector('.topbar-logo img')?.src || '';
@@ -422,137 +414,120 @@
         setProg('Building report…', 90);
         const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>${esc(printTitle)} — Report</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Poppins:wght@700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
-:root{--blue:#3B98F1;--blue-lt:#dbeafe;--blue-dk:#1e40af;--teal:#0d9488;--amber:#d97706;--dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb;--white:#fff}
-.page{width:595px;min-height:842px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);border-radius:3px;position:relative;overflow:hidden;display:flex;flex-direction:column}
-.cover-top{background:var(--blue);height:354px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:28px;position:relative;overflow:hidden}
-.cover-top::before{content:'';position:absolute;width:320px;height:320px;border-radius:50%;border:50px solid rgba(255,255,255,.07);top:-80px;right:-80px}
-.cover-top::after{content:'';position:absolute;width:180px;height:180px;border-radius:50%;border:30px solid rgba(255,255,255,.06);bottom:40px;left:-50px}
-.cover-logo{background:white;border-radius:10px;padding:10px 20px;margin-bottom:24px;position:relative;z-index:1;font-size:15px;font-weight:700;color:var(--blue);letter-spacing:.02em;display:flex;align-items:center;gap:8px}
-.cover-divider{width:50px;height:3px;background:rgba(255,255,255,.4);border-radius:2px;margin-bottom:16px;position:relative;z-index:1}
-.cover-title{font-size:26px;font-weight:800;color:#fff;text-align:center;position:relative;z-index:1;padding:0 32px;line-height:1.25}
-.cover-subtitle{font-size:11px;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.12em;margin-top:8px;position:relative;z-index:1}
-.cover-bottom{background:var(--blue-lt);flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px}
-.cover-meta-row{display:flex;gap:32px}
-.cover-meta-item{text-align:center}
-.cover-meta-item .val{font-size:22px;font-weight:700;color:var(--blue)}
-.cover-meta-item .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-top:2px}
-.cover-date{font-size:10px;color:var(--mid);margin-top:8px}
-.cover-dots{display:flex;gap:8px;margin-top:6px}
-.cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
-.cover-dots span:not(:first-child){opacity:.35}
-.section-header{display:flex;align-items:center;padding:0 28px;margin:20px 0 0;position:relative}
-.section-header::after{content:'';position:absolute;bottom:-1px;left:28px;right:28px;height:1px;background:var(--border)}
-.section-pill{background:var(--blue);color:white;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 14px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:6px}
-.section-pill .dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.5)}
-.section-date{margin-left:auto;font-size:8px;color:var(--mid)}
-.kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
-.kpi-mini{background:var(--light);border-radius:6px;padding:10px 12px;border-left:3px solid var(--blue)}
-.kpi-mini.teal{border-color:var(--teal)}.kpi-mini.indigo{border-color:#4f46e5}.kpi-mini.amber{border-color:#d97706}
-.kpi-mini-val{font-size:18px;font-weight:800;color:var(--dark)}
-.kpi-mini-lbl{font-size:8px;color:var(--mid);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
-.kpi-mini-trend{font-size:8px;color:#059669;font-weight:600;margin-top:3px}
-.kpi-mini-trend.down{color:#dc2626}
-.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 28px 20px}
-.wc{border-radius:6px;overflow:hidden;box-shadow:none;display:flex;flex-direction:column;background:#fff}
-.wc-head{display:flex;flex-direction:column;padding:14px 16px 10px;border-bottom:none;flex-shrink:0;background:#fff;position:relative; padding-left:0px !Important;}
-.wc-head-title{font-size:14px;color:#000;letter-spacing:.08em;text-transform:uppercase}
-.widget-card-body{flex:1;background:#fff;padding:10px;min-height:120px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px}
+:root{--primary:#3B98F1;--secondary:#212950;--bg:#F8F7F5;--white:#FFFFFF;--text:#231F21;--muted:#6F7482;--line:#ECEEF2;--soft-blue:#EEF6FF;--success:#12A37F;--warning:#F59E0B;--danger:#E45E5E;--radius:10px;--shadow:0 10px 25px rgba(33,41,80,.06)}
+body{min-height:100vh;background:var(--bg);font-family:'Nunito',Arial,sans-serif;color:var(--text);padding:32px 20px 56px;display:flex;flex-direction:column;align-items:center;gap:28px}
+h1,h2,h3{font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+p{line-height:1.65;color:var(--muted)}
+.print-bar{width:min(960px,100%);background:var(--white);border:1px solid var(--line);box-shadow:0 6px 18px rgba(33,41,80,.05);border-radius:8px;padding:10px 12px 10px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:16px;z-index:20}
+.print-bar-title{font-size:13px;color:var(--secondary);font-weight:600;display:flex;gap:10px;align-items:center}
+.ai-badge{background:var(--soft-blue);color:var(--primary);font-size:11px;font-weight:600;padding:5px 10px;border-radius:8px}
+.print-btn{border:0;background:var(--primary);color:white;border-radius:8px;padding:11px 18px;font-weight:600;font-family:'Nunito',Arial,sans-serif;cursor:pointer;box-shadow:0 8px 20px rgba(59,152,241,.25)}
+.page{width:min(960px,100%);min-height:1120px;background:var(--white);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
+.cover{padding:54px 56px 44px;background:#fff}
+.brand-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:90px}
+.logo-mark{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--secondary)}
+.cover-chip{border:1px solid var(--line);border-radius:8px;padding:8px 14px;color:var(--secondary);font-weight:600;font-size:12px;background:white}
+.cover-eyebrow{font-size:13px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
+.cover-title{font-size:56px;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+.cover-sub{font-size:17px;max-width:520px;color:var(--muted)}
+.cover-meta-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 56px 56px;background:white}
+.cover-meta-item{background:var(--bg);border-radius:10px;padding:22px 24px;border:1px solid #F0EFED;min-height:120px;display:flex;flex-direction:column;justify-content:space-between;text-align:center}
+.cover-meta-val{font-family:'Poppins',Arial,sans-serif;font-size:34px;line-height:1;color:var(--secondary);font-weight:600;margin:auto 0}
+.cover-meta-val.accent{color:var(--primary)}
+.cover-meta-val.date{font-size:20px;letter-spacing:-.03em}
+.cover-meta-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:auto}
+.content{padding:34px 40px 30px;display:flex;flex-direction:column;gap:24px;flex:1}
+.section-header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:4px 0 2px}
+.section-kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);font-weight:700;margin-bottom:4px}
+.section-title{font-size:25px;letter-spacing:-.03em}
+.section-date{font-size:13px;color:var(--muted);font-weight:600}
+.kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.kpi-card{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:20px;position:relative;overflow:hidden}
+.metric-value{font-size:34px;letter-spacing:-.05em;margin-bottom:4px;font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+.metric-label{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-height:32px}
+.trend{margin-top:12px;font-size:12px;color:var(--success);font-weight:700}
+.trend.down{color:var(--danger)}
+.trend.warn{color:var(--warning)}
+.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.wc{background:var(--white);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:330px}
+.wc.wide{grid-column:1/-1;min-height:300px}
+.wc-head{padding:22px 24px 12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.wc-head-title{font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary);font-size:20px;line-height:1.2;letter-spacing:-.03em}
+.wc-body-right,.wc-body-left{display:grid;grid-template-columns:1.55fr 1fr;gap:0;flex:1}
+.wc-body-left{grid-template-columns:1fr 1.55fr}
+.wc-body-left .wc-img{order:2}
+.wc-body-left .insight-panel{order:1}
 .wc-body-bottom{display:flex;flex-direction:column;flex:1}
-.wc-body-bottom .wc-img{overflow:hidden}
-.wc-body-bottom .wc-img img{display:block;width:100%}
-.wc-note{padding:10px 14px;font-size:10px;color:#374151;line-height:1.75;border-top:1px solid var(--border);background:#fafafa}
-.wc-body-right{display:flex;flex-direction:row;flex:1;min-height:190px}
-.wc-body-right .wc-img{flex:0 0 60%;overflow:hidden}
-.wc-body-right .wc-img img{display:block;width:100%;height:100%;object-fit:contain;background:#fff}
-.wc-aside{flex:1;padding:18px 16px;display:flex;flex-direction:column;justify-content:center;background:#fafafa}
-.wc-aside p{font-size:11px;color:#374151;line-height:1.8;margin:0}
-.wc-body-left{display:flex;flex-direction:row;flex:1;min-height:190px}
-.wc-body-left .wc-img{flex:0 0 60%;overflow:hidden;order:2}
-.wc-body-left .wc-img img{display:block;width:100%;height:100%;object-fit:contain;background:#fff}
-.wc-body-left .wc-aside{order:1;background:#fafafa}
-.kpi-value{font-size:30px;font-weight:800;color:var(--blue)}
-.kpi-label{font-size:9px;color:var(--mid);text-transform:uppercase;letter-spacing:.08em}
-.kpi-trend{display:flex;align-items:center;gap:3px;font-size:9px;color:#059669;font-weight:600}
-.kpi-trend.down{color:#dc2626}
-.table-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.table-banner .tit{font-size:13px;font-weight:700;color:white;display:flex;align-items:center;gap:8px}
-.table-banner .cnt{font-size:8.5px;color:rgba(255,255,255,.65);background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px}
-.data-table-wrap{padding:0 28px 20px;overflow:hidden}
-.data-table{width:100%;border-collapse:collapse;font-size:8px}
-.data-table thead{display:table-header-group}
-.data-table thead th{background:var(--blue);color:white;padding:6px 8px;text-align:left;font-weight:600;letter-spacing:.03em}
-.data-table tbody tr:nth-child(even) td{background:#f9fafb}
-.data-table tbody td{padding:5px 8px;color:var(--dark);border-bottom:1px solid var(--border)}
-.badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:7px;font-weight:600}
-.badge.green{background:#d1fae5;color:#065f46}.badge.red{background:#fee2e2;color:#991b1b}.badge.amber{background:#fef3c7;color:#92400e}
-.page-footer{margin-top:auto;padding:8px 28px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.page-footer .brand{font-size:7.5px;color:var(--mid);font-weight:600;letter-spacing:.05em}
-.page-footer .doc-title{font-size:7px;color:#9ca3af}
-.page-footer .pg{font-size:7.5px;color:var(--mid)}
-.table-insight{display:flex;align-items:flex-start;gap:10px;margin:14px 28px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:4px;background:#fafafa}
-.table-insight-text{font-size:9px;color:#374151;line-height:1.75}
-.run-header{display:none;align-items:center;justify-content:space-between;padding:6px 28px;background:#f8fafc;border-bottom:1px solid var(--border);flex-shrink:0}
-.run-header .rh-title{font-size:8px;font-weight:700;color:var(--blue);letter-spacing:.06em;text-transform:uppercase}
-.run-header .rh-date{font-size:8px;color:var(--mid)}
-.print-bar{background:#1e293b;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;width:100%;position:sticky;top:0;z-index:99}
-.print-bar-title{color:rgba(255,255,255,.65);font-size:12px}
-.print-btn{background:#2563eb;color:white;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em;font-family:inherit}
-.print-btn:hover{background:#1d4ed8}
-@page{size:A4 portrait;margin:0}
+.wc-img{background:#FCFCFD;padding:14px 18px 20px;display:flex;align-items:center;justify-content:center}
+.wc-img img{width:100%;display:block}
+.insight-panel{background:var(--bg);padding:28px 26px;display:flex;align-items:center}
+.insight-panel p{font-size:14px;color:#545A6B}
+.wc-note{border-top:1px solid var(--line);background:var(--bg);padding:18px 22px;color:#545A6B;font-size:13px;line-height:1.6}
+.note-label{display:block;color:var(--primary);text-transform:uppercase;letter-spacing:.1em;font-size:10px;font-weight:700;margin-bottom:6px}
+.table-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:white}
+.table-banner{padding:24px 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:white}
+.table-banner .tit{font-family:'Poppins',Arial,sans-serif;font-size:23px;color:var(--secondary);font-weight:600;letter-spacing:-.03em}
+.cnt{background:var(--soft-blue);color:var(--primary);padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700}
+.table-insight{margin:20px 24px;background:var(--bg);border-radius:8px;padding:18px 20px;color:#545A6B;font-size:14px;line-height:1.65;border-left:4px solid var(--primary)}
+.data-table-wrap{padding:0 24px 26px;overflow-x:auto}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.data-table th{padding:13px 14px;text-align:left;background:var(--secondary);color:white;font-weight:700}
+.data-table th:first-child{border-radius:4px 0 0 4px}
+.data-table th:last-child{border-radius:0 4px 4px 0}
+.data-table td{padding:14px;border-bottom:1px solid var(--line);color:#3D4250}
+.badge{display:inline-block;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700}
+.badge.red{background:#FFF0F0;color:var(--danger)}
+.badge.green{background:#EAF8F4;color:var(--success)}
+.badge.amber{background:#FFF7E8;color:var(--warning)}
+.page-footer{margin-top:auto;padding:18px 40px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:700}
+.brand{color:var(--secondary)}
 @media print{
   body{background:white;padding:0;gap:0}
   .print-bar{display:none}
-  .page{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;width:100%;min-height:100vh}
-  .page:last-child{page-break-after:avoid;break-after:avoid}
-  .cover-top{height:42vh;print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .cover-bottom{min-height:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .kpi-mini{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .data-table thead th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .page{width:100%;min-height:100vh;border:0;border-radius:0;box-shadow:none;page-break-after:always}
+  .page:last-child{page-break-after:auto}
+  .cover{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .data-table th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .wc{page-break-inside:avoid;break-inside:avoid}
-  .kpi-summary-row{page-break-inside:avoid;break-inside:avoid}
+  .kpi-strip{page-break-inside:avoid;break-inside:avoid}
   .data-table tbody tr{page-break-inside:avoid;break-inside:avoid}
   .table-insight{page-break-inside:avoid;break-inside:avoid}
-  .run-header{display:flex !important}
+  .insight-panel{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style></head><body>
 <div class="print-bar">
-  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
-  <button class="print-btn" onclick="window.print()">&#x1F5A8;&nbsp; Print / Save as PDF</button>
+  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span class="ai-badge">AI Annotated</span>' : ''}</span>
+  <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
 </div>
 
-<div class="page">
-  <div class="cover-top">
-    <div class="cover-logo">${logoHtml}</div>
-    <div class="cover-divider"></div>
-    <div class="cover-title">${esc(printTitle)}</div>
-    <div class="cover-subtitle">Workplace Health &amp; Safety</div>
-  </div>
-  <div class="cover-bottom">
-    <div class="cover-meta-row">
-      <div class="cover-meta-item">
-        <div class="val">${gridItems.length + tableWidgets.length}</div>
-        <div class="lbl">Total Widgets</div>
-      </div>
-      <div class="cover-meta-item">
-        <div class="val" style="color:var(--teal)">${tableWidgets.length}</div>
-        <div class="lbl">Data Tables</div>
-      </div>
-      <div class="cover-meta-item">
-        <div class="val" style="color:#4f46e5;font-size:14px">${printDate}</div>
-        <div class="lbl">Report Date</div>
-      </div>
+<section class="page">
+  <div class="cover">
+    <div class="brand-row">
+      <div class="logo-mark">${logoHtml || esc(printTitle)}</div>
+      <div class="cover-chip">DashboardAI report</div>
     </div>
-    ${storeLabel ? `<div class="cover-date">${esc(storeLabel)}</div>` : ''}
-    <div class="cover-dots"><span></span><span></span><span></span></div>
+    <div class="cover-eyebrow">Workplace Health &amp; Safety</div>
+    <h1 class="cover-title">${esc(printTitle)}</h1>
+    <p class="cover-sub">An executive-ready snapshot of your dashboard data${aiMode ? ', with AI-generated insights and analysis' : ''}.</p>
   </div>
-  <div class="page-footer">
-    <span class="doc-title">${esc(printTitle)}</span>
-    <span class="pg">Cover</span>
+  <div class="cover-meta-strip">
+    <div class="cover-meta-item">
+      <div class="cover-meta-val accent">${gridItems.length + tableWidgets.length}</div>
+      <div class="cover-meta-lbl">Total Widgets</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-val">${tableWidgets.length}</div>
+      <div class="cover-meta-lbl">Data Tables</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-val date">${printDate}</div>
+      <div class="cover-meta-lbl">${storeLabel || 'Report Date'}</div>
+    </div>
   </div>
-</div>
+  <div class="page-footer"><span class="brand">WHS Monitor</span><span>Cover</span></div>
+</section>
 
 ${widgetPageHtml}
 ${tablePagesHtml}
@@ -561,7 +536,7 @@ ${tablePagesHtml}
 
         // ── Open report in new window ──────────────────────────────────────────
         setProg('Opening report…', 98);
-        const win = window.open('', '_blank', 'width=720,height=960,scrollbars=yes');
+        const win = window.open('', '_blank', 'width=1040,height=960,scrollbars=yes');
         if (!win) {
           alert('Popup blocked — please allow popups for this page and try again.');
           return;
