@@ -28,16 +28,6 @@ bld/
 publish/
 PublishOutput/
 
-## Secrets / environment
-appsettings.json
-appsettings.Development.json
-appsettings.Local.json
-appsettings.Production.json
-*.pfx
-*.p12
-.env
-.env.*
-secrets.json
 
 ## Logs & crash dumps
 *.log
