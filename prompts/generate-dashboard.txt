@@ -143,6 +143,32 @@ Choose based on what a user would want to see in a detail list:
 WRONG:  "config": {}
 RIGHT:  "config": { "columns": "<comma-separated column names chosen from the dataSource>" }
 
+--- SECONDARY DATA SOURCE (optional — table widgets only) ---
+To add an aggregated column from a second data source into a table, add "secondaryDataSource"
+at the widget level (NOT inside config):
+  {
+    "name":            "<data source name>",
+    "joinKey":         "<column in primary row to match on>",
+    "foreignKey":      "<column in secondary source to GROUP BY>",
+    "aggregate":       "count | sum | avg",
+    "aggregateColumn": "<column to sum/avg — omit for count>",
+    "as":              "<name of the new merged column>"
+  }
+
+Example — hazard table with action count:
+  "dataSource": "AID_HazardReport",
+  "secondaryDataSource": {
+    "name": "AID_Actions", "joinKey": "RegOthID", "foreignKey": "RegOthID",
+    "aggregate": "count", "as": "ActionCount"
+  },
+  "config": { "columns": "RecordName,Status,HazardType,Location,PersonResponsible,ActionCount" }
+
+RULES:
+- Only use secondaryDataSource on table (or map) widgets.
+- The "as" column name MUST appear in config.columns to be visible in the table.
+- Do NOT use secondaryDataSource on chart, kpi, gauge, stat, donut, progress, or heatmap widgets.
+- dataSource and secondaryDataSource.name must both be exact names from AVAILABLE DATA SOURCES.
+
 --- MAP: config MUST contain latKey + lngKey ---
 WRONG:  "config": {}
 RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }

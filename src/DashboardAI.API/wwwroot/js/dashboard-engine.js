@@ -271,6 +271,9 @@ const DashboardEngine = (() => {
     try {
       if (isTable) {
         const result = await _queryDataPaged(widget.dataSource, params, curPage, pageSize);
+        if (widget.secondaryDataSource) {
+          result.data = await _fetchAndMergeSecondary(result.data, widget.secondaryDataSource);
+        }
         const fetchFn = (p) => _loadWidgetData(widget, p);
         _renderWidgetContent(widget, bodyEl, result.data, result, fetchFn);
 
@@ -310,7 +313,10 @@ const DashboardEngine = (() => {
 
       } else {
         // map, markdown — raw rows needed
-        const data = await _queryData(widget.dataSource, params);
+        let data = await _queryData(widget.dataSource, params);
+        if (widget.secondaryDataSource) {
+          data = await _fetchAndMergeSecondary(data, widget.secondaryDataSource);
+        }
         _renderWidgetContent(widget, bodyEl, data);
       }
     } catch(err) {
@@ -557,6 +563,49 @@ const DashboardEngine = (() => {
     return out;
   }
 
+  /**
+   * Fetches secondaryDataSource aggregated by foreignKey and merges the result
+   * into each primary row as a new column.
+   *
+   * secondaryConfig: { name, joinKey, foreignKey, aggregate, aggregateColumn, as }
+   *   name            — data source name
+   *   joinKey         — column in primary row to match on (e.g. "RegOthID")
+   *   foreignKey      — column in secondary data to GROUP BY (e.g. "RegOthID")
+   *   aggregate       — "count" | "sum" | "avg"  (default "count")
+   *   aggregateColumn — column to sum/avg (omit for count)
+   *   as              — name of the new merged column added to each primary row
+   */
+  async function _fetchAndMergeSecondary(primaryData, secondaryConfig) {
+    if (!secondaryConfig || !primaryData || primaryData.length === 0) return primaryData;
+
+    const { name, joinKey, foreignKey, aggregate, aggregateColumn, as: asCol } = secondaryConfig;
+    const aggFunc = (aggregate || 'count').toLowerCase();
+    const colName = asCol || (aggFunc === 'count' ? 'Count' : (aggregateColumn || 'Value'));
+
+    // Fetch secondary aggregated — only pass storeId, no date/other filters
+    const secData = await _queryDataAggregated(name, { StoreId: _session.storeId }, {
+      groupBy:           foreignKey,
+      groupBy2:          null,
+      aggregateFunction: aggFunc,
+      aggregateColumn:   aggFunc !== 'count' ? (aggregateColumn || null) : null,
+      dateGroup:         null,
+      additionalFilters: null
+    });
+
+    // Build lookup: { foreignKeyValue -> __value }
+    const lookup = {};
+    (secData || []).forEach(row => {
+      const k = row[foreignKey];
+      if (k != null) lookup[k] = row.__value ?? 0;
+    });
+
+    // Merge into primary rows
+    return primaryData.map(row => ({
+      ...row,
+      [colName]: lookup[row[joinKey]] ?? 0
+    }));
+  }
+
   function getDashboard()   { return _dashboard; }
   function getSession()     { return _session; }
   function getFilterState() { return Object.assign({}, _filterState); }
@@ -584,7 +633,11 @@ const DashboardEngine = (() => {
       try {
         if (type === 'table') {
           const result = await _queryDataPaged(widget.dataSource, params, 1, 9999);
-          results.push({ widget, type, data: result.data || [], totalCount: result.totalCount });
+          let tableData = result.data || [];
+          if (widget.secondaryDataSource) {
+            tableData = await _fetchAndMergeSecondary(tableData, widget.secondaryDataSource);
+          }
+          results.push({ widget, type, data: tableData, totalCount: result.totalCount });
 
         } else if (['kpi','gauge','stat','chart','donut','progress','heatmap'].includes(type)) {
           const agg          = (config.aggregation || '').toLowerCase();
