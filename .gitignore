@@ -53,3 +53,6 @@ TestResults/
 coverage/
 *.coverage
 *.coveragexml
+
+## Sensitive config — keep out of source control
+src/DashboardAI.API/appsettings.json

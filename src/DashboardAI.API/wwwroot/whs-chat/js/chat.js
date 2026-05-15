@@ -14,7 +14,7 @@ const CONFIG = {
     userName: _jmember.UserName || 'User',
     elevenlabsApiKey: 'sk_7f1831767c31a0eb6a44da85883cdeede76ef428c30374c8',
     elevenlabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // Default voice (Sarah)
-    openaiApiKey: 'REMOVED_OPENAI_KEY',
+    openaiApiKey: '',
     googleMapsApiKey: 'AIzaSyDx17vZ4ZTrcYxxbRds4HDOv3x5vG5d7Nk', // Google Maps API key for location fields,
     // Known profile facts from localStorage — sent with every message so AI never asks for things it already knows
     userProfile: {
@@ -10544,3 +10544,4 @@ function escapeHtml(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
+
