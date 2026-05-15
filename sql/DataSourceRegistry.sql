@@ -152,6 +152,39 @@ VALUES (
     'StoreID,StartDate,EndDate,Status,HazardType,Department,Location'
 );
 
+-- ── AID_Actions ───────────────────────────────────────────────────────────────
+INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
+VALUES (
+    'AID_Actions',
+    'Corrective action controls across ALL WHS modules (hazard reports, audits, incidents, risk assessments, job procedures, policies) — each row is one action with its module type, status, priority, responsible person, deadline, and completion date. Use this data source when the user asks about actions, corrective actions, action status, overdue actions, action deadlines, action counts, or actions by module.',
+    'View',
+    '[
+        {"name":"ControlID",    "dataType":"number", "description":"Unique action (control) identifier"},
+        {"name":"StoreID",      "dataType":"number", "description":"Store identifier"},
+        {"name":"RegOthID",     "dataType":"number", "description":"Parent record identifier"},
+        {"name":"ModuleType",   "dataType":"string", "description":"WHS module the action belongs to: Hazard Report, Audit & Inspection, Incident, Risk Assessment, Job Procedure, Policy"},
+        {"name":"ParentTitle",  "dataType":"string", "description":"Title of the parent WHS record this action is linked to"},
+        {"name":"InternalNo",   "dataType":"string", "description":"Internal reference number of the parent record"},
+        {"name":"Action",       "dataType":"string", "description":"Description of the corrective action to be taken"},
+        {"name":"Category",     "dataType":"string", "description":"Action category"},
+        {"name":"ActionStatus", "dataType":"string", "description":"Current status of the action (e.g. Open, In Progress, Completed, Overdue)"},
+        {"name":"Priority",     "dataType":"string", "description":"Priority level of the action (e.g. High, Medium, Low)"},
+        {"name":"Responsible",  "dataType":"string", "description":"Name of the person responsible for completing the action"},
+        {"name":"Deadline",     "dataType":"date",   "description":"Due date for the action (used for date range filtering)"},
+        {"name":"DeadlineString","dataType":"string","description":"Deadline as a formatted string (dd/MM/yyyy)"},
+        {"name":"CompletedOn",  "dataType":"date",   "description":"Date the action was completed"},
+        {"name":"StartDate",    "dataType":"date",   "description":"Start date of the action"},
+        {"name":"Division",     "dataType":"string", "description":"Division name"},
+        {"name":"Department",   "dataType":"string", "description":"Department name"},
+        {"name":"Programme",    "dataType":"string", "description":"Programme name"},
+        {"name":"LocationName", "dataType":"string", "description":"Location name"},
+        {"name":"LocationType", "dataType":"string", "description":"Type of location"},
+        {"name":"EstCost",      "dataType":"number", "description":"Estimated cost of the action"},
+        {"name":"CreatedDt",    "dataType":"date",   "description":"Date the action was created"}
+    ]',
+    'StoreID,StartDate,EndDate,ActionStatus,Priority,Department,LocationName'
+);
+
 -- ── ADD MORE VIEWS / SPs BELOW — no code changes needed ─────────────────────
 -- INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
 -- VALUES ('vw_MyNewView', 'Description here', 'View', '[{"name":"Col1","dataType":"string","description":"..."}]', 'StoreID');

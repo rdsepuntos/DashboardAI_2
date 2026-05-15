@@ -274,8 +274,92 @@ namespace DashboardAI.Infrastructure.Services
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        //  Hazard MCP query  (POST /api/chat/hazard)
+        // ─────────────────────────────────────────────────────────────────────
+        private const string ArventaBase     = "https://beta.whsmonitor.com.au/vws";
+        private const string ArventaAdminKey = "2G2rFq95Kr7g8MQSWO3SE2kGbq9BJ748";
+
+        // Cache resolved MCP URLs per store — they don't change between requests.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string>
+            _mcpUrlCache = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+
+        private async Task<string> ResolveMcpUrlAsync(int storeId)
+        {
+            if (_mcpUrlCache.TryGetValue(storeId, out var cached)) return cached;
+
+            var payload = JsonConvert.SerializeObject(new { adminKey = ArventaAdminKey, storeId });
+            var req     = new HttpRequestMessage(HttpMethod.Post, $"{ArventaBase}/auth/generate-key")
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+
+            var res  = await _http.SendAsync(req);
+            var json = await res.Content.ReadAsStringAsync();
+            if (!res.IsSuccessStatusCode)
+                throw new HttpRequestException($"Arventa MCP key resolution failed ({(int)res.StatusCode}): {json}");
+
+            var data = JObject.Parse(json);
+            var url  = data["url"]?.ToString();
+            if (string.IsNullOrWhiteSpace(url))
+                throw new InvalidOperationException("Arventa /auth/generate-key did not return a URL.");
+
+            var fullUrl = $"{ArventaBase}{url}";
+            _mcpUrlCache.TryAdd(storeId, fullUrl);
+            return fullUrl;
+        }
+
+        public async Task<string> QueryHazardMcpAsync(string message, int storeId, string userId)
+        {
+            var mcpUrl = await ResolveMcpUrlAsync(storeId);
+
+            var body = new
+            {
+                model        = "gpt-4o",
+                input        = message,
+                instructions = "You are a Workplace Health & Safety assistant. " +
+                               "Use the available MCP tools to retrieve hazard report information. " +
+                               "Be professional, concise, and clear. " +
+                               "When listing reports, format them as a readable list with key fields such as " +
+                               "report number, type, status, location, and date. " +
+                               "For individual report details, present the full record in a structured layout.",
+                tools = new[]
+                {
+                    new
+                    {
+                        type             = "mcp",
+                        server_label     = "arventa-hazard",
+                        server_url       = mcpUrl,
+                        require_approval = "never"
+                    }
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/responses")
+            {
+                Content = new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+            var response = await _http.SendAsync(request);
+            var json     = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"OpenAI MCP error {(int)response.StatusCode}: {json}");
+
+            var parsed    = JObject.Parse(json);
+            var outputArr = parsed["output"] as JArray;
+            var msgItem   = outputArr?.FirstOrDefault(o => o["type"]?.ToString() == "message");
+            var content   = msgItem?["content"]?[0]?["text"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                throw new InvalidOperationException($"OpenAI returned empty MCP response. Raw: {json}");
+
+            return content.Trim();
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         //  OpenAI Responses API
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ─────────────────────────────────────────────────────────────────────
         private async Task<string> CallOpenAIResponsesAsync(
             string promptId,
             string promptVersion,

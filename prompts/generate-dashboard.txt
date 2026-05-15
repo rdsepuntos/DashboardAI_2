@@ -243,6 +243,19 @@ Layout:
 - Never place two widgets with the same y and overlapping x ranges.
 - Always use the FULL 12-column width — do NOT leave all widgets at x=0.
 
+=== DATA SOURCE SELECTION GUIDE ===
+Pick the BEST matching data source from AVAILABLE DATA SOURCES based on the user's topic:
+- Hazard reports / hazard records / hazard overview         => AID_HazardReport
+- Corrective actions / action status / overdue actions
+  action deadlines / action counts / actions by module
+  actions by person / actions by priority                   => AID_Actions
+- Audits / inspections                                      => AID_AuditAndInspection
+- Incidents                                                 => AID_IncidentAssessor
+- Risk assessments                                          => AID_RapidRiskAssessor
+
+When the user asks for a "hazard details table with number of actions" or similar,
+use AID_HazardActions (it has one row per action, so COUNT(*) per HazardTitle gives action counts).
+
 === FINAL RULES ===
 1. Always include a locked StoreId filter:
    { "id": "f_store", "type": "dropdown", "label": "Store", "param": "StoreId", "isLocked": true, "defaultValue": "" }

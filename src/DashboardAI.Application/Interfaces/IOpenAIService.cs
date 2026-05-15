@@ -93,5 +93,12 @@ namespace DashboardAI.Application.Interfaces
             string dashboardTitle,
             IEnumerable<ReportWidgetItem> widgets,
             Dictionary<string, string> activeFilters = null);
+
+        /// <summary>
+        /// Routes a hazard-related question through the Arventa MCP server via the
+        /// OpenAI Responses API.  Resolves the per-store MCP URL automatically and
+        /// caches it for subsequent calls.
+        /// </summary>
+        Task<string> QueryHazardMcpAsync(string message, int storeId, string userId);
     }
 }

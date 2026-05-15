@@ -17,6 +17,13 @@ namespace DashboardAI.API.Controllers
         public List<WidgetDescribeItem> Widgets { get; set; }
     }
 
+    public class HazardQueryRequest
+    {
+        public string Message { get; set; }
+        public string UserId  { get; set; }
+        public int    StoreId { get; set; }
+    }
+
     [Route("api/chat")]
     [ApiController]
     public class ChatController : ControllerBase
@@ -83,6 +90,32 @@ namespace DashboardAI.API.Controllers
                     request.DashboardTitle ?? "Dashboard",
                     request.Widgets);
                 return Ok(new { descriptions });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // POST /api/chat/hazard
+        // Body: { "message": "...", "userId": "...", "storeId": 1 }
+        // Returns: { "reply": "..." }
+        // Routes a hazard-related question through the Arventa MCP server.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpPost("hazard")]
+        public async Task<IActionResult> Hazard([FromBody] HazardQueryRequest request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.Message))
+                return BadRequest(new { error = "Message is required." });
+
+            try
+            {
+                var reply = await _aiService.QueryHazardMcpAsync(
+                    request.Message,
+                    request.StoreId,
+                    request.UserId ?? "");
+                return Ok(new { reply });
             }
             catch (Exception ex)
             {

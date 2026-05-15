@@ -139,6 +139,76 @@
     DashboardEngine.init(dashboardId, SESSION);
     ChatManager.init(SESSION);
 
+    // ── Hazard MCP intercept ────────────────────────────────────────────────
+    // Capture-phase listener fires before ChatManager's regular listener.
+    // Routes hazard DATA queries to POST /api/chat/hazard (Arventa MCP).
+    //
+    // IMPORTANT: Messages that create/modify the dashboard (add widget, change
+    // chart, remove filter, etc.) must NEVER be intercepted — they always
+    // fall through to ChatManager regardless of whether "hazard" appears in them.
+    //
+    // Rule: intercept only when the message is clearly querying existing hazard
+    // records (list, show, how many, open report, etc.) and does NOT contain a
+    // dashboard-modification verb.
+    const _DASHBOARD_VERBS_RE = /\b(create|build|generate|make|add|remove|delete|update|change|modify|convert|turn|switch|give me|show me a? ?dashboard|dashboard)\b/i;
+    const _HAZARD_QUERY_RE    = /\b(show|list|view|open|display|find|search|get|fetch|how many|all|summarise|summarize).{0,30}(hazard|incident|near[- ]?miss|inspection|report)|\b(hazard|incident|near[- ]?miss|inspection).{0,30}(report|list|summary|count|status|detail|record)\b/i;
+
+    function _appendChatBubble(cls, html) {
+      const msgs = document.getElementById('chatMessages');
+      const div  = document.createElement('div');
+      div.className = 'chat-bubble ' + cls;
+      div.innerHTML  = html;
+      msgs.appendChild(div);
+      msgs.scrollTop = msgs.scrollHeight;
+      return div;
+    }
+
+    function _renderHazardText(text) {
+      if (!text) return '(No response)';
+      const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return esc(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^\s*[-•]\s+(.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>[\s\S]*?<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+        .replace(/\n\n/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+    }
+
+    const _hazardApiBase = location.protocol === 'file:' ? 'http://localhost:56231' : '';
+
+    document.getElementById('chatForm').addEventListener('submit', async function(e) {
+      const input = document.getElementById('chatInput');
+      const msg   = (input?.value || '').trim();
+      // Let ChatManager handle if: no message, OR it's a dashboard modification command,
+      // OR it's not clearly a hazard data query.
+      if (!msg) return;
+      if (_DASHBOARD_VERBS_RE.test(msg)) return;
+      if (!_HAZARD_QUERY_RE.test(msg)) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      input.value = '';
+
+      _appendChatBubble('user', msg);
+      const thinkEl = _appendChatBubble('assistant', '<em>Looking up hazard data…</em>');
+
+      try {
+        const res  = await fetch(_hazardApiBase + '/api/chat/hazard', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ message: msg, userId: SESSION.userId, storeId: SESSION.storeId })
+        });
+        const data = await res.json();
+        thinkEl.innerHTML = res.ok
+          ? _renderHazardText(data.reply || '')
+          : `⚠ ${data.error || 'Request failed'}`;
+      } catch (err) {
+        thinkEl.innerHTML = `⚠ ${err.message}`;
+      }
+      document.getElementById('chatMessages').scrollTop = 99999;
+    }, true /* capture phase */);
+    // ── End hazard intercept ────────────────────────────────────────────────
+
     async function generatePDF(aiMode = false) {
       const btn = document.querySelector('[onclick="generatePDF()"]');
       if (btn) btn.disabled = true;

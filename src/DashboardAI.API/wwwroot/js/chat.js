@@ -98,6 +98,9 @@ let state = {
     currentFieldRequired: true, // false when the next checklist field is optional (skip chip shown)
     lastSuggestedQuestions: [], // most recent suggestion pills shown for a field
     lastSuggestionFieldId: null, // fieldID associated with lastSuggestedQuestions
+    _chemicalMode: false,          // true when chemical SDS mode is locked
+    _policyMode: false,            // true when WHS policy mode is locked
+    _hazardMode: false,            // true when WHS hazard report mode is locked
     chatConfirmedFieldIds: []  // field IDs explicitly answered by the user during THIS chat session
                                // (not pre-filled defaults from SP); passed to the server on every call
                                // so the AI knows which fields are truly answered vs need confirmation
@@ -146,6 +149,54 @@ function trackWhisper(durationSeconds) {
 function updateCostDisplay() {
     const el = document.getElementById('panelCost');
     if (el) el.textContent = `$${state.sessionCost.totalUSD.toFixed(4)}`;
+}
+
+// ── Chemical mode helpers ────────────────────────────────────────────────────
+function enterChemicalMode() {
+    state._chemicalMode = true;
+    const banner = document.getElementById('chem-mode-banner');
+    if (banner) banner.classList.add('active');
+}
+
+function exitChemicalMode() {
+    state._chemicalMode = false;
+    const banner = document.getElementById('chem-mode-banner');
+    if (banner) banner.classList.remove('active');
+    if (typeof resetChemicalChatMemory === 'function') resetChemicalChatMemory();
+    addMessage('assistant', 'Chemical SDS mode ended. How else can I help you?');
+    scrollToBottom();
+}
+
+// ── Policy mode helpers ───────────────────────────────────────────────────────
+function enterPolicyMode() {
+    state._policyMode = true;
+    const banner = document.getElementById('policy-mode-banner');
+    if (banner) banner.classList.add('active');
+}
+
+function exitPolicyMode() {
+    state._policyMode = false;
+    const banner = document.getElementById('policy-mode-banner');
+    if (banner) banner.classList.remove('active');
+    if (typeof resetPolicyChatMemory === 'function') resetPolicyChatMemory();
+    addMessage('assistant', 'Policy mode ended. How else can I help you?');
+    scrollToBottom();
+}
+
+// ── Hazard mode helpers ───────────────────────────────────────────────────────
+function enterHazardMode() {
+    state._hazardMode = true;
+    const banner = document.getElementById('hazard-mode-banner');
+    if (banner) banner.classList.add('active');
+}
+
+function exitHazardMode() {
+    state._hazardMode = false;
+    const banner = document.getElementById('hazard-mode-banner');
+    if (banner) banner.classList.remove('active');
+    if (typeof resetHazardChatMemory === 'function') resetHazardChatMemory();
+    addMessage('assistant', 'Hazard report mode ended. How else can I help you?');
+    scrollToBottom();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -199,10 +250,9 @@ function saveTranscript() {
     };
     _updateSidebarItem(transcript);
     renderSidebarChats();
-    // Fire-and-forget database save — skip for dashboard-only sessions (negative pseudo-ID)
-    if (transcript.regOthId > 0) {
-        _saveTranscriptToDb(transcript);
-    }
+    // Dashboard and form sessions both go to the DB.
+    // Dashboards use IsDashboard=true; the backend handles them via TranscriptID.
+    _saveTranscriptToDb(transcript);
 }
 
 // ── chatConfirmedFieldIds helpers ───────────────────────────────────────────
@@ -238,7 +288,8 @@ function markFieldsConfirmed(extractedFields) {
 
 /**
  * Save a transcript to the database (upsert via POST /api/chat-transcript).
- * Non-blocking — errors are logged but never thrown.
+ * Returns the parsed response JSON (or null on failure).
+ * For dashboard first-saves, the response includes transcriptID which the caller uses to update state.regOthId.
  */
 async function _saveTranscriptToDb(transcript) {
     try {
@@ -248,7 +299,7 @@ async function _saveTranscriptToDb(transcript) {
                 ? Math.round((transcript.completionPercentage / 100) * transcript.totalFieldCount)
                 : (state.filledFields ? state.filledFields.length : 0);
 
-        await fetch(TRANSCRIPT_API_URL, {
+        const res = await fetch(TRANSCRIPT_API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -263,11 +314,15 @@ async function _saveTranscriptToDb(transcript) {
                 completionPercentage: transcript.completionPercentage,
                 totalFieldCount:      transcript.totalFieldCount,
                 answeredFieldCount:   answeredCount,
-                createdAt:            transcript.createdAt
+                createdAt:            transcript.createdAt,
+                isDashboard:          transcript.isDashboard || false
             })
         });
+        if (!res.ok) return null;
+        return await res.json();
     } catch(e) {
         console.warn('[Transcript] DB save failed:', e);
+        return null;
     }
 }
 
@@ -292,7 +347,8 @@ async function _loadSidebarFromDb() {
             createdAt:           t.createdAt,
             isComplete:          t.isComplete,
             completionPercentage: t.completionPercentage,
-            totalFieldCount:     t.totalFieldCount
+            totalFieldCount:     t.totalFieldCount,
+            isDashboard:         t.isDashboard || false
         }));
         renderSidebarChats();
     } catch(e) {
@@ -479,6 +535,21 @@ async function openSavedChat(regOthId) {
     if (!entry) return;
 
     if (entry.isDashboard || regOthId < 0) {
+        // Chemical chat sessions are resumable despite using the dashboard ID scheme
+        if ((entry.chatName || '').startsWith('Chemical Chat') && typeof _resumeChemicalSession === 'function') {
+            _resumeChemicalSession(regOthId, entry);
+            return;
+        }
+        // Policy chat sessions are resumable despite using the dashboard ID scheme
+        if ((entry.chatName || '').startsWith('Policy Chat') && typeof _resumePolicySession === 'function') {
+            _resumePolicySession(regOthId, entry);
+            return;
+        }
+        // Hazard chat sessions are resumable despite using the dashboard ID scheme
+        if ((entry.chatName || '').startsWith('Hazard Chat') && typeof _resumeHazardSession === 'function') {
+            _resumeHazardSession(regOthId, entry);
+            return;
+        }
         // Dashboard-only session — always read-only
         _loadReadOnlyTranscript(regOthId, entry);
     } else if (!entry.isComplete) {
@@ -526,9 +597,9 @@ async function _loadReadOnlyTranscriptAsync(regOthId, entry) {
     state.awaitingHeaderField = false;
     state._headerFieldCallback = null;
 
-    // Restore progress widget — try DB first, then localStorage
+    // Restore progress widget — try DB first (handles both form and dashboard sessions)
     const dbTranscript = await _loadTranscriptFromDb(regOthId);
-    const savedTranscript = dbTranscript || loadTranscript(regOthId);
+    let savedTranscript = dbTranscript || loadTranscript(regOthId);
     // Restore regTypeId from saved transcript
     if (savedTranscript && savedTranscript.regTypeId) {
         state.regTypeId = savedTranscript.regTypeId;
@@ -567,7 +638,10 @@ async function _loadReadOnlyTranscriptAsync(regOthId, entry) {
     // Render transcript messages — use already-loaded transcript (DB or localStorage)
     const transcript = savedTranscript;
     if (transcript && transcript.messages && transcript.messages.length > 0) {
-        transcript.messages.forEach(msg => addMessage(msg.role, msg.content));
+        transcript.messages
+            .filter(msg => !(msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.includes('typing-thinking-wrap')))
+            .filter(msg => !(msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.includes('sds-info-form')))
+            .forEach(msg => addMessage(msg.role, msg.content));
     } else {
         addMessage('assistant', `This is a completed session: **${entry.chatName || entry.templateName}**`);
     }
@@ -604,7 +678,7 @@ async function _loadReadOnlyTranscriptAsync(regOthId, entry) {
                     ${dashUrl ? `<div class="col-12 col-sm-6"><button class="btn btn-primary w-100" onclick="if(parent.loadDashboardAI)parent.loadDashboardAI('${dashUrl}');else window.open('${dashUrl}','_blank')">
                         <i class="ph-thin ph-arrow-counter-clockwise" style="margin-right:4px"></i>Reopen Dashboard
                     </button></div>` : ''}
-                    <div class="col-12 col-sm-6"><button class="btn btn-outline-primary w-100" onclick="newChatFromSidebar()">
+                    <div class="col-12 col-sm-6"><button class="btn btn-outline-secondary w-100" onclick="newChatFromSidebar()">
                         <i class="ph-thin ph-plus" style="margin-right:4px"></i>New Chat
                     </button></div>
                 </div>
@@ -620,7 +694,7 @@ async function _loadReadOnlyTranscriptAsync(regOthId, entry) {
                     <div class="col-12 col-sm-6"><button class="btn btn-primary w-100" onclick="window.open('${formUrl}','_blank')">
                         <i class="ph-thin ph-arrow-square-out" style="margin-right:4px"></i>Open Form
                     </button></div>
-                    <div class="col-12 col-sm-6"><button class="btn btn-outline-primary w-100" onclick="newChatFromSidebar()">
+                    <div class="col-12 col-sm-6"><button class="btn btn-outline-secondary w-100" onclick="newChatFromSidebar()">
                         <i class="ph-thin ph-plus" style="margin-right:4px"></i>New Chat
                     </button></div>
                 </div>
@@ -1863,11 +1937,92 @@ async function checkAndHandleSuggestionsIntent(message) {
 }
 
 /**
+ * Executes the actual dashboard generation API call.
+ * Called either directly from checkAndHandleDashboardIntent (no match found)
+ * or from the "Create new" button after a duplicate suggestion is shown.
+ */
+async function _proceedCreateDashboard() {
+    const message = state._pendingDashboardMessage;
+    if (!message) return;
+    state._pendingDashboardMessage = null;
+
+    // Remove the choice-button row from the last assistant bubble
+    const lastBubble = document.querySelector('#messagesArea .message.assistant:last-of-type .suggestions');
+    if (lastBubble) lastBubble.remove();
+
+    showTypingIndicator(message);
+
+    const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
+    try {
+        const genRes = await fetch(dashBase + '/api/dashboard/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: message, storeId: CONFIG.storeId, userId: String(CONFIG.userId) })
+        });
+
+        removeTypingIndicator();
+
+        if (!genRes.ok) {
+            if (!state.sessionStarted) return;
+            const err = await genRes.json().catch(() => ({}));
+            addMessage('assistant', `Could not generate dashboard: ${err.error || 'Unknown error'}`);
+            return;
+        }
+
+        const result = await genRes.json();
+        const url = dashBase + result.redirectUrl;
+
+        addMessage('assistant', `✅ Dashboard created! [Click here to view it](${url})`);
+
+        if (!state.regOthId) {
+            // regOthId = 0 signals a brand-new dashboard — backend will INSERT and return TranscriptID
+            state.regOthId       = 0;
+            const generatedName  = await generateSessionName(message, 'Dashboard');
+            state.chatName       = state.chatName || generatedName;
+            state.templateName   = state.templateName || generatedName;
+            state._chatCreatedAt = state._chatCreatedAt || new Date().toISOString();
+            state.sessionStarted = true;
+        }
+        state._isDashboardSession = true;
+
+        // First save: await so we can capture the TranscriptID returned by the backend
+        const transcript = {
+            regOthId:            state.regOthId,   // 0 = new
+            chatName:            state.chatName,
+            templateName:        state.templateName,
+            internalNo:          state.internalNo || null,
+            messages:            state.displayMessages,
+            createdAt:           state._chatCreatedAt,
+            isComplete:          false,
+            completionPercentage: 0,
+            totalFieldCount:     0,
+            answeredFieldCount:  0,
+            isDashboard:         true
+        };
+        _updateSidebarItem(transcript);
+        renderSidebarChats();
+        const dbRes = await _saveTranscriptToDb(transcript);
+        if (dbRes && dbRes.transcriptID > 0) {
+            state.regOthId = -dbRes.transcriptID;  // negative = dashboard keyed on TranscriptID
+            _updateSidebarItem({ ...transcript, regOthId: state.regOthId });
+            renderSidebarChats();
+        }
+
+        state._initialMessageBubbleShown = false;
+        parent.loadDashboardAI(url);
+    } catch (err) {
+        removeTypingIndicator();
+        console.error('[_proceedCreateDashboard]', err);
+    }
+}
+
+/**
  * Uses OpenAI to decide if the user wants to create a dashboard or report.
  * If yes, calls the DashboardAI generate endpoint and shows a link to the result.
  * Returns true if handled so sendMessage can skip the normal pipeline.
  */
 async function checkAndHandleDashboardIntent(message) {
+    console.log('[Dashboard] checkAndHandleDashboardIntent called with:', message);
     if (!CONFIG.openaiApiKey) return false;
     try {
         const ctrl = new AbortController();
@@ -1899,60 +2054,251 @@ async function checkAndHandleDashboardIntent(message) {
         const answer = intentData.choices?.[0]?.message?.content?.trim().toLowerCase();
         if (answer !== 'yes') return false;
 
-        // Show user message then a typing indicator
+        // Check if a similar dashboard already exists and offer to open it
+        const existingDashboards = _sidebarItems.filter(x => x.isDashboard);
+        if (existingDashboards.length > 0) {
+            try {
+                const nameList = existingDashboards
+                    .map((d, i) => `${i + 1}. ${d.chatName || d.templateName || 'Untitled Dashboard'}`)
+                    .join('\n');
+                const matchRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+                    signal: AbortSignal.timeout(4000),
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        max_tokens: 5,
+                        temperature: 0,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Dashboard matcher. Reply ONLY with the NUMBER of the best-matching dashboard ' +
+                                         'if the user request is clearly about the same topic as one of the listed dashboards. ' +
+                                         'Otherwise reply "0". Single number only, no other text.'
+                            },
+                            {
+                                role: 'user',
+                                content: `User request: "${message}"\n\nExisting dashboards:\n${nameList}\n\nMatch number (or 0):`
+                            }
+                        ]
+                    })
+                });
+                if (matchRes.ok) {
+                    const matchData = await matchRes.json();
+                    trackCost('gpt-4o-mini', matchData.usage);
+                    const matchIdx = parseInt((matchData.choices?.[0]?.message?.content || '0').trim(), 10) - 1;
+                    console.log('[Dashboard:Intent] AI match reply:', matchData.choices?.[0]?.message?.content, '→ matchIdx:', matchIdx);
+                    if (matchIdx >= 0 && matchIdx < existingDashboards.length) {
+                        const matched = existingDashboards[matchIdx];
+                        const matchedName = escapeHtml(matched.chatName || matched.templateName || 'Existing Dashboard');
+                        console.log('[Dashboard:Intent] AUTO-OPENING:', matchedName);
+                        addMessage('user', message);
+                        state._initialMessageBubbleShown = true;
+                        state._pendingDashboardMessage = message;
+                        addMessage('assistant',
+                            `<div>Opening <strong>${matchedName}</strong>&hellip;</div>` +
+                            `<div style="margin-top:8px">` +
+                            `<button class="btn btn-outline-secondary btn-sm" onclick="state._pendingDashboardMessage='${message.replace(/'/g, "\\'")}';\_proceedCreateDashboard()">` +
+                            `<i class="ph-thin ph-plus" style="margin-right:4px"></i>Create new dashboard instead</button>` +
+                            `</div>`
+                        );
+                        openSavedChat(matched.regOthId);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.warn('[DashboardIntent] similarity check failed, proceeding with create:', e);
+            }
+        }
+
+        // No existing match — proceed straight to generation
         addMessage('user', message);
         state._initialMessageBubbleShown = true;
-        showTypingIndicator(message);
-
-        const dashBase = 'https://beta.whsmonitor.com.au/dashboardv2';
-        const genRes = await fetch(dashBase + '/api/dashboard/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt:  message,
-                storeId: CONFIG.storeId,
-                userId:  String(CONFIG.userId)
-            })
-        });
-
-        removeTypingIndicator();
-
-        if (!genRes.ok) {
-            // If no session exists yet, fall through to the normal template-chat flow
-            // so the user's message still starts an intelligent session.
-            if (!state.sessionStarted) {
-                return false;
-            }
-            const err = await genRes.json().catch(() => ({}));
-            addMessage('assistant', `Could not generate dashboard: ${err.error || 'Unknown error'}`);
-            return true;
-        }
-
-        const result = await genRes.json();
-        const url = dashBase + result.redirectUrl;
-
-        // Add an assistant message so the exchange is saved in the transcript
-        addMessage('assistant', `✅ Dashboard created! [Click here to view it](${url})`);
-
-        // If no form session, create a pseudo-ID so this chat appears in the sidebar
-        if (!state.regOthId) {
-            state.regOthId     = -Date.now();  // negative = dashboard-only, never a real form ID
-            state.chatName     = state.chatName || 'Dashboard';
-            state.templateName = state.templateName || 'Dashboard';
-            state._chatCreatedAt = state._chatCreatedAt || new Date().toISOString();
-            state.sessionStarted = true;
-        }
-        // Mark as dashboard so sidebar shows the right badge and skips DB save
-        state._isDashboardSession = true;
-        saveTranscript();
-
-        state._initialMessageBubbleShown = false; // reset so next message works correctly
-        parent.loadDashboardAI(url);
+        state._pendingDashboardMessage = message;
+        await _proceedCreateDashboard();
 
         return true;
     } catch (err) {
         if (err.name === 'AbortError') return false;
         console.error('[DashboardIntent]', err);
+        return false;
+    }
+}
+
+// =============================================================================
+// ACTION FUNCTIONS — called by chat-router.js ai-dispatch after classification.
+// These contain only the "do the thing" logic, with no internal AI classification.
+// =============================================================================
+
+/** Opens the existing form record in a new tab. */
+function _doFormOpenAction(message) {
+    const url = getFormUrl();
+    addMessage('user', message);
+    const reply = 'Opening the form for you now. It will load in a new tab.';
+    addMessage('assistant', reply);
+    if (state.voiceMode) speakText(reply);
+    window.open(url, '_blank');
+}
+
+/** Shows contextual suggestions — reuses cached pills or generates new ones. */
+async function _doSuggestionsAction(message) {
+    try {
+        // Prefer current in-context options if available (better than generating generic AI suggestions)
+        const reusableSuggestions = Array.isArray(state.lastSuggestedQuestions)
+            ? state.lastSuggestedQuestions.filter(Boolean).slice(0, 8)
+            : [];
+        const sameFieldSuggestions = reusableSuggestions.length > 0
+            && String(state.lastSuggestionFieldId || '') === String(state.currentFieldID || '');
+
+        if (sameFieldSuggestions) {
+            addMessage('user', message);
+            addMessage('assistant', 'Here are the available options for this question:');
+            addSuggestions(reusableSuggestions);
+            if (state.voiceMode) speakText('Here are the available options for this question.');
+            return true;
+        }
+
+        // Generate contextual suggestions via OpenAI
+        const recentHistory = state.conversationHistory.slice(-6)
+            .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+            .join('\n');
+
+        const knownFieldFacts = Array.from(state.extractedFieldsMap.values())
+            .slice(-8)
+            .map(f => `${f.fieldName || f.fieldID || 'Field'}: ${f.extractedValue || f.value || ''}`)
+            .filter(Boolean)
+            .join('; ') || 'none yet';
+
+        const currentFieldContext = `Current field ID: ${state.currentFieldID || 'n/a'}; Type: ${state.currentFieldType || 'n/a'}; Required: ${state.currentFieldRequired === false ? 'no' : 'yes'}`;
+
+        const profileContext = Object.entries(CONFIG.userProfile || {})
+            .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('; ') || 'none';
+
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 6000);
+
+        const suggRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 120,
+                temperature: 0.7,
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are a helpful assistant for a workplace health & safety app. ` +
+                                 `The user is filling in a form called "${state.templateName || 'WHS form'}". ` +
+                                 `Use available context first (current field + known captured values) and avoid generic suggestions. ` +
+                                 `If clear options are implied by context, suggest those options directly. ` +
+                                 `Based on the conversation below, suggest 3 short, specific things the user could say or answer next. ` +
+                                 `Return ONLY a JSON array of 3 strings, no explanation. Example: ["Yes, I was injured", "No injuries occurred", "I need more information"]`
+                    },
+                    {
+                        role: 'user',
+                        content: `Conversation:\n${recentHistory}\n\n${currentFieldContext}\nKnown captured fields: ${knownFieldFacts}\nUser profile: ${profileContext}`
+                    }
+                ]
+            })
+        });
+        clearTimeout(t);
+
+        if (!suggRes.ok) return false;
+        const suggData = await suggRes.json();
+        trackCost('gpt-4o-mini', suggData.usage);
+        const raw = suggData.choices?.[0]?.message?.content?.trim();
+
+        let suggestions;
+        try {
+            suggestions = JSON.parse(raw);
+        } catch(e) {
+            const match = raw?.match(/\[.*\]/s);
+            suggestions = match ? JSON.parse(match[0]) : null;
+        }
+
+        if (!Array.isArray(suggestions) || suggestions.length === 0) return false;
+
+        addMessage('user', message);
+        addMessage('assistant', 'Here are some suggestions based on your current form context:');
+        addSuggestions(suggestions);
+        if (state.voiceMode) speakText('Here are some suggestions based on your current form context.');
+        return true;
+    } catch(e) {
+        return false;
+    }
+}
+
+/** Checks for an existing similar dashboard, offers to open it or creates a new one. */
+async function _doDashboardAction(message) {
+    console.log('[Dashboard] _doDashboardAction called with:', message);
+    try {
+        const existingDashboards = _sidebarItems.filter(x => x.isDashboard);
+        console.log('[Dashboard] existing dashboards:', existingDashboards.map(d => d.chatName || d.templateName));
+        if (existingDashboards.length > 0) {
+            try {
+                const nameList = existingDashboards
+                    .map((d, i) => `${i + 1}. ${d.chatName || d.templateName || 'Untitled Dashboard'}`)
+                    .join('\n');
+                const matchRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+                    signal: AbortSignal.timeout(4000),
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        max_tokens: 5,
+                        temperature: 0,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Dashboard matcher. Reply ONLY with the NUMBER of the best-matching dashboard ' +
+                                         'if the user request is clearly about the same topic as one of the listed dashboards. ' +
+                                         'Otherwise reply "0". Single number only, no other text.'
+                            },
+                            {
+                                role: 'user',
+                                content: `User request: "${message}"\n\nExisting dashboards:\n${nameList}\n\nMatch number (or 0):`
+                            }
+                        ]
+                    })
+                });
+                if (matchRes.ok) {
+                    const matchData = await matchRes.json();
+                    trackCost('gpt-4o-mini', matchData.usage);
+                    const matchIdx = parseInt((matchData.choices?.[0]?.message?.content || '0').trim(), 10) - 1;
+                    console.log('[Dashboard:Action] AI match reply:', matchData.choices?.[0]?.message?.content, '→ matchIdx:', matchIdx);
+                    if (matchIdx >= 0 && matchIdx < existingDashboards.length) {
+                        const matched = existingDashboards[matchIdx];
+                        const matchedName = escapeHtml(matched.chatName || matched.templateName || 'Existing Dashboard');
+                        console.log('[Dashboard:Action] AUTO-OPENING:', matchedName);
+                        addMessage('user', message);
+                        state._initialMessageBubbleShown = true;
+                        state._pendingDashboardMessage = message;
+                        addMessage('assistant',
+                            `<div>Opening <strong>${matchedName}</strong>&hellip;</div>` +
+                            `<div style="margin-top:8px">` +
+                            `<button class="btn btn-outline-secondary btn-sm" onclick="state._pendingDashboardMessage='${message.replace(/'/g, "\\'")}';\_proceedCreateDashboard()">` +
+                            `<i class="ph-thin ph-plus" style="margin-right:4px"></i>Create new dashboard instead</button>` +
+                            `</div>`
+                        );
+                        openSavedChat(matched.regOthId);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.warn('[DashboardAction] similarity check failed, proceeding with create:', e);
+            }
+        }
+
+        addMessage('user', message);
+        state._initialMessageBubbleShown = true;
+        state._pendingDashboardMessage = message;
+        await _proceedCreateDashboard();
+        return true;
+    } catch (err) {
+        console.error('[DashboardAction]', err);
         return false;
     }
 }
@@ -1968,186 +2314,60 @@ async function sendMessage() {
     // Mark as processing so voice loop doesn't restart during API call
     state.isProcessing = true;
 
-    // ── Supplementary card handler — locks chat to supp card until cont/skip
-    if (typeof state._suppChatHandler === 'function') {
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        if (state.voiceMode) finalTranscript = '';
-        state.isProcessing = false;
-        addMessage('user', message);
-        scrollToBottom();
-        await state._suppChatHandler(message);
-        return;
-    }
-
-    // ── Capture chat/session name if we're waiting for it ──────────────────
-    if (state.awaitingChatName) {
-        activeInput.value = '';
-        if (state.voiceMode) finalTranscript = '';
-        state.isProcessing = false;
-        await handleChatNameResponse(message);
-        return;
-    }
-
-    // Hard lock: while header/details collection is active, do not allow
-    // normal checklist send flow to run. Only the active header callback may consume input.
-    if (state._collectingHeaderDetails && !(state.awaitingHeaderField && state._headerFieldCallback)) {
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        if (state.voiceMode) finalTranscript = '';
-        state.isProcessing = false;
-        addMessage('assistant', 'Let’s finish the details section first. Please answer the current details question.');
-        scrollToBottom();
-        return;
-    }
-
-    // ── Capture header field answer if we're waiting for it ──────────────
-    if (state.awaitingHeaderField && state._headerFieldCallback) {
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        if (state.voiceMode) finalTranscript = '';
-        document.querySelectorAll('.hf-opts button').forEach(b => b.disabled = true);
-        state.awaitingHeaderField = false;
-        const _hdrCb = state._headerFieldCallback;
-        state._headerFieldCallback = null;
-        state.isProcessing = false;
-        addMessage('user', message);
-        scrollToBottom();
-        await _hdrCb(message, message, false);
-        return;
-    }
-
-    // Check if awaiting template selection and try to match voice input
-    if (state.awaitingTemplateSelection && state.availableTemplates.length > 0) {
-        const matchedTemplate = matchVoiceToTemplate(message);
-        if (matchedTemplate) {
-            // Clear input first
-            activeInput.value = '';
-            activeInput.style.height = 'auto';
-            if (state.voiceMode) {
-                finalTranscript = '';
-            }
-
-            // Select the template
-            await selectTemplate(
-                matchedTemplate.templateID,
-                matchedTemplate.templateName,
-                matchedTemplate.estimatedFields || 0,
-                matchedTemplate
-            );
-            state.isProcessing = false;
-            return;
-        }
-    }
-
-    // Hide empty state and show chat input
+    // Show UI containers (safe to run early — idempotent)
     document.getElementById('emptyState').style.display = 'none';
     document.getElementById('messagesArea').classList.add('active');
     document.getElementById('chatInputArea').style.display = 'block';
 
-    // Check if the user is asking to open/view the form (only once a session exists)
-    if (state.sessionStarted && state.regOthId) {
-        const formHandled = await checkAndHandleFormIntent(message);
-        if (formHandled) {
-            activeInput.value = '';
-            activeInput.style.height = 'auto';
-            if (state.voiceMode) finalTranscript = '';
-            state.isProcessing = false;
-            return;
-        }
-    }
+    // ── Route through all registered process handlers (see chat-router.js) ──
+    const routedTo = await ChatRouter.route(message);
 
-    if (isAwaitingCompletion()) {
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        if (state.voiceMode) finalTranscript = '';
-        promptCompletion();
-        state.isProcessing = false;
-        return;
-    }
+    if (!routedTo) {
+        // ── Fallthrough: form filling ──────────────────────────────────────────
+        // No handler claimed the message — treat it as a form field answer
+        // (or the very first message that starts a new intelligent session).
+        if (!state.sessionStarted) {
+            await startIntelligentSession(message);
+        } else {
+            // Special handling for map fields — map must always be confirmed via
+            // the "Confirm Location" button; never auto-extract from typed input.
+            if (state.currentFieldType === '10016' &&
+                (message.toLowerCase() === 'yes' || message.toLowerCase() === 'confirm' ||
+                 message.toLowerCase() === 'correct' || message.toLowerCase() === "that's correct")) {
 
-    // Check if the user is asking for suggestions
-    if (state.sessionStarted) {
-        const suggestionsHandled = await checkAndHandleSuggestionsIntent(message);
-        if (suggestionsHandled) {
-            activeInput.value = '';
-            activeInput.style.height = 'auto';
-            if (state.voiceMode) finalTranscript = '';
-            state.isProcessing = false;
-            if (state.voiceMode && !state.isSpeaking && !state.isListening) {
-                setTimeout(() => startListening(), 600);
-            }
-            return;
-        }
-    }
-
-    // Check if the user wants to create a dashboard or report
-    // Skip entirely once a real form session is in progress — never interrupt an active form
-    const dashboardHandled = (state.sessionStarted && state.regOthId > 0)
-        ? false
-        : await checkAndHandleDashboardIntent(message);
-    if (dashboardHandled) {
-        activeInput.value = '';
-        activeInput.style.height = 'auto';
-        if (state.voiceMode) finalTranscript = '';
-        state.isProcessing = false;
-        if (state.voiceMode && !state.isSpeaking && !state.isListening) {
-            setTimeout(() => startListening(), 600);
-        }
-        return;
-    }
-
-    // Check if this is the first message
-    if (!state.sessionStarted) {
-        await startIntelligentSession(message);
-    } else {
-        // Special handling for map fields — map must always be confirmed via the "Confirm Location"
-        // button. Never auto-extract from the map state based on a typed "Yes"/"Confirm" message.
-        if (state.currentFieldType === '10016' && 
-            (message.toLowerCase() === 'yes' || message.toLowerCase() === 'confirm' || 
-             message.toLowerCase() === 'correct' || message.toLowerCase() === "that's correct")) {
-            
-            if (state.lastMapData) {
-                // User already clicked "Confirm Location" — send the stored confirmed data
-                console.log('User confirmed map location via input, sending stored map data:', state.lastMapData);
-                await sendChatMessage(state.lastMapData);
-                state.lastMapData = null;
+                if (state.lastMapData) {
+                    // User already clicked "Confirm Location" — send the stored confirmed data
+                    console.log('User confirmed map location via input, sending stored map data:', state.lastMapData);
+                    await sendChatMessage(state.lastMapData);
+                    state.lastMapData = null;
+                } else {
+                    // Map still visible but not confirmed — require the button
+                    await sendChatMessage(message);
+                }
+            } else if (state.currentFieldType === '10020' || state.currentFieldType === '10026') {
+                // Dataset Dropdown (single) — {"Value":"0","Text":"user input"}
+                const datasetJson = JSON.stringify({ Value: "0", Text: message });
+                await sendChatMessage(datasetJson, message);
+            } else if (state.currentFieldType === '10037') {
+                // Dataset Multi-select — split comma-delimited input into arrays
+                // e.g. "Vik, Nick, David" — {"Value":[0,0,0],"Text":["Vik","Nick","David"]}
+                const items = message.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                const multiJson = JSON.stringify({ Value: items.map(() => 0), Text: items });
+                await sendChatMessage(multiJson, message);
+            } else if (state.currentFieldType === '10023') {
+                // Substatement list box — multi-select stored with tilde (~)
+                const items = message.split(/[,;~]/).map(s => s.trim()).filter(s => s.length > 0);
+                await sendChatMessage(items.join('~') || message, message);
             } else {
-                // Map still visible but not confirmed — require user to click "Confirm Location"
                 await sendChatMessage(message);
             }
-        } else if (state.currentFieldType === '10020' || state.currentFieldType === '10026') {
-            // Dataset Dropdown (single) — {"Value":"0","Text":"user input"}
-            const datasetJson = JSON.stringify({ Value: "0", Text: message });
-            await sendChatMessage(datasetJson, message);
-        } else if (state.currentFieldType === '10037') {
-            // Dataset Multi-select — split comma-delimited input into arrays
-            // e.g. "Vik Sathivail, Nick, David" → {"Value":[0,0,0],"Text":["Vik Sathivail","Nick","David"]}
-            const items = message.split(',').map(s => s.trim()).filter(s => s.length > 0);
-            const multiJson = JSON.stringify({
-                Value: items.map(() => 0),
-                Text: items
-            });
-            await sendChatMessage(multiJson, message);
-        } else if (state.currentFieldType === '10023') {
-            // Substatement list box — multi-select stored with tilde (~)
-            const items = message.split(/[,;~]/).map(s => s.trim()).filter(s => s.length > 0);
-            await sendChatMessage(items.join('~') || message, message);
-        } else {
-            await sendChatMessage(message);
         }
     }
 
-    // Clear input
+    // ── Cleanup (runs for all paths, including routed ones) ───────────────────
     activeInput.value = '';
     activeInput.style.height = 'auto';
-
-    // Reset transcript if in voice mode
-    if (state.voiceMode) {
-        finalTranscript = '';
-    }
-
-    // Done processing - speakText will handle restarting the listener
+    if (state.voiceMode) finalTranscript = '';
     state.isProcessing = false;
 
     // Safety: if voice mode is on and TTS isn't running, restart listening now
@@ -2370,6 +2590,12 @@ async function promptManualTemplateSelection() {
         const topTemplates = rankedTemplates.slice(0, 8);
         const moreTemplates = rankedTemplates.slice(8);
 
+        if (rankedTemplates.length === 1) {
+            const solo = rankedTemplates[0];
+            selectTemplate(solo.templateID, solo.templateName, solo.estimatedFields || 0, solo);
+            return;
+        }
+
         addMessage('assistant', 'Please choose which template you want to use. I\'ve put the most relevant ones first.');
         state.additionalTemplateChoices = moreTemplates;
         addTemplateList(topTemplates, moreTemplates);
@@ -2426,6 +2652,12 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
             // Template selection
             if (data.needsTemplateSelection && data.templateChoices && data.templateChoices.length > 0) {
                 trackServerCost(data.tokenUsage);
+                const allChoices = [...data.templateChoices, ...(data.additionalTemplateChoices || [])];
+                if (allChoices.length === 1) {
+                    const solo = allChoices[0];
+                    selectTemplate(solo.templateID, solo.templateName, solo.estimatedFields || 0, solo);
+                    return;
+                }
                 addMessage('assistant', data.aiMessage);
                 state.additionalTemplateChoices = data.additionalTemplateChoices || [];
                 addTemplateList(data.templateChoices, state.additionalTemplateChoices);
@@ -2485,10 +2717,10 @@ async function startIntelligentSession(initialMessage, selectedTemplateID = null
 async function sendChatMessage(message, displayText) {
     addMessage('user', displayText || message);
 
-    // Add to conversation history
+    // Add to conversation history — use displayText if provided so history stays meaningful
     state.conversationHistory.push({
         role: 'user',
-        content: message
+        content: displayText || message
     });
 
     showTypingIndicator(message);
@@ -2521,6 +2753,13 @@ async function sendChatMessage(message, displayText) {
 
         if (data.success) {
             trackServerCost(data.tokenUsage);
+
+            console.group('%c[CHAT RESPONSE]', 'color:#2196F3;font-weight:bold');
+            console.log('currentFieldID:', data.currentFieldID, '| type:', data.currentFieldType);
+            console.log('clusterFormFields:', data.clusterFormFields ? JSON.parse(JSON.stringify(data.clusterFormFields)) : null);
+            console.log('currentFieldDynamicFilter:', data.currentFieldDynamicFilter);
+            console.log('aiMessage:', data.aiMessage);
+            console.groupEnd();
 
             // Store current field info
             state.currentFieldID = data.currentFieldID;
@@ -2555,10 +2794,11 @@ async function sendChatMessage(message, displayText) {
                     const existingFileUpload = document.querySelector('.file-upload-container');
                     const existingMapContainer = document.querySelector('.map-container');
                     const existingDynamicData = document.querySelector('.dynamic-data-container');
-                    
+                    const existingClusterCard = document.querySelector('.cluster-form-card');
+
                     console.log('[CLEANUP] Found file upload container:', !!existingFileUpload);
                     console.log('[CLEANUP] Found map container:', !!existingMapContainer);
-                    
+
                     if (state.currentFieldType !== '10013' && existingFileUpload) {
                         console.log('[CLEANUP] Removing file upload container');
                         existingFileUpload.remove();
@@ -2567,9 +2807,10 @@ async function sendChatMessage(message, displayText) {
                         console.log('[CLEANUP] Removing map container');
                         existingMapContainer.remove();
                     }
-                    if (state.currentFieldType !== '10020' && state.currentFieldType !== '10037' && existingDynamicData) {
-                        existingDynamicData.remove();
-                    }
+                    // Always remove stale dynamic-data widget
+                    if (existingDynamicData) existingDynamicData.remove();
+                    // Always remove stale cluster form card before potentially adding a new one
+                    if (existingClusterCard) existingClusterCard.remove();
 
                     // Show the next field's UI (file upload / dropdown / map / suggestions)
                     // Show file upload UI if current field is a file upload (Type Code 10013)
@@ -2578,7 +2819,8 @@ async function sendChatMessage(message, displayText) {
                         addFileUploadUI();
                     }
                     // Show dynamic dropdown for dataset fields (10020 single / 10037 multi)
-                    else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
+                    // Skip if clusterFormFields is present — the cluster card handles everything
+                    else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter && !(data.clusterFormFields && data.clusterFormFields.length >= 1)) {
                         addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
                     }
                     // Show map UI if current field is a map (Type Code 10016)
@@ -2671,12 +2913,44 @@ async function sendChatMessage(message, displayText) {
                     }
 
                     // Add suggestions (skip for map fields - use Confirm Location button instead)
-                    if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0 
-                        && state.currentFieldType !== '10016') {
-                        console.log('[CLEANUP] Adding suggestions');
-                        addSuggestions(data.nextSuggestedQuestions);
+                    console.log('%c[CLUSTER CHECK]', 'color:#9C27B0;font-weight:bold', 'clusterFormFields:', data.clusterFormFields, '| length:', data.clusterFormFields?.length);
+                    if (data.clusterFormFields && data.clusterFormFields.length >= 1) {
+                        // Special case: a single dataset-type field in a cluster is better served
+                        // by the dedicated dynamic data widget (full searchable dropdown with remote fetch)
+                        // rather than the cluster card's inline combo which requires dynamicFilterCondn on the DTO.
+                        const datasetCodes = new Set(['10020', '10026', '10037']);
+                        const soloClusterField = data.clusterFormFields.length === 1 ? data.clusterFormFields[0] : null;
+                        if (soloClusterField && datasetCodes.has(soloClusterField.typeCode)) {
+                            const filterCondn = soloClusterField.dynamicFilterCondn || state.currentFieldDynamicFilter;
+                            console.log('%c[CLUSTER→DYNAMIC] Solo dataset field, routing to addDynamicDataUI', 'color:#9C27B0;font-weight:bold', soloClusterField.typeCode, '| filterCondn:', !!filterCondn);
+                            if (filterCondn) {
+                                addDynamicDataUI(soloClusterField.typeCode, filterCondn);
+                            }
+                            addSkipChipIfOptional();
+                        } else {
+                            // Cluster mode: render a compact inline form card instead of suggestion chips
+                            // Skip chip is suppressed — cluster card has its own skip-all button
+                            console.log('%c[CLUSTER] Rendering cluster card with', 'color:#9C27B0;font-weight:bold', data.clusterFormFields.length, 'fields:', data.clusterFormFields.map(f => f.fieldID + ':' + f.typeCode));
+                            const _iv1 = {};
+                            const _sac = new Set(['10006','10008','10009','10017','10020','10023','10026','10037']);
+                            (data.extractedFields || []).forEach(ef => {
+                                const cf = data.clusterFormFields.find(f => f.fieldID === ef.fieldID);
+                                if (cf && _sac.has(cf.typeCode) && ef.extractedValue) {
+                                    let val = ef.extractedValue, text = ef.extractedValue;
+                                    try { const p = JSON.parse(ef.extractedValue); if (p.Value !== undefined) { val = String(p.Value); text = p.Text || val; } } catch {}
+                                    _iv1[ef.fieldID] = { value: val, text };
+                                }
+                            });
+                            addClusterFormCard(data.clusterFormFields, _iv1);
+                        }
+                    } else {
+                        if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0 
+                            && state.currentFieldType !== '10016') {
+                            console.log('[CLEANUP] Adding suggestions');
+                            addSuggestions(data.nextSuggestedQuestions);
+                        }
+                        addSkipChipIfOptional();
                     }
-                    addSkipChipIfOptional();
 
                     console.log('[CLEANUP] Field UI cleanup complete');
                 }, 50); // 50ms delay to prevent race condition
@@ -2809,7 +3083,7 @@ function promptCompletion() {
     contentDiv.className = 'message-content';
 
     const container = document.createElement('div');
-    container.style.cssText = 'padding:16px;background:#fff;border-radius:8px;border:1px solid #e5e7eb;max-width:520px;box-sizing:border-box;margin-top:10px;';
+    container.style.cssText = 'padding:16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;max-width:520px;box-sizing:border-box;margin-top:10px;';
     container.innerHTML = `
         <div style="margin-bottom:12px;font-size:14px;color:#374151;">${escapeHtml(bodyText)}</div>
         ${total > 0 ? `<div style="margin-bottom:14px;">
@@ -2939,6 +3213,24 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function enhanceTables(container) {
+    if (typeof jQuery === 'undefined' || !jQuery.fn.DataTable) return;
+    container.querySelectorAll('table').forEach(table => {
+        if (jQuery.fn.DataTable.isDataTable(table)) return;
+        if (!table.id) table.id = 'dt-' + Math.random().toString(36).slice(2, 9);
+        jQuery(table).DataTable({
+            dom: 'Bfrtip',
+            buttons: [
+                { extend: 'csv', text: '\u2B07 Export CSV' }
+            ],
+            paging: false,
+            searching: false,
+            info: false,
+            ordering: true
+        });
+    });
+}
+
 function addMessage(role, content) {
     // Track every displayed message for save/restore (skip during replay)
     if (!state._replayMode) {
@@ -2968,8 +3260,10 @@ function addMessage(role, content) {
         contentDiv.innerHTML = formatMapJSON(content);
     } else if (role === 'assistant' && typeof content === 'string' && /<(div|input|button|textarea)\b/i.test(content)) {
         contentDiv.innerHTML = content;
+        enhanceTables(contentDiv);
     } else if (role === 'assistant' && typeof marked !== 'undefined') {
         contentDiv.innerHTML = marked.parse(content);
+        enhanceTables(contentDiv);
     } else {
         contentDiv.textContent = content;
     }
@@ -3358,7 +3652,7 @@ function _skipChipButtonHtml({ id = '', className = '', label = 'Skip (optional)
     const idAttr    = id        ? `id="${id}"`         : '';
     const extraCls  = className ? ` ${className}`       : '';
     // extraStyle ignored — Bootstrap handles it; extraAttrs still forwarded (e.g. onclick)
-    return `<button ${idAttr} class="btn btn-outline-primary btn-sm${extraCls}" ${extraAttrs || ''}>${escapeHtml(label)}</button>`;
+    return `<button ${idAttr} class="btn btn-outline-secondary btn-sm${extraCls}" ${extraAttrs || ''}>${escapeHtml(label)}</button>`;
 }
 
 /**
@@ -3433,6 +3727,570 @@ function addSuggestions(suggestions) {
     }
 
     lastMessage.querySelector('.message-content').appendChild(wrapper);
+    scrollToBottom();
+}
+
+/**
+ * Renders a compact inline form card for cluster-mode questions.
+ * Each field gets an appropriately-typed input; submitting all at once sends a
+ * structured message that the server extracts in cluster mode.
+ *
+ * @param {Array} fields  Array of ClusterFormFieldDto from the server
+ */
+function addClusterFormCard(fields, initialValues) {
+    console.group('%c[addClusterFormCard]', 'color:#4CAF50;font-weight:bold');
+    console.log('fields received:', fields ? JSON.parse(JSON.stringify(fields)) : null);
+    if (!fields || fields.length === 0) { console.warn('NO FIELDS — returning early'); console.groupEnd(); return; }
+
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMessage  = messagesArea.lastElementChild;
+    if (!lastMessage) return;
+
+    const card = document.createElement('div');
+    card.className = 'cluster-form-card mt-2';
+
+    // ── Hint bar + toggle button (always visible) ─────────────────────────
+    const hintBar = document.createElement('div');
+    hintBar.className = 'cluster-hint-bar';
+    hintBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;';
+    const hintText = document.createElement('span');
+    hintText.style.cssText = 'font-size:12px;color:#888;';
+    hintText.innerHTML = '<i class="ph ph-chat-circle-text" style="margin-right:4px;"></i>You can type your answer below, or';
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'btn btn-sm btn-outline-secondary';
+    toggleBtn.style.cssText = 'font-size:12px;white-space:nowrap;';
+    toggleBtn.innerHTML = '<i class="ph ph-list-dashes" style="margin-right:4px;"></i>Show form fields';
+    hintBar.appendChild(hintText);
+    hintBar.appendChild(toggleBtn);
+    card.appendChild(hintBar);
+
+    // ── Collapsible fields container (hidden by default) ──────────────────
+    const fieldsContainer = document.createElement('div');
+    fieldsContainer.className = 'cluster-fields-container';
+    fieldsContainer.style.display = 'none';
+    toggleBtn.addEventListener('click', () => {
+        const isOpen = fieldsContainer.style.display !== 'none';
+        fieldsContainer.style.display = isOpen ? 'none' : '';
+        toggleBtn.innerHTML = isOpen
+            ? '<i class="ph ph-list-dashes" style="margin-right:4px;"></i>Show form fields'
+            : '<i class="ph ph-caret-up" style="margin-right:4px;"></i>Hide form fields';
+    });
+
+    const inputEls = []; // { fieldId, label, isRequired, getValue, el, group, conditionalOnFieldId, conditionalOnValues }
+    const valueMap  = new Map(); // fieldId -> current value (for conditional visibility checks)
+
+    // Multi-select type codes — values joined with ~
+    const multiSelectCodes = new Set(['10006', '10017', '10023']);
+
+    // Re-evaluate which conditional rows are visible based on current selections (OR logic across all triggers)
+    function reevaluateVisibility() {
+        inputEls.forEach(item => {
+            if (!item.conditionalTriggers || item.conditionalTriggers.length === 0) return;
+            const show = item.conditionalTriggers.some(trigger => {
+                const triggerRaw = (valueMap.get(trigger.triggerFieldId) || '').replace(/[\[\]]/g, '').trim().toLowerCase();
+                return (trigger.allowedValues || []).some(v =>
+                    v.replace(/[\[\]]/g, '').trim().toLowerCase() === triggerRaw
+                );
+            });
+            item.group.style.display = show ? '' : 'none';
+        });
+    }
+
+    function notifyChange(fieldId, value) {
+        valueMap.set(fieldId, value || '');
+        reevaluateVisibility();
+    }
+
+    fields.forEach(field => {
+        const group = document.createElement('div');
+        group.className = 'mb-3';
+
+        const labelText = (field.questionText || field.fieldName || '') + (field.isRequired ? ' *' : '');
+        const tc = field.typeCode || '';
+        let inputEl;
+
+        // Helper: wrap any input in a notched md-field
+        const makeNotchedField = (el) => {
+            el.classList.add('md-input');
+            const wrap = document.createElement('div');
+            wrap.className = 'md-field';
+            const lbl = document.createElement('label');
+            lbl.className = 'md-label';
+            lbl.textContent = labelText;
+            wrap.appendChild(el);
+            wrap.appendChild(lbl);
+            return { wrap, el };
+        };
+
+        // Helper: build a searchable combobox identical to makeSearchSelect in the header card.
+        // multi=false → single pick; multi=true → multiple picks joined by ~
+        // fetchFn (optional): async (search) => [{id, text}] — used for dataset fields (10020/10026/10037)
+        const makeClusterCombo = (options, multi, fetchFn) => {
+            let allOpts = options.map(o => typeof o === 'string' ? { id: o, text: o } : o);
+            const selectedSet = new Set();          // used for multi only
+            const selectedTextMap = new Map();      // used for multi only: id → display text
+            let _selVal = '', _selText = '';         // used for single only
+            let fetchTimer = null;
+
+            const outer = document.createElement('div');
+            outer.className = 'md-search-select';
+
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.className = 'md-input';
+            inp.placeholder = 'Select or search…'; inp.autocomplete = 'off';
+
+            const arrow = document.createElement('span');
+            arrow.className = 'md-select-arrow'; arrow.innerHTML = '&#9662;';
+            arrow.addEventListener('mousedown', e => { e.preventDefault(); inp.focus(); });
+
+            const dd = document.createElement('div');
+            dd.className = 'chat-floating-dd';
+            dd.style.cssText = 'display:none;position:absolute;z-index:1000;width:100%;max-height:200px;overflow-y:auto;';
+
+            const renderOpts = (filter) => {
+                const q = (filter || '').trim().toLowerCase();
+                // When fetchFn is used, allOpts is already server-filtered — skip client filtering
+                const filtered = (fetchFn || !q) ? allOpts : allOpts.filter(o => o.text.toLowerCase().includes(q));
+                if (!filtered.length) {
+                    dd.innerHTML = '<div class="chat-floating-dd-empty">No results</div>';
+                    return;
+                }
+                dd.innerHTML = filtered.map(o => {
+                    const active = multi ? selectedSet.has(String(o.id)) : (_selVal === String(o.id));
+                    return `<div class="chat-floating-dd-item${active ? ' selected' : ''}"
+                        data-id="${escapeHtml(String(o.id))}" data-text="${escapeHtml(o.text)}">
+                        ${multi ? `<span class="dd-check">${active ? '&#10003;' : '&nbsp;'}</span>` : ''}
+                        ${escapeHtml(o.text)}</div>`;
+                }).join('');
+                dd.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                    el.addEventListener('mousedown', e => {
+                        e.preventDefault();
+                        const id = el.dataset.id, text = el.dataset.text;
+                        if (multi) {
+                            if (selectedSet.has(id)) { selectedSet.delete(id); selectedTextMap.delete(id); }
+                            else { selectedSet.add(id); selectedTextMap.set(id, text); }
+                            inp.value = selectedSet.size > 0 ? [...selectedSet].map(sid => {
+                                const o = allOpts.find(x => String(x.id) === sid);
+                                return o ? o.text : sid;
+                            }).join(', ') : '';
+                            notifyChange(field.fieldID, selectedSet.size > 0 ? [...selectedSet].join('~') : null);
+                            renderOpts(fetchFn ? '' : inp.value); // re-render with updated checks
+                        } else {
+                            _selVal = id; _selText = text;
+                            inp.value = text;
+                            dd.style.display = 'none';
+                            notifyChange(field.fieldID, id);
+                        }
+                    });
+                });
+            };
+
+            const doFetch = async (q) => {
+                try {
+                    const items = await fetchFn(q);
+                    allOpts = items;
+                    renderOpts('');
+                    dd.style.display = allOpts.length ? 'block' : 'block';
+                } catch (e) {
+                    dd.innerHTML = '<div class="chat-floating-dd-empty">Error loading options</div>';
+                    dd.style.display = 'block';
+                }
+            };
+
+            inp.addEventListener('focus', () => {
+                if (fetchFn) {
+                    if (allOpts.length === 0) {
+                        dd.innerHTML = '<div class="chat-floating-dd-empty">Loading…</div>';
+                        dd.style.display = 'block';
+                        doFetch(inp.value);
+                    } else {
+                        renderOpts('');
+                        dd.style.display = 'block';
+                    }
+                } else {
+                    renderOpts(inp.value); dd.style.display = 'block';
+                }
+            });
+            inp.addEventListener('blur',  () => { setTimeout(() => { dd.style.display = 'none'; }, 150); });
+            inp.addEventListener('input', () => {
+                if (!multi) { _selVal = ''; _selText = ''; }
+                if (fetchFn) {
+                    clearTimeout(fetchTimer);
+                    dd.innerHTML = '<div class="chat-floating-dd-empty">Loading…</div>';
+                    dd.style.display = 'block';
+                    fetchTimer = setTimeout(() => doFetch(inp.value), 280);
+                } else {
+                    renderOpts(inp.value);
+                    dd.style.display = 'block';
+                }
+            });
+
+            outer.appendChild(inp); outer.appendChild(arrow); outer.appendChild(dd);
+
+            // Wrap in notched md-field
+            const wrap = document.createElement('div');
+            wrap.className = 'md-field';
+            const lbl = document.createElement('label');
+            lbl.className = 'md-label';
+            lbl.textContent = labelText;
+            wrap.appendChild(outer); wrap.appendChild(lbl);
+
+            const getValue = multi
+                ? () => selectedSet.size > 0 ? [...selectedSet].join('~') : null
+                : () => _selVal || null;
+            // getValueFull: returns {Value, Text} JSON string (for dataset fields 10020/10026/10037)
+            const getValueFull = multi
+                ? () => selectedSet.size > 0
+                    ? JSON.stringify({ Value: [...selectedSet], Text: [...selectedSet].map(id => selectedTextMap.get(id) || id) })
+                    : null
+                : () => _selVal
+                    ? JSON.stringify({ Value: _selVal, Text: _selText })
+                    : null;
+            // setValue: programmatically set a value (used for auto-fill from chat extraction)
+            const setValue = multi
+                ? (id, text) => {
+                    const sid = String(id);
+                    selectedSet.add(sid);
+                    selectedTextMap.set(sid, text || sid);
+                    inp.value = [...selectedSet].map(s => {
+                        const o = allOpts.find(x => String(x.id) === s);
+                        return o ? o.text : (selectedTextMap.get(s) || s);
+                    }).join(', ');
+                    notifyChange(field.fieldID, [...selectedSet].join('~'));
+                }
+                : (id, text) => {
+                    _selVal = String(id);
+                    _selText = text || String(id);
+                    inp.value = _selText;
+                    notifyChange(field.fieldID, _selVal);
+                };
+
+            return { wrap, getValue, getValueFull, setValue, el: inp };
+        };
+
+        // ── Dataset Dropdown / SubDynamicCombo / Dataset Multi-select (10020 / 10026 / 10037) ──
+        console.log(`  field #${field.fieldID} "${field.fieldName}" | typeCode=${tc} | options=${field.options ? field.options.length : 'NULL'} | dynamicFilterCondn=${field.dynamicFilterCondn ? field.dynamicFilterCondn.slice(0,80)+'…' : 'NULL'}`);
+        if (tc === '10020' || tc === '10026' || tc === '10037') {
+            const isMulti = tc === '10037';
+            const filterCondn = field.dynamicFilterCondn;
+            if (!filterCondn) {
+                console.warn(`  [DATASET FALLBACK] field ${field.fieldID} has no dynamicFilterCondn — plain text`);
+                // No filter config — fall back to plain text input
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.oninput = () => notifyChange(field.fieldID, inp.value.trim());
+                const { wrap, el } = makeNotchedField(inp);
+                group.appendChild(wrap);
+                inputEl = { getValue: () => inp.value.trim() || null, el };
+            } else {
+                let parsedFilter;
+                try { parsedFilter = JSON.parse(filterCondn); } catch (e) { parsedFilter = filterCondn; }
+                const baseUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template$/i, '');
+                const asmxUrl = baseUrl + '/NetServices/POSTBusinessPlan.asmx/spGetDynamicDataV2';
+                const primaryField = (parsedFilter && parsedFilter.primaryDetails)
+                    || (parsedFilter && parsedFilter.fieldData && parsedFilter.fieldData.find(f => f.isPrimaryKey));
+                console.log(`  [DATASET] field ${field.fieldID} isMulti=${isMulti} asmxUrl=${asmxUrl}`);
+                console.log(`  [DATASET] parsedFilter:`, parsedFilter);
+                const fetchFn = async (search) => {
+                    if (!parsedFilter || !parsedFilter.fieldData) { console.warn('[DATASET fetchFn] parsedFilter missing fieldData'); return []; }
+                    console.log(`[DATASET fetchFn] field=${field.fieldID} search="${search}"`);
+                    try {
+                        const resp = await fetch(asmxUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                dynamicFilters: parsedFilter,
+                                search: search || '',
+                                value: '',
+                                type: '',
+                                RegOthHazardTempalteID: field.fieldID
+                            })
+                        });
+                        const json = await resp.json();
+                        let raw = json.d || json;
+                        if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = []; } }
+                        console.log(`[DATASET fetchFn] raw response (first 3):`, Array.isArray(raw) ? raw.slice(0,3) : raw);
+                        if (!Array.isArray(raw)) { console.warn('[DATASET fetchFn] raw is not array:', raw); return []; }
+                        return raw.map(row => {
+                            let id = null, textParts = [];
+                            (parsedFilter.fieldData || []).forEach(fd => {
+                                const val = row[fd.fieldName];
+                                if (fd.isPrimaryKey || (primaryField && fd.fieldName === primaryField.fieldName)) {
+                                    id = val;
+                                } else if (fd.display !== 'hide') {
+                                    textParts.push(val != null ? String(val) : '');
+                                }
+                            });
+                            return id != null ? { id: String(id), text: textParts.join(' ').trim() } : null;
+                        }).filter(Boolean);
+                    } catch (e) {
+                        console.error('[ClusterDataset] fetch error:', e);
+                        return [];
+                    }
+                };
+                const { wrap, getValueFull, setValue, el } = makeClusterCombo([], isMulti, fetchFn);
+                console.log(`  [DATASET] combo created for field ${field.fieldID}`);
+                group.appendChild(wrap);
+                inputEl = { getValue: getValueFull, setValue, el };
+            }
+        }
+
+        // ── YesNo / YesNoNA — single-select searchable combobox ───────────
+        else if (tc === '10008' || tc === '10009') {
+            const opts = tc === '10009' ? ['YES', 'NO', 'N/A'] : ['YES', 'NO'];
+            const mapped = opts.map(o => ({ id: `[${o}]`, text: o }));
+            const { wrap, getValue, setValue, el } = makeClusterCombo(mapped, false);
+            group.appendChild(wrap);
+            inputEl = { getValue, setValue, el };
+        }
+
+        // ── Multi-select — searchable combobox with checkmarks ────────────
+        else if (multiSelectCodes.has(tc) && field.options && field.options.length > 0) {
+            const { wrap, getValue, setValue, el } = makeClusterCombo(field.options, true);
+            group.appendChild(wrap);
+            inputEl = { getValue, setValue, el };
+        }
+
+        // ── Single-select — searchable combobox ───────────────────────────
+        else if (field.options && field.options.length > 0) {
+            const { wrap, getValue, setValue, el } = makeClusterCombo(field.options, false);
+            group.appendChild(wrap);
+            inputEl = { getValue, setValue, el };
+        }
+
+        // ── Date ───────────────────────────────────────────────────────────
+        else if (tc === '10010') {
+            const inp = document.createElement('input');
+            inp.type = 'date';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value);
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value || null, el,
+                setValue: (v) => { inp.value = v; notifyChange(field.fieldID, v); } };
+        }
+
+        // ── Time ───────────────────────────────────────────────────────────
+        else if (tc === '10012') {
+            const inp = document.createElement('input');
+            inp.type = 'time';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value);
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value || null, el,
+                setValue: (v) => { inp.value = v; notifyChange(field.fieldID, v); } };
+        }
+
+        // ── Number ─────────────────────────────────────────────────────────
+        else if (tc === '10003' || tc === '10025') {
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value);
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value || null, el,
+                setValue: (v) => { inp.value = v; notifyChange(field.fieldID, v); } };
+        }
+
+        // ── Textarea ───────────────────────────────────────────────────────
+        else if (tc === '10002' || tc === '10004') {
+            const ta = document.createElement('textarea');
+            ta.rows = 3;
+            ta.style.resize = 'vertical';
+            ta.oninput = () => notifyChange(field.fieldID, ta.value.trim());
+            const { wrap, el } = makeNotchedField(ta);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => ta.value.trim() || null, el,
+                setValue: (v) => { ta.value = v; notifyChange(field.fieldID, v); } };
+        }
+
+        // ── Default: single-line text ──────────────────────────────────────
+        else {
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.oninput = () => notifyChange(field.fieldID, inp.value.trim());
+            const { wrap, el } = makeNotchedField(inp);
+            group.appendChild(wrap);
+            inputEl = { getValue: () => inp.value.trim() || null, el,
+                setValue: (v) => { inp.value = v; notifyChange(field.fieldID, v); } };
+        }
+
+        console.log(`  pushed inputEl for field ${field.fieldID}, getValue=${typeof (inputEl && inputEl.getValue)}`);
+        inputEls.push({
+            fieldId:             field.fieldID,
+            label:               field.fieldName,
+            isRequired:          field.isRequired,
+            group,
+            conditionalTriggers: field.conditionalTriggers || null,
+            ...inputEl
+        });
+        fieldsContainer.appendChild(group);
+    });
+    console.log('inputEls built:', inputEls.length, '| ids:', inputEls.map(i => i.fieldId));
+    console.groupEnd();
+
+    // Initial pass — hide conditional rows until their trigger is answered
+    reevaluateVisibility();
+
+    // ── Skip all button (only shown when all visible fields are optional) ──
+    const allOptional = inputEls.every(it => !it.isRequired);
+    if (allOptional) {
+        const skipAllBtn = document.createElement('button');
+        skipAllBtn.type = 'button';
+        skipAllBtn.className = 'btn btn-outline-secondary btn-sm w-100 mt-2 mb-1';
+        skipAllBtn.textContent = 'Skip (optional)';
+        skipAllBtn.onclick = () => {
+            card.remove();
+            // Mark all cluster field IDs as confirmed so server skips them
+            inputEls.forEach(it => {
+                if (!state.chatConfirmedFieldIds.includes(it.fieldId))
+                    state.chatConfirmedFieldIds.push(it.fieldId);
+            });
+            saveConfirmedFieldIds(state.regOthId, state.chatConfirmedFieldIds);
+            sendChatMessage('What is the next question?', '');
+        };
+        fieldsContainer.appendChild(skipAllBtn);
+    }
+
+    // ── Submit button ──────────────────────────────────────────────────────
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'btn btn-primary hdr-submit-btn w-100 mt-2';
+    submitBtn.textContent = 'Submit answers';
+    submitBtn.onclick = async () => {
+        const parts = [];
+        let hasError = false;
+        const fieldsToSave = [];
+
+        console.group('%c[ClusterSubmit]', 'color:#FF5722;font-weight:bold');
+        inputEls.forEach(item => {
+            // Skip hidden conditional fields
+            if (item.group.style.display === 'none') { console.log(`  field ${item.fieldId} SKIPPED (hidden)`); return; }
+
+            const val = item.getValue ? item.getValue() : null;
+            console.log(`  field ${item.fieldId} "${item.label}" val=${JSON.stringify(val)} required=${item.isRequired}`);
+            if (!val && item.isRequired) {
+                hasError = true;
+                if (item.el) item.el.classList.add('md-input--error');
+            } else {
+                if (item.el) item.el.classList.remove('md-input--error');
+                if (val) {
+                    parts.push(`${item.label}: ${val}`);
+                    fieldsToSave.push({ fieldID: item.fieldId, value: val });
+                }
+            }
+        });
+        console.log('fieldsToSave:', JSON.parse(JSON.stringify(fieldsToSave)));
+        console.groupEnd();
+
+        if (hasError) {
+            console.warn('[ClusterSubmit] blocked by required field error');
+            // Show or update error banner inside the card
+            let banner = card.querySelector('.cluster-error-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.className = 'cluster-error-banner';
+                banner.style.cssText = 'background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:8px;color:#856404;font-size:13px;';
+                card.insertBefore(banner, submitBtn);
+            }
+            const missing = inputEls
+                .filter(it => it.group.style.display !== 'none' && it.isRequired && !it.getValue?.())
+                .map(it => it.label.replace(/&nbsp;/g,'').trim());
+            banner.textContent = '⚠ Please fill in: ' + missing.join(', ');
+            // Scroll first errored field into view
+            const firstErr = inputEls.find(it => it.isRequired && !it.getValue?.());
+            if (firstErr) firstErr.el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+        if (fieldsToSave.length === 0) { console.warn('[ClusterSubmit] nothing to save'); return; }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving…';
+
+        const regOthID = state.regOthId; // CONFIG has no regOthId — session ID lives in state
+        console.log('[ClusterSubmit] using regOthID:', regOthID, '| storeID:', CONFIG.storeId, '| userID:', CONFIG.userId);
+
+        let saveOk = false;
+        try {
+            // Save ALL fields directly — bypasses AI extraction (no "one field per turn" limit)
+            const confirmUrl = CONFIG.apiUrl.replace(/\/affinda\/api\/chat-template$/i, '') + '/affinda/api/smart-fill/confirm';
+            const resp = await fetch(confirmUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    regOthID: regOthID,
+                    storeID:  CONFIG.storeId,
+                    userID:   CONFIG.userId,
+                    confirmedFields: fieldsToSave
+                })
+            });
+            const result = await resp.json();
+            console.log('[ClusterSubmit] save result:', result);
+            if (result.success) {
+                saveOk = true;
+            } else {
+                console.error('[ClusterSubmit] Direct save failed:', result.message);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit answers';
+                let banner = card.querySelector('.cluster-error-banner');
+                if (!banner) {
+                    banner = document.createElement('div');
+                    banner.className = 'cluster-error-banner';
+                    banner.style.cssText = 'background:#f8d7da;border:1px solid #f5c2c7;border-radius:6px;padding:8px 12px;margin-bottom:8px;color:#842029;font-size:13px;';
+                    card.insertBefore(banner, submitBtn);
+                }
+                banner.textContent = '❌ Save failed: ' + result.message;
+                return;
+            }
+        } catch (e) {
+            console.error('[ClusterSubmit] Direct save error:', e);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit answers';
+            return;
+        }
+
+        // Only proceed if save succeeded
+        card.remove();
+
+        // Mark ALL visible (non-conditional-hidden) field IDs as confirmed — not just the ones
+        // that had values. Optional fields left blank must still be confirmed so the server's
+        // GetCurrentClusterFields advances past this section rather than re-grouping the same
+        // optional fields on the next turn.
+        inputEls.forEach(item => {
+            if (item.group.style.display !== 'none') {
+                if (!state.chatConfirmedFieldIds.includes(item.fieldId)) {
+                    state.chatConfirmedFieldIds.push(item.fieldId);
+                }
+            }
+        });
+        saveConfirmedFieldIds(state.regOthId, state.chatConfirmedFieldIds);
+
+        // Call the chat API - show the submitted answers as the user bubble,
+        // but send a clean "next question" trigger so the AI doesn't re-extract saved fields
+        sendChatMessage('What is the next question?', parts.join('\n'));
+    };
+    fieldsContainer.appendChild(submitBtn);
+    card.appendChild(fieldsContainer);
+
+    // ── Auto-fill from initialValues (pre-filled by AI extraction from chat) ──
+    let anyPrefilled = false;
+    if (initialValues && Object.keys(initialValues).length > 0) {
+        inputEls.forEach(item => {
+            const pre = initialValues[item.fieldId];
+            if (pre && item.setValue) {
+                try { item.setValue(pre.value, pre.text); anyPrefilled = true; } catch (e) {}
+            }
+        });
+    }
+
+    // ── Collapse toggle: show form only when explicitly requested ──────────
+    // If values were pre-filled, expand immediately so user can review.
+    if (anyPrefilled) {
+        fieldsContainer.style.display = '';
+        toggleBtn.innerHTML = '<i class="ph ph-caret-up" style="margin-right:4px;"></i>Hide form fields';
+    }
+
+    lastMessage.querySelector('.message-content').appendChild(card);
     scrollToBottom();
 }
 
@@ -6911,7 +7769,7 @@ async function showCompletionUI(missingFields) {
     };
 
     const newBtn = document.createElement('button');
-    newBtn.className = 'btn btn-outline-primary w-100';
+    newBtn.className = 'btn btn-outline-secondary w-100';
     newBtn.innerHTML = '<i class="ph-thin ph-plus" style="margin-right:4px"></i>Start New';
     newBtn.onclick = () => startNewSession();
 
@@ -6974,6 +7832,10 @@ function startNewSession() {
     state._isDashboardSession = false;
     state.awaitingHeaderField = false;
     state._headerFieldCallback = null;
+    state._headerAllFieldsMode = false;
+    state._hdrFieldEls = null;
+    state._hdrFieldsContainer = null;
+    state._hdrToggleBtn = null;
     state.chatConfirmedFieldIds = []; // clear confirmed IDs — new session starts fresh
     updateCostDisplay();
 
@@ -7182,18 +8044,526 @@ async function collectHeaderDetails(onComplete) {
         }
 
         addMessage('assistant',
+            aiQ?._summary ||
             aiQ?._intro ||
-            `Before we start on the checklist, I just need a few quick details about this ${state.templateName || 'record'}.`
+            `Before we start on the checklist, I need a few quick details about this ${state.templateName || 'record'}. Could you provide the ${fields.map(f => f.ColCaption).join(', ')}?`
         );
         scrollToBottom();
 
-        _askNextHeaderField(fields, firstPendingIndex, onComplete);
+        await _showAllHeaderFieldsCard(fields, onComplete);
     } catch (err) {
         console.warn('[Header] Could not load field schema — skipping:', err);
         state._collectingHeaderDetails = false;
         state._headerDetailsReadyForChecklist = true;
         onComplete();
     }
+}
+
+/**
+ * Shows all header detail fields (date, location, type, subtype, division etc.) in a
+ * single grouped form card — same pattern as addClusterFormCard for checklist questions.
+ * Replaces the old one-at-a-time _askNextHeaderField flow.
+ */
+async function _showAllHeaderFieldsCard(fields, onComplete) {
+    const messagesArea = document.getElementById('messagesArea');
+    const lastMessage  = messagesArea.lastElementChild;
+    if (!lastMessage) { onComplete(); return; }
+
+    // Pre-fetch independent combo options in parallel before rendering
+    const comboCache = {};
+    const independentFids = ['wcRegRecTypeCombo', 'wcDivisionCmb', 'wcStatusCombo', 'wcProjectCombo', 'wcContractorCompanyCMB'];
+    await Promise.allSettled(independentFids.map(async fid => {
+        if (fields.some(f => _normalizeHeaderFieldId(f.FieldControlID) === fid))
+            comboCache[fid] = await _fetchHeaderComboOptions(fid, '');
+    }));
+
+    // Pre-fetch location types
+    let locTypes = [];
+    if (fields.some(f => _isHeaderLocationField(f))) {
+        try {
+            const baseApi = CONFIG.apiUrl.replace(/\/chat-template.*$/, '');
+            const r = await fetch(`${baseApi}/chat-template/location-types?storeId=${CONFIG.storeId}&memberId=${CONFIG.userId}`);
+            const j = await r.json();
+            locTypes = j.d?.recordlist || [];
+            if (locTypes.length) {
+                state._hdrLocTypeId   = locTypes[0].id;
+                state._hdrLocTypeName = locTypes[0].name;
+                if (!state._headerData['_locationTypeId'])
+                    state._headerData['_locationTypeId'] = { value: locTypes[0].id, displayText: locTypes[0].name };
+            }
+        } catch(e) { console.warn('[Header card] location types error:', e); }
+    }
+
+    const card = document.createElement('div');
+    card.className = 'hdr-details-card';
+
+    // ── Hint bar (same pattern as addClusterFormCard) ──────────────────────
+    const hintBar = document.createElement('div');
+    hintBar.className = 'd-flex align-items-center gap-2 mb-2';
+    hintBar.style.cssText = 'font-size:0.82rem;color:#555;flex-wrap:wrap;';
+    const hintText = document.createElement('span');
+    hintText.innerHTML = '<i class="ph ph-chat-circle-text" style="margin-right:4px;"></i>You can type your answers in chat, or';
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'btn btn-outline-secondary btn-sm';
+    toggleBtn.style.cssText = 'font-size:0.78rem;padding:2px 10px;';
+    toggleBtn.innerHTML = '<i class="ph ph-list-dashes" style="margin-right:4px;"></i>Show form fields';
+    hintBar.appendChild(hintText);
+    hintBar.appendChild(toggleBtn);
+
+    // ── Fields container — hidden by default ──────────────────────────────
+    const fieldsContainer = document.createElement('div');
+    fieldsContainer.style.display = 'none';
+    let isOpen = false;
+    toggleBtn.addEventListener('click', () => {
+        isOpen = !isOpen;
+        fieldsContainer.style.display = isOpen ? '' : 'none';
+        toggleBtn.innerHTML = isOpen
+            ? '<i class="ph ph-caret-up" style="margin-right:4px;"></i>Hide form fields'
+            : '<i class="ph ph-list-dashes" style="margin-right:4px;"></i>Show form fields';
+        if (isOpen) scrollToBottom();
+    });
+
+    const fieldEls = [];
+
+    // ── Material outlined always-notched label wrapper
+    const makeMdField = (labelText, req, inputEl) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'md-field mb-3';
+        const lbl = document.createElement('label');
+        lbl.className = 'md-label';
+        lbl.textContent = labelText + (req ? ' *' : '');
+        inputEl.classList.add('md-input');
+        // Label is always notched — no focus/blur class toggling needed
+        wrap.appendChild(inputEl);
+        wrap.appendChild(lbl);
+        return wrap;
+    };
+
+    // ── Searchable combo widget
+    const makeSearchSelect = (options, fetchFn) => {
+        let allOptions = options || [];
+        let _selVal = '', _selText = '', _fetchTimer = null;
+        const outer = document.createElement('div');
+        outer.className = 'md-search-select';
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.className = 'md-input';
+        inp.placeholder = 'Select or search…'; inp.autocomplete = 'off';
+        const arrow = document.createElement('span');
+        arrow.className = 'md-select-arrow'; arrow.innerHTML = '&#9662;';
+        arrow.addEventListener('mousedown', e => { e.preventDefault(); inp.focus(); });
+        const dd = document.createElement('div');
+        dd.className = 'chat-floating-dd';
+        dd.style.cssText = 'display:none;position:absolute;z-index:1000;width:100%;max-height:200px;overflow-y:auto;';
+        const renderOpts = (filter) => {
+            const q = (filter || '').trim().toLowerCase();
+            const filtered = q ? allOptions.filter(o => o.text.toLowerCase().includes(q)) : allOptions;
+            dd.innerHTML = filtered.length
+                ? filtered.map(o =>
+                    `<div class="chat-floating-dd-item" data-id="${escapeHtml(String(o.id))}" data-text="${escapeHtml(o.text)}">${escapeHtml(o.text)}</div>`
+                  ).join('')
+                : '<div class="chat-floating-dd-empty">No results</div>';
+            dd.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                el.addEventListener('mousedown', e => {
+                    e.preventDefault();
+                    _selVal = el.dataset.id; _selText = el.dataset.text;
+                    inp.value = _selText;
+                    inp.classList.remove('md-input--error');
+                    dd.style.display = 'none';
+                    outer.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            });
+        };
+        const doLiveFetch = async (q) => {
+            if (!fetchFn) return;
+            inp.placeholder = 'Searching…';
+            try {
+                const results = await fetchFn(q);
+                allOptions = results;
+            } catch(e) { /* ignore */ }
+            inp.placeholder = 'Select or search…';
+            renderOpts(q);
+            dd.style.display = 'block';
+        };
+        inp.addEventListener('focus', () => {
+            if (fetchFn && allOptions.length === 0) { doLiveFetch(''); }
+            else { renderOpts(inp.value); dd.style.display = 'block'; }
+        });
+        inp.addEventListener('blur',  () => { if (!_selVal) inp.value = ''; });
+        inp.addEventListener('input', () => {
+            _selVal = ''; _selText = '';
+            if (fetchFn) {
+                clearTimeout(_fetchTimer);
+                _fetchTimer = setTimeout(() => doLiveFetch(inp.value.trim()), 300);
+            } else {
+                renderOpts(inp.value); dd.style.display = 'block';
+            }
+        });
+        document.addEventListener('click', e => { if (!outer.contains(e.target)) dd.style.display = 'none'; }, { passive: true });
+        outer.appendChild(inp); outer.appendChild(arrow); outer.appendChild(dd);
+        outer.getValue       = () => _selVal;
+        outer.getDisplayText = () => _selText;
+        outer.getInputEl     = () => inp;
+        outer.reload = async (fid) => {
+            allOptions = []; _selVal = ''; _selText = ''; inp.value = '';
+            inp.placeholder = 'Loading…'; inp.disabled = true;
+            const opts = await _fetchHeaderComboOptions(fid, '');
+            allOptions = opts; inp.placeholder = 'Select or search…'; inp.disabled = false;
+        };
+        return outer;
+    };
+
+    for (const field of fields) {
+        const rawFid = field.FieldControlID;
+        const fid    = _normalizeHeaderFieldId(rawFid);
+        const req    = _isHeaderRequired(field);
+        const question = state._hdrAiQuestions?.[rawFid] || field.ColCaption || rawFid;
+
+        const group = document.createElement('div');
+        group.className = 'mb-3';
+        group.dataset.fid = fid;
+
+        let getVal, getDisplayVal, mainEl;
+
+        // ── Date ──────────────────────────────────────────────────────────
+        if (_isHeaderDateField(field)) {
+            const inp = document.createElement('input');
+            inp.type = 'date';
+            inp.className = 'md-input';
+            inp.value = new Date().toISOString().split('T')[0];
+            mainEl = inp;
+            getVal        = () => inp.value || null;
+            getDisplayVal = () => { if (!inp.value) return null; const [y,m,d] = inp.value.split('-'); return `${d}/${m}/${y}`; };
+            group.appendChild(makeMdField(question, req, inp));
+
+        // ── Location ──────────────────────────────────────────────────────
+        } else if (_isHeaderLocationField(field)) {
+            let selectedLoc = null;
+            const wrap = document.createElement('div');
+            if (locTypes.length > 1) {
+                const typesWrap = document.createElement('div');
+                typesWrap.className = 'hdr-loc-types mb-2';
+                locTypes.forEach((t, i) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = `btn btn-sm ${i === 0 ? 'btn-primary' : 'btn-outline-secondary'}`;
+                    btn.dataset.id = t.id; btn.dataset.name = t.name;
+                    btn.textContent = t.name;
+                    btn.onclick = () => {
+                        typesWrap.querySelectorAll('button').forEach(b => {
+                            b.classList.replace('btn-primary', 'btn-outline-secondary');
+                        });
+                        btn.classList.replace('btn-outline-secondary', 'btn-primary');
+                        state._hdrLocTypeId   = t.id;
+                        state._hdrLocTypeName = t.name;
+                        state._headerData['_locationTypeId'] = { value: t.id, displayText: t.name };
+                        selectedLoc = null;
+                        searchEl.value = '';
+                        ddEl.style.display = 'none';
+                    };
+                    typesWrap.appendChild(btn);
+                });
+                wrap.appendChild(typesWrap);
+            }
+
+            const searchWrap = document.createElement('div');
+            searchWrap.style.position = 'relative';
+            const searchEl = document.createElement('input');
+            searchEl.type = 'text';
+            searchEl.className = 'md-input';
+            searchEl.placeholder = 'Type to search location…';
+            searchEl.autocomplete = 'off';
+            const ddEl = document.createElement('div');
+            ddEl.className = 'chat-floating-dd';
+            ddEl.style.cssText = 'display:none;position:absolute;z-index:1000;width:100%;max-height:200px;overflow-y:auto;';
+            let locTimer = null;
+
+            const renderLocList = (items) => {
+                ddEl.innerHTML = items.length
+                    ? items.map(x =>
+                        `<div class="chat-floating-dd-item" style="cursor:pointer;padding:8px 12px;"
+                            data-id="${escapeHtml(String(x.IDNo))}"
+                            data-name="${escapeHtml(x.RowDescription)}"
+                            data-addr="${escapeHtml(x.Address || '')}">${escapeHtml(x.RowDescription)}</div>`
+                      ).join('')
+                    : '<div class="chat-floating-dd-empty">No results</div>';
+                ddEl.style.display = 'block';
+                ddEl.querySelectorAll('.chat-floating-dd-item').forEach(el => {
+                    el.addEventListener('mousedown', e => {
+                        e.preventDefault();
+                        selectedLoc = { id: el.dataset.id, name: el.dataset.name, address: el.dataset.addr, locTypeId: state._hdrLocTypeId };
+                        searchEl.value = el.dataset.name;
+                        ddEl.style.display = 'none';
+                    });
+                });
+            };
+
+            searchEl.addEventListener('input', () => {
+                selectedLoc = null;
+                clearTimeout(locTimer);
+                const q = searchEl.value.trim();
+                if (q.length < 2) { ddEl.style.display = 'none'; return; }
+                locTimer = setTimeout(async () => {
+                    try {
+                        const r = await fetch(`${ASMX_BASE_URL}/GetLocationTypeAddressListv2`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ locRequest: { StoreID: CONFIG.storeId, LocType: state._hdrLocTypeId, MemberId: CONFIG.userId, Condition: q, TotalCount: 20 } })
+                        });
+                        const j = await r.json();
+                        renderLocList(j.d?.recordList || []);
+                    } catch(e) { console.warn('[Header card] location search error', e); }
+                }, 250);
+            });
+
+            document.addEventListener('click', e => {
+                if (!searchWrap.contains(e.target)) ddEl.style.display = 'none';
+            }, { passive: true });
+
+            searchWrap.appendChild(searchEl);
+            searchWrap.appendChild(ddEl);
+            wrap.appendChild(searchWrap);
+
+            // Wrap in notched md-field
+            const locFieldWrap = document.createElement('div');
+            locFieldWrap.className = 'md-field mb-3';
+            const locLbl = document.createElement('label');
+            locLbl.className = 'md-label';
+            locLbl.textContent = question + (req ? ' *' : '');
+            locFieldWrap.appendChild(wrap);
+            locFieldWrap.appendChild(locLbl);
+            group.appendChild(locFieldWrap);
+
+            mainEl        = searchEl;
+            getVal        = () => selectedLoc?.id   || null;
+            getDisplayVal = () => selectedLoc?.name || null;
+
+            fieldEls.push({ rawFid, fid, isRequired: req, getVal, getDisplayVal, mainEl, group,
+                _getLocData: () => selectedLoc });
+            fieldsContainer.appendChild(group);
+            continue; // skip the common fieldEls.push below
+
+        // ── Combo / dropdown ──────────────────────────────────────────────
+        } else if (_isHeaderComboField(field)) {
+            const _liveSearchFids = ['wcPersonRespCmb', 'wcReportsTo'];
+            const _liveFetch = _liveSearchFids.includes(fid)
+                ? (q) => _fetchHeaderComboOptions(fid, q)
+                : null;
+            const widget = makeSearchSelect(comboCache[fid] || [], _liveFetch);
+            group._searchSelectWidget = widget;
+            mainEl        = widget.getInputEl();
+            getVal        = () => widget.getValue()       || null;
+            getDisplayVal = () => widget.getDisplayText() || null;
+            if (fid === 'wcRegRecTypeCombo') {
+                widget.addEventListener('change', async () => {
+                    state._headerData['wcRegRecTypeCombo'] = { value: widget.getValue(), displayText: widget.getDisplayText() };
+                    state._headerData['wcType'] = state._headerData['wcRegRecTypeCombo'];
+                    const sg = card.querySelector('[data-fid="wcRegRecSubTypeCombo"]');
+                    if (sg?._searchSelectWidget) await sg._searchSelectWidget.reload('wcRegRecSubTypeCombo');
+                });
+            }
+            if (fid === 'wcDivisionCmb') {
+                widget.addEventListener('change', async () => {
+                    state._headerData['wcDivisionCmb'] = { value: widget.getValue(), displayText: widget.getDisplayText() };
+                    state._headerData['wcDivision'] = state._headerData['wcDivisionCmb'];
+                    const dg = card.querySelector('[data-fid="wcDepartmentCmb"]');
+                    if (dg?._searchSelectWidget) await dg._searchSelectWidget.reload('wcDepartmentCmb');
+                });
+            }
+            if (fid === 'wcDepartmentCmb') {
+                widget.addEventListener('change', async () => {
+                    state._headerData['wcDepartmentCmb'] = { value: widget.getValue(), displayText: widget.getDisplayText() };
+                    state._headerData['wcDepartment'] = state._headerData['wcDepartmentCmb'];
+                    const pg = card.querySelector('[data-fid="wcProgrammeCmb"]');
+                    if (pg?._searchSelectWidget) await pg._searchSelectWidget.reload('wcProgrammeCmb');
+                });
+            }
+            // Wrap combo widget in notched md-field
+            const comboWrap = document.createElement('div');
+            comboWrap.className = 'md-field';
+            const comboLbl = document.createElement('label');
+            comboLbl.className = 'md-label';
+            comboLbl.textContent = question + (req ? ' *' : '');
+            comboWrap.appendChild(widget);
+            comboWrap.appendChild(comboLbl);
+            group.appendChild(comboWrap);
+
+        // ── Text / Textarea ───────────────────────────────────────────────
+        } else {
+            const ct  = String(field.ControlType || '').toLowerCase();
+            const cap = String(field.ColCaption  || '').toLowerCase();
+            const isLong = ct.includes('multiline') || ct.includes('textar') ||
+                           cap.includes('desc') || cap.includes('detail') || cap.includes('comment');
+            if (isLong) {
+                const ta = document.createElement('textarea');
+                ta.rows = 2; ta.style.resize = 'vertical';
+                mainEl        = ta;
+                getVal        = () => ta.value.trim() || null;
+                getDisplayVal = () => ta.value.trim() || null;
+                group.appendChild(makeMdField(question, req, ta));
+            } else {
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                mainEl        = inp;
+                getVal        = () => inp.value.trim() || null;
+                getDisplayVal = () => inp.value.trim() || null;
+                group.appendChild(makeMdField(question, req, inp));
+            }
+        }
+
+        fieldEls.push({ rawFid, fid, isRequired: req, getVal, getDisplayVal, mainEl, group });
+        fieldsContainer.appendChild(group);
+    }
+
+    // ── Submit ──────────────────────────────────────────────────────────────
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'btn btn-primary hdr-submit-btn w-100 mt-2';
+    submitBtn.textContent = 'Save Details';
+    submitBtn.onclick = async () => {
+        let hasError = false;
+        fieldEls.forEach(item => {
+            const val = item.getVal();
+            if (!val && item.isRequired) {
+                hasError = true;
+                if (item.mainEl) item.mainEl.classList.add('md-input--error');
+            } else {
+                if (item.mainEl) item.mainEl.classList.remove('md-input--error');
+            }
+        });
+        if (hasError) { scrollToBottom(); return; }
+
+        fieldEls.forEach(item => {
+            const val  = item.getVal();
+            const disp = item.getDisplayVal ? item.getDisplayVal() : val;
+            if (val !== null && val !== undefined && val !== '') {
+                state._headerData[item.rawFid] = { value: val, displayText: disp || val };
+                if (item.fid !== item.rawFid)
+                    state._headerData[item.fid] = { value: val, displayText: disp || val };
+            }
+            if (item._getLocData) {
+                const loc = item._getLocData();
+                if (loc) _doSelectLocation(loc.id, loc.name, loc.address || '', loc.locTypeId,
+                    (locId, locName) => {
+                        state._headerData[item.rawFid] = { value: locId, displayText: locName };
+                        if (item.fid !== item.rawFid)
+                            state._headerData[item.fid] = { value: locId, displayText: locName };
+                    });
+            }
+        });
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving…';
+        await _saveHeaderDetailsProgress({ finalize: true, announce: false });
+        markHeaderDetailsCompleted(state.regOthId);
+        saveTranscript();
+        card.remove();
+        state._headerAllFieldsMode = false;
+        state._hdrFieldEls = null;
+        state._hdrFieldsContainer = null;
+        state._hdrToggleBtn = null;
+        state._collectingHeaderDetails = false;
+        state._headerDetailsReadyForChecklist = true;
+        addMessage('assistant', 'Details saved — let\'s move on to the checklist.');
+        scrollToBottom();
+        onComplete();
+    };
+    fieldsContainer.appendChild(submitBtn);
+
+    card.appendChild(hintBar);
+    card.appendChild(fieldsContainer);
+    state._headerAllFieldsMode = true;
+    state._hdrFieldEls = fieldEls;
+    state._hdrToggleBtn = toggleBtn;
+    state._hdrFieldsContainer = fieldsContainer;
+
+    lastMessage.querySelector('.message-content').appendChild(card);
+    scrollToBottom();
+}
+
+/**
+ * Called when a user types a free-text message while the header all-fields card is visible.
+ * Uses AI to extract values, fills what it can, then expands the form for review.
+ */
+async function _processHeaderChatAnswer(message) {
+    if (!state._hdrFieldEls || !state._hdrFieldsContainer) return;
+
+    const fieldEls = state._hdrFieldEls;
+    const fieldsContainer = state._hdrFieldsContainer;
+    const toggleBtn = state._hdrToggleBtn;
+
+    // Build field context for AI
+    const fieldList = fieldEls.map(f => {
+        const label = state._hdrAiQuestions?.[f.rawFid] || f.fid;
+        const type = f.mainEl && f.mainEl.type === 'date' ? 'date' : 'text';
+        return `${f.rawFid}|${label}|${type}`;
+    }).join('\n');
+
+    showTypingIndicator(message);
+    try {
+        const extracted = await _aiExtractHeaderValues(message, fieldList);
+        removeTypingIndicator();
+
+        if (!extracted || Object.keys(extracted).length === 0) {
+            addMessage('assistant', 'I couldn\'t extract specific values from that. Please use the form fields to fill in the details.');
+        } else {
+            let anyFilled = false;
+            for (const f of fieldEls) {
+                const val = extracted[f.rawFid] || extracted[f.fid];
+                if (!val || !f.mainEl) continue;
+                if (f.mainEl.type === 'date') {
+                    const d = _parseHdrDate(val);
+                    if (d) {
+                        f.mainEl.value = d.toISOString().split('T')[0];
+                        f.mainEl.classList.remove('md-input--error');
+                        anyFilled = true;
+                    }
+                } else {
+                    f.mainEl.value = val;
+                    f.mainEl.classList.remove('md-input--error');
+                    anyFilled = true;
+                }
+            }
+            // Expand the form so user can review
+            fieldsContainer.style.display = '';
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '<i class="ph ph-caret-up" style="margin-right:4px;"></i>Hide form fields';
+            }
+            addMessage('assistant', anyFilled
+                ? 'I\'ve pre-filled the form with what I found. Please review, adjust if needed, then click Save Details.'
+                : 'Please use the form fields above to fill in the details, then click Save Details.');
+        }
+    } catch (e) {
+        removeTypingIndicator();
+        addMessage('assistant', 'Please use the form fields above to fill in the details, then click Save Details.');
+    }
+    scrollToBottom();
+}
+
+async function _aiExtractHeaderValues(message, fieldList) {
+    if (!CONFIG.openaiApiKey) return null;
+    try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 300,
+                temperature: 0,
+                messages: [{
+                    role: 'system',
+                    content: `Extract field values from the user's message. Fields (id|label|type):\n${fieldList}\nReturn ONLY valid JSON { fieldId: "value" } for fields mentioned. For date fields use dd/mm/yyyy. Return {} if nothing found. No markdown.`
+                }, {
+                    role: 'user',
+                    content: message
+                }]
+            })
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        trackCost('gpt-4o-mini', data.usage);
+        const text = data.choices?.[0]?.message?.content?.trim();
+        return text ? JSON.parse(text) : null;
+    } catch (e) { return null; }
 }
 
 function _askNextHeaderField(fields, index, onComplete) {
@@ -7241,11 +8611,11 @@ async function _loadAiHeaderQuestions(fields) {
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.openaiApiKey}` },
             body: JSON.stringify({
                 model: 'gpt-4o-mini',
-                max_tokens: 600,
+                max_tokens: 700,
                 temperature: 0.7,
                 messages: [{
                     role: 'system',
-                    content: `You are an AI assistant helping a worker fill in a "${templateName}" form via chat.\nConvert each field label into a short, warm, conversational question (max 10 words).\nAlso write a one-sentence friendly intro (key: "_intro") for starting the form section.\nReturn ONLY valid JSON: { "_intro": "...", "<FieldControlID>": "question...", ... }\nNo markdown or explanation.`
+                    content: `You are an AI assistant helping a worker fill in a "${templateName}" form via chat.\nConvert each field label into a short, warm, conversational question (max 10 words).\nAlso write:\n- "_intro": a one-sentence friendly intro for starting this section.\n- "_summary": a single warm question that asks for ALL the fields at once (list them naturally, e.g. "Could you tell me the date, location, type, and who was responsible?").\nReturn ONLY valid JSON: { "_intro": "...", "_summary": "...", "<FieldControlID>": "question...", ... }\nNo markdown or explanation.`
                 }, {
                     role: 'user',
                     content: `Fields (id|label|type):\n${fieldList}`
@@ -7970,7 +9340,7 @@ async function _showHeaderLocationField(onSave, onSkip, isRequired = false) {
     addMessage('assistant',
         `<div style="margin-bottom:8px;">${question}</div>
          <div id="${msgId}-types" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
-             ${locTypes.map((t, i) => `<button type="button" class="hf-loc-type btn btn-sm ${i===0 ? 'btn-primary' : 'btn-outline-primary'}" data-id="${t.id}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`).join('')}
+             ${locTypes.map((t, i) => `<button type="button" class="hf-loc-type btn btn-sm ${i===0 ? 'btn-primary' : 'btn-outline-secondary'}" data-id="${t.id}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`).join('')}
          </div>
          <div class="chat-floating-select-wrap" style="margin-top:0;">
              <span class="chat-floating-label">Location</span>
@@ -8030,9 +9400,9 @@ async function _showHeaderLocationField(onSave, onSkip, isRequired = false) {
             e.preventDefault();
             typesEl.querySelectorAll('.hf-loc-type').forEach(b => {
                 b.classList.remove('btn-primary');
-                b.classList.add('btn-outline-primary');
+                b.classList.add('btn-outline-secondary');
             });
-            btn.classList.remove('btn-outline-primary');
+            btn.classList.remove('btn-outline-secondary');
             btn.classList.add('btn-primary');
             state._hdrLocTypeId = btn.dataset.id;
             state._hdrLocTypeName = btn.dataset.name;
@@ -8175,7 +9545,7 @@ async function _showHeaderFieldCard(field, onSave, onSkip) {
         const dateLabels = req ? [todayLabel, yesterdayLabel] : [todayLabel, yesterdayLabel, 'Skip (optional)'];
         const dateColClass = getSuggestionColClass(dateLabels);
         addMessage('assistant',
-            `<div
+            `<div style="margin-top:12px;padding:16px;background:#f8f9fa;border-radius:8px;border:1px solid #e5e7eb;width:100%;max-width:520px;box-sizing:border-box;">
                 <div style="margin-bottom:8px;color:#374151;">${question}</div>
                 <div class="hf-opts row g-2">
                     ${_hdrChip(fmt(today),     todayLabel, undefined, dateColClass)}
@@ -8542,19 +9912,32 @@ async function continueFromSmartFill() {
                     if (state.currentFieldType !== '10016' && existingMapContainer) existingMapContainer.remove();
                     if (state.currentFieldType !== '10020' && state.currentFieldType !== '10037' && existingDynamicData) existingDynamicData.remove();
 
-                    if (state.currentFieldType === '10013') {
-                        addFileUploadUI();
-                    } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
-                        addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
-                    } else if (state.currentFieldType === '10016') {
-                        addMapUI(null);
+                    if (data.clusterFormFields && data.clusterFormFields.length >= 1) {
+                        const _iv3 = {};
+                        const _sac3 = new Set(['10006','10008','10009','10017','10020','10023','10026','10037']);
+                        (data.extractedFields || []).forEach(ef => {
+                            const cf = data.clusterFormFields.find(f => f.fieldID === ef.fieldID);
+                            if (cf && _sac3.has(cf.typeCode) && ef.extractedValue) {
+                                let val = ef.extractedValue, text = ef.extractedValue;
+                                try { const p = JSON.parse(ef.extractedValue); if (p.Value !== undefined) { val = String(p.Value); text = p.Text || val; } } catch {}
+                                _iv3[ef.fieldID] = { value: val, text };
+                            }
+                        });
+                        addClusterFormCard(data.clusterFormFields, _iv3);
+                    } else {
+                        if (state.currentFieldType === '10013') {
+                            addFileUploadUI();
+                        } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
+                            addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
+                        } else if (state.currentFieldType === '10016') {
+                            addMapUI(null);
+                        }
+                        if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0
+                            && state.currentFieldType !== '10016') {
+                            addSuggestions(data.nextSuggestedQuestions);
+                        }
+                        addSkipChipIfOptional();
                     }
-
-                    if (data.nextSuggestedQuestions && data.nextSuggestedQuestions.length > 0
-                        && state.currentFieldType !== '10016') {
-                        addSuggestions(data.nextSuggestedQuestions);
-                    }
-                    addSkipChipIfOptional();
                 }, 50);
             };
 
@@ -9318,18 +10701,31 @@ async function autoResumeNext() {
                     if (state.currentFieldType !== '10016' && existingMapContainer) existingMapContainer.remove();
                     if (state.currentFieldType !== '10020' && state.currentFieldType !== '10037' && existingDynamicData) existingDynamicData.remove();
 
-                    if (state.currentFieldType === '10013') {
-                        addFileUploadUI();
-                    } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
-                        addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
-                    } else if (state.currentFieldType === '10016') {
-                        addMapUI(null);
+                    if (data.clusterFormFields && data.clusterFormFields.length >= 1) {
+                        const _iv4 = {};
+                        const _sac4 = new Set(['10006','10008','10009','10017','10020','10023','10026','10037']);
+                        (data.extractedFields || []).forEach(ef => {
+                            const cf = data.clusterFormFields.find(f => f.fieldID === ef.fieldID);
+                            if (cf && _sac4.has(cf.typeCode) && ef.extractedValue) {
+                                let val = ef.extractedValue, text = ef.extractedValue;
+                                try { const p = JSON.parse(ef.extractedValue); if (p.Value !== undefined) { val = String(p.Value); text = p.Text || val; } } catch {}
+                                _iv4[ef.fieldID] = { value: val, text };
+                            }
+                        });
+                        addClusterFormCard(data.clusterFormFields, _iv4);
+                    } else {
+                        if (state.currentFieldType === '10013') {
+                            addFileUploadUI();
+                        } else if ((state.currentFieldType === '10020' || state.currentFieldType === '10026' || state.currentFieldType === '10037') && state.currentFieldDynamicFilter) {
+                            addDynamicDataUI(state.currentFieldType, state.currentFieldDynamicFilter);
+                        } else if (state.currentFieldType === '10016') {
+                            addMapUI(null);
+                        }
+                        if (data.nextSuggestedQuestions?.length && state.currentFieldType !== '10016') {
+                            addSuggestions(data.nextSuggestedQuestions);
+                        }
+                        addSkipChipIfOptional();
                     }
-
-                    if (data.nextSuggestedQuestions?.length && state.currentFieldType !== '10016') {
-                        addSuggestions(data.nextSuggestedQuestions);
-                    }
-                    addSkipChipIfOptional();
                 }, 50);
             };
 
