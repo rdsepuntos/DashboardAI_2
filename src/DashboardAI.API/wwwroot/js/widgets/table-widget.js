@@ -18,6 +18,50 @@ const TableWidget = (() => {
       return;
     }
 
+    // ── Pivot transform ──────────────────────────────────────────────────────
+    // config.pivot      = true
+    // config.pivotGroup = "RecordTitle,InternalNo"   — fixed left-hand columns
+    // config.pivotKey   = "Question"                 — column whose values → new headers
+    // config.pivotValue = "Answer"                   — column whose values fill cells
+    if (config.pivot) {
+      const groupCols = (config.pivotGroup || '').split(',').map(c => c.trim()).filter(Boolean);
+      const keyCol    = config.pivotKey   || 'Question';
+      const valCol    = config.pivotValue || 'Answer';
+
+      // Collect unique question keys in SortOrder sequence
+      const keySeen  = new Set();
+      const keyOrder = [];
+      [...data]
+        .sort((a, b) => (a.SortOrder || 0) - (b.SortOrder || 0))
+        .forEach(row => {
+          const k = row[keyCol];
+          if (k != null && k !== '' && !keySeen.has(k)) { keySeen.add(k); keyOrder.push(k); }
+        });
+
+      // Group rows by pivotGroup composite key
+      const groups = new Map();
+      data.forEach(row => {
+        const gk = groupCols.map(c => String(row[c] ?? '')).join('\x00');
+        if (!groups.has(gk)) {
+          const base = {};
+          groupCols.forEach(c => base[c] = row[c] ?? '');
+          groups.set(gk, { base, vals: {} });
+        }
+        groups.get(gk).vals[row[keyCol]] = row[valCol] ?? '';
+      });
+
+      // Rebuild flat pivoted data
+      data = [...groups.values()].map(g => {
+        const row = { ...g.base };
+        keyOrder.forEach(k => row[k] = g.vals[k] ?? '');
+        return row;
+      });
+
+      // Override columns — no config.columns needed for pivot
+      meta    = null;   // pagination meaningless after client-side pivot
+      fetchFn = null;
+    }
+
     // Determine columns to display
     let columns;
     if (config.columns) {

@@ -180,7 +180,45 @@ config MUST have latKey + lngKey.
 WRONG:  "config": {}
 RIGHT:  "config": { "latKey": "Lat", "lngKey": "Lng", "labelKey": "Location" }
 
---- GAUGE ---
+--- PIVOT TABLE (AID_TemplateResponses only) ---
+⚠ OVERRIDE RULE: If the user request contains the phrase "using template", "with template",
+  "template [name] responses", or asks to show form/checklist question answers for a named
+  template — you MUST use AID_TemplateResponses + pivot. Do NOT use AID_HazardReport,
+  AID_AuditAndInspection, or any other module view even if the module name appears in the request.
+  "hazard report using template X" => AID_TemplateResponses, NOT AID_HazardReport.
+
+When the user asks for a checklist/form/template dashboard where each QUESTION becomes a COLUMN
+(one row per record, answers spread across columns), use a pivot table widget:
+
+  "type": "table",
+  "dataSource": "AID_TemplateResponses",
+  "config": {
+    "templateNameFilter": "<see TEMPLATE NAME EXTRACTION rule below>",
+    "pivot":       true,
+    "pivotGroup":  "RecordTitle,InternalNo,Status,StartDtString,Location",
+    "pivotKey":    "Question",
+    "pivotValue":  "Answer"
+  }
+
+TEMPLATE NAME EXTRACTION — follow these steps every time:
+  1. Look at the user request for a quoted or named template (e.g. "Call out Form", "Monthly Safety Walk").
+  2. Copy that name VERBATIM (preserve capitalisation and spaces) into templateNameFilter.
+  3. If the user did NOT name a specific template, set templateNameFilter to "" (empty string)
+     and rely on the dropdown filter — but warn yourself: an empty templateNameFilter means
+     ALL templates will mix together, producing meaningless columns.
+  4. NEVER invent, guess, or substitute a template name — use only what the user typed.
+
+RULES for pivot:
+- templateNameFilter is MANDATORY. Omitting it or leaving it as a placeholder mixes every
+  template's questions into one table. This is wrong. Always set it.
+- pivotGroup lists the fixed left-hand columns shown per record row.
+  Default: "RecordTitle,InternalNo,Status,StartDtString,Location"
+- pivotKey and pivotValue are always "Question" and "Answer" for AID_TemplateResponses.
+- Do NOT set config.columns on a pivot table — columns are generated dynamically.
+- ALWAYS add a template dropdown filter so the user can switch templates:
+    { "type": "dropdown", "label": "Template", "param": "TemplateName",
+      "optionsSource": "AID_TemplateList", "valueKey": "TemplateName", "labelKey": "TemplateName",
+      "defaultValue": "<same value as templateNameFilter>" }
 Shows a half-doughnut arc of a single scalar value within a min–max range.
 config MUST have valueKey + max.
   valueKey    — "count" or a numeric column (same rules as KPI)
@@ -241,6 +279,17 @@ columns list, valueKey/labelKey in filters) MUST appear in the "columns" array o
 the dataSource in AVAILABLE DATA SOURCES. If a column does not exist in that list,
 do NOT use it. The only exception is the magic valueKey "count" (counts rows).
 Never use ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID) as xKey or valueKey.
+- Checklist responses / form answers / template findings
+  inspection question results / audit question details
+  what answers were given / question-level detail
+  "using template [name]" / "with template [name]"
+  "[module] using template" / "template [name] responses"
+  show form questions / show checklist answers                => AID_TemplateResponses  *** PIVOT ***
+- Template names / available checklists / which templates
+  exist / template list / pick a template                   => AID_TemplateList
+  (use AID_TemplateList as optionsSource for filters only;
+   for actual response data use AID_TemplateResponses)
+
 dataSource MUST be the exact Name of a data source from AVAILABLE DATA SOURCES — never invent one.
 
 === APPLIESFILTERS RULES ===

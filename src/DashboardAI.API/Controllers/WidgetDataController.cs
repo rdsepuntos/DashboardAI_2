@@ -31,7 +31,10 @@ namespace DashboardAI.API.Controllers
             "Department", "Division", "Location", "LocationType",
             "Programme", "Checklist", "CreatedBy", "PersonResponsible", "ReportedBy",
             // AID_Actions
-            "ActionStatus", "Priority", "Category", "Responsible", "LocationName", "ModuleType"
+            "ActionStatus", "Priority", "Category", "Responsible", "LocationName", "ModuleType",
+            "TemplateQuestion", "TemplateAnswer",
+            // AID_TemplateResponses
+            "Section", "Question", "Answer", "RecordTitle", "TemplateName"
         };
 
         public WidgetDataController(QueryWidgetDataHandler handler, IDataSourceRegistry registry)
