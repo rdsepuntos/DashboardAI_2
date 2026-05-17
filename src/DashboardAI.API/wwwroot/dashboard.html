@@ -488,7 +488,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--primary:#3B98F1;--secondary:#212950;--bg:#F8F7F5;--white:#FFFFFF;--text:#231F21;--muted:#6F7482;--line:#ECEEF2;--soft-blue:#EEF6FF;--success:#12A37F;--warning:#F59E0B;--danger:#E45E5E;--radius:10px;--shadow:0 10px 25px rgba(33,41,80,.06)}
 body{min-height:100vh;background:var(--bg);font-family:'Nunito',Arial,sans-serif;color:var(--text);padding:32px 20px 56px;display:flex;flex-direction:column;align-items:center;gap:28px}
-h1,h2,h3{font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+h1,h2,h3{font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
 p{line-height:1.65;color:var(--muted)}
 .print-bar{width:min(960px,100%);background:var(--white);border:1px solid var(--line);box-shadow:0 6px 18px rgba(33,41,80,.05);border-radius:8px;padding:10px 12px 10px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:16px;z-index:20}
 .print-bar-title{font-size:13px;color:var(--secondary);font-weight:600;display:flex;gap:10px;align-items:center}
@@ -500,11 +500,11 @@ p{line-height:1.65;color:var(--muted)}
 .logo-mark{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--secondary)}
 .cover-chip{border:1px solid var(--line);border-radius:8px;padding:8px 14px;color:var(--secondary);font-weight:600;font-size:12px;background:white}
 .cover-eyebrow{font-size:20px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
-.cover-title{font-size:50x;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+.cover-title{font-size:50x;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
 .cover-sub{font-size:17px;max-width:520px;color:var(--muted)}
 .cover-meta-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 56px 56px;background:white}
 .cover-meta-item{background:var(--bg);border-radius:10px;padding:22px 24px;border:1px solid #F0EFED;min-height:120px;display:flex;flex-direction:column;justify-content:space-between;text-align:center}
-.cover-meta-val{font-family:'Poppins',Arial,sans-serif;font-size:34px;line-height:1;color:var(--secondary);font-weight:600;margin:auto 0}
+.cover-meta-val{font-family:'Nunito',sans-serif;font-size:34px;line-height:1;color:var(--secondary);font-weight:600;margin:auto 0}
 .cover-meta-val.accent{color:var(--primary)}
 .cover-meta-val.date{font-size:20px;letter-spacing:-.03em}
 .cover-meta-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:auto}
@@ -515,7 +515,7 @@ p{line-height:1.65;color:var(--muted)}
 .section-date{font-size:13px;color:var(--muted);font-weight:600}
 .kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .kpi-card{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:20px;position:relative;overflow:hidden}
-.metric-value{font-size:34px;letter-spacing:-.05em;margin-bottom:4px;font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+.metric-value{font-size:34px;letter-spacing:-.05em;margin-bottom:4px;font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
 .metric-label{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-height:32px}
 .trend{margin-top:12px;font-size:12px;color:var(--success);font-weight:700}
 .trend.down{color:var(--danger)}
@@ -524,7 +524,7 @@ p{line-height:1.65;color:var(--muted)}
 .wc{background:var(--white);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:330px}
 .wc.wide{grid-column:1/-1;min-height:300px}
 .wc-head{padding:22px 24px 12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.wc-head-title{font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary);font-size:20px;line-height:1.2;letter-spacing:-.03em}
+.wc-head-title{font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary);font-size:20px;line-height:1.2;letter-spacing:-.03em}
 .wc-body-right,.wc-body-left{display:grid;grid-template-columns:1.55fr 1fr;gap:0;flex:1}
 .wc-body-left{grid-template-columns:1fr 1.55fr}
 .wc-body-left .wc-img{order:2}
@@ -538,7 +538,7 @@ p{line-height:1.65;color:var(--muted)}
 .note-label{display:block;color:var(--primary);text-transform:uppercase;letter-spacing:.1em;font-size:10px;font-weight:700;margin-bottom:6px}
 .table-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:white}
 .table-banner{padding:24px 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:white}
-.table-banner .tit{font-family:'Poppins',Arial,sans-serif;font-size:23px;color:var(--secondary);font-weight:600;letter-spacing:-.03em}
+.table-banner .tit{font-family:'Nunito',sans-serif;font-size:23px;color:var(--secondary);font-weight:600;letter-spacing:-.03em}
 .cnt{background:var(--soft-blue);color:var(--primary);padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700}
 .table-insight{margin:20px 24px;background:var(--bg);border-radius:8px;padding:18px 20px;color:#545A6B;font-size:14px;line-height:1.65;border-left:4px solid var(--primary)}
 .data-table-wrap{padding:0 24px 26px;overflow-x:auto}
@@ -604,15 +604,12 @@ ${tablePagesHtml}
 
 </body></html>`;
 
-        // ── Open report in new window ──────────────────────────────────────────
+        // ── Open report in drawer ───────────────────────────────────────────────
         setProg('Opening report…', 98);
-        const win = window.open('', '_blank', 'width=1040,height=960,scrollbars=yes');
-        if (!win) {
-          alert('Popup blocked — please allow popups for this page and try again.');
-          return;
-        }
-        win.document.write(html);
-        win.document.close();
+        const frame = document.getElementById('pdfFrame');
+        frame.srcdoc = html;
+        document.getElementById('pdfDrawerBackdrop').style.display = 'block';
+        document.getElementById('pdfDrawer').style.right = '0';
 
       } catch (err) {
         console.error('[Report]', err);
@@ -636,7 +633,32 @@ ${tablePagesHtml}
     document.getElementById('chatExpandBtn').addEventListener('click', () => {
       document.getElementById('chatSidebar').classList.remove('hidden');
     });
+
+    function closePdfDrawer() {
+      document.getElementById('pdfDrawer').style.right = '-100%';
+      document.getElementById('pdfDrawerBackdrop').style.display = 'none';
+      setTimeout(() => { document.getElementById('pdfFrame').srcdoc = ''; }, 400);
+    }
+
+    function printPdfFrame() {
+      const frame = document.getElementById('pdfFrame');
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    }
   </script>
+
+  <!-- ── PDF Report Drawer ────────────────────────────────────────────────── -->
+  <div id="pdfDrawerBackdrop" onclick="closePdfDrawer()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9998"></div>
+  <div id="pdfDrawer" style="position:fixed;top:0;right:-100%;width:min(960px,100%);height:100vh;z-index:9999;display:flex;flex-direction:column;background:#f8f7f5;box-shadow:-8px 0 40px rgba(0,0,0,.25);transition:right .35s cubic-bezier(.4,0,.2,1)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;border-bottom:1px solid #eceef2;flex-shrink:0">
+      <span style="font-family:'Nunito',sans-serif;font-weight:700;font-size:14px;color:#212950">Report Preview</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="printPdfFrame()" style="border:0;background:#3B98F1;color:#fff;border-radius:8px;padding:8px 16px;font-family:'Nunito',sans-serif;font-weight:700;font-size:13px;cursor:pointer">Print / Save as PDF</button>
+        <button onclick="closePdfDrawer()" style="border:1px solid #eceef2;background:#fff;color:#6b7280;border-radius:8px;padding:8px 12px;font-size:18px;line-height:1;cursor:pointer">&times;</button>
+      </div>
+    </div>
+    <iframe id="pdfFrame" style="flex:1;border:none;width:100%;background:#f8f7f5"></iframe>
+  </div>
 
   <footer style="display:none;" class="print-footer">
     <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
