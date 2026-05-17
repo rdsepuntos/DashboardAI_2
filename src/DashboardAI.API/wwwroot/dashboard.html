@@ -461,7 +461,7 @@
                 ${bodyHtml}
               </div>
             </main>
-            <div class="page-footer"><span class="brand">WHS Monitor</span><span>${esc(printTitle)}</span></div>
+            <div class="page-footer"><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span><span>${esc(printTitle)}</span></div>
           </section>`;
         });
 
@@ -473,12 +473,12 @@
             <header class="section-header"><div><div class="section-kicker">Dashboard Widgets</div><h2 class="section-title">${esc(printTitle)}</h2></div></header>
             ${cardsHtml ? `<div class="cards-grid">${cardsHtml}</div>` : ''}
           </main>
-          <div class="page-footer"><span class="brand">WHS Monitor</span><span>1</span></div>
+          <div class="page-footer"><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span><span>1</span></div>
         </section>` : '';
 
         // ── Logo ───────────────────────────────────────────────────────────────
         const logoSrc  = document.querySelector('.topbar-logo img')?.src || '';
-        const logoHtml = logoSrc ? `<img src="${logoSrc}" crossorigin="anonymous" style="max-height:24px;width:auto" />` : '';
+        const logoHtml = logoSrc ? `<img src="${logoSrc}" crossorigin="anonymous" style="max-height:40px;width:auto" />` : '';
 
         // ── Assemble HTML document ─────────────────────────────────────────────
         setProg('Building report…', 90);
@@ -499,8 +499,8 @@ p{line-height:1.65;color:var(--muted)}
 .brand-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:90px}
 .logo-mark{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--secondary)}
 .cover-chip{border:1px solid var(--line);border-radius:8px;padding:8px 14px;color:var(--secondary);font-weight:600;font-size:12px;background:white}
-.cover-eyebrow{font-size:13px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
-.cover-title{font-size:56px;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
+.cover-eyebrow{font-size:20px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
+.cover-title{font-size:50x;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Poppins',Arial,sans-serif;font-weight:600;color:var(--secondary)}
 .cover-sub{font-size:17px;max-width:520px;color:var(--muted)}
 .cover-meta-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 56px 56px;background:white}
 .cover-meta-item{background:var(--bg);border-radius:10px;padding:22px 24px;border:1px solid #F0EFED;min-height:120px;display:flex;flex-direction:column;justify-content:space-between;text-align:center}
@@ -596,7 +596,7 @@ p{line-height:1.65;color:var(--muted)}
       <div class="cover-meta-lbl">${storeLabel || 'Report Date'}</div>
     </div>
   </div>
-  <div class="page-footer"><span class="brand">WHS Monitor</span><span>Cover</span></div>
+  <div class="page-footer"><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span><span>Cover</span></div>
 </section>
 
 ${widgetPageHtml}
@@ -637,5 +637,14 @@ ${tablePagesHtml}
       document.getElementById('chatSidebar').classList.remove('hidden');
     });
   </script>
+
+  <footer style="display:none;" class="print-footer">
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+  </footer>
+  <style>
+    @media print {
+      .print-footer { display: flex !important; justify-content: flex-end; padding: 6px 16px; }
+    }
+  </style>
 </body>
 </html>

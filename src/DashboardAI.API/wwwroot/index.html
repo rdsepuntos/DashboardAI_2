@@ -99,5 +99,14 @@
       }
     });
   </script>
+
+  <footer style="display:none;" class="print-footer">
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;position:relative;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+  </footer>
+  <style>
+    @media print {
+      .print-footer { display: flex !important; justify-content: flex-end; padding: 6px 16px; }
+    }
+  </style>
 </body>
 </html>
