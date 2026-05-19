@@ -125,6 +125,16 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
   <script>
+    // ── Send Report state ───────────────────────────────────────────────────
+    let _reportHtml = '', _reportTitle = '', _reportDate = '';
+    let _srSel    = { users:{}, division:{}, department:{}, role:{} };
+    let _srTotal  = { users:0, division:0, department:0, role:0 };
+    let _srLoaded = { division:false, department:false };
+    let _srSearchTimer = null;
+    const _SR_SEND_URL  = 'https://beta.whsmonitor.com.au/dashboardv2/api/report/send-email';
+    const _SR_ASHX_BASE = 'https://beta.whsmonitor.com.au/App/NetServices';
+    const _SR_ASMX_BASE = 'https://beta.whsmonitor.com.au/NetServices/POSTDynamicChecklist.asmx';
+
     // Bootstrap: extract dashboard ID from URL path /dashboard/{id}
     const pathParts    = window.location.pathname.split('/');
     const dashboardId  = pathParts[pathParts.length - 1];
@@ -567,10 +577,7 @@ p{line-height:1.65;color:var(--muted)}
   .insight-panel{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style></head><body>
-<div class="print-bar">
-  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span class="ai-badge">AI Annotated</span>' : ''}</span>
-  <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
-</div>
+
 
 <section class="page">
   <div class="cover">
@@ -608,6 +615,7 @@ ${tablePagesHtml}
         setProg('Opening report…', 98);
         const frame = document.getElementById('pdfFrame');
         frame.srcdoc = html;
+        _reportHtml = html; _reportTitle = printTitle; _reportDate = printDate;
         document.getElementById('pdfDrawerBackdrop').style.display = 'block';
         document.getElementById('pdfDrawer').style.right = '0';
 
@@ -645,6 +653,204 @@ ${tablePagesHtml}
       frame.contentWindow.focus();
       frame.contentWindow.print();
     }
+
+    // ── Send Report (share via email) ──────────────────────────────────────────
+    function srOpen() {
+      if (!_reportHtml) { alert('Generate a report first.'); return; }
+      document.getElementById('sr-pill-name').textContent = `${_reportTitle} \u2014 ${_reportDate}`;
+      document.getElementById('sr-subject').value = `${_reportTitle} \u2014 ${_reportDate}`;
+      document.getElementById('sr-message').value = '';
+      // Reset state
+      _srSel    = { users:{}, division:{}, department:{}, role:{} };
+      _srLoaded = { division:false, department:false };
+      ['sr-users-list','sr-role-list'].forEach(id => {
+        document.getElementById(id).innerHTML = '<div class="sr-empty">No results \u2014 type to search</div>';
+      });
+      ['sr-division-list','sr-department-list'].forEach(id => {
+        document.getElementById(id).innerHTML = '<div class="sr-loading">Loading\u2026</div>';
+      });
+      document.getElementById('sr-chips-wrap').innerHTML = '';
+      document.getElementById('sr-total').textContent = '0 selected';
+      document.getElementById('sr-send-btn').disabled = true;
+      ['users','division','department','role'].forEach(g => {
+        document.getElementById('sr-cnt-' + g).textContent = '0';
+      });
+      // Reset tabs to Users
+      document.querySelectorAll('.sr-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.sr-panel').forEach(p => p.classList.remove('visible'));
+      document.querySelector('.sr-tab[data-sr-tab="users"]').classList.add('active');
+      document.getElementById('sr-panel-users').classList.add('visible');
+      document.getElementById('sr-backdrop').classList.add('open');
+      srLoadDivisions();
+      srLoadDepartments();
+    }
+    function srClose() {
+      document.getElementById('sr-backdrop').classList.remove('open');
+    }
+    function srTab(tab, el) {
+      document.querySelectorAll('.sr-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.sr-panel').forEach(p => p.classList.remove('visible'));
+      el.classList.add('active');
+      document.getElementById('sr-panel-' + tab).classList.add('visible');
+    }
+    function srLoadDivisions() {
+      if (_srLoaded.division) return;
+      _srLoaded.division = true;
+      fetch(`${_SR_ASHX_BASE}/GetDivision.ashx?storeId=${SESSION.storeId}&memberId=${SESSION.userId}`)
+        .then(r => r.json())
+        .then(j => {
+          const items = j.data || [];
+          _srTotal.division = items.length;
+          const list = document.getElementById('sr-division-list');
+          if (!items.length) { list.innerHTML = '<div class="sr-empty">No divisions found</div>'; srUpdateSelCount('division'); return; }
+          list.innerHTML = items.map(x =>
+            `<div class="sr-item" data-group="division" data-id="${x.IDNo}" data-label="${srEsc(x.RowDescription)}" onclick="srToggle(this,'division')">`
+            + '<div class="sr-item-cb"></div>'
+            + `<div class="sr-item-label">${srEsc(x.RowDescription)}</div></div>`
+          ).join('');
+          srUpdateSelCount('division');
+        })
+        .catch(() => { document.getElementById('sr-division-list').innerHTML = '<div class="sr-empty">Failed to load</div>'; });
+    }
+    function srLoadDepartments() {
+      if (_srLoaded.department) return;
+      _srLoaded.department = true;
+      fetch(`${_SR_ASHX_BASE}/GetDepartment.ashx?storeId=${SESSION.storeId}&memberId=${SESSION.userId}&parentId=0`)
+        .then(r => r.json())
+        .then(j => {
+          const items = j.data || [];
+          _srTotal.department = items.length;
+          const list = document.getElementById('sr-department-list');
+          if (!items.length) { list.innerHTML = '<div class="sr-empty">No departments found</div>'; srUpdateSelCount('department'); return; }
+          list.innerHTML = items.map(x =>
+            `<div class="sr-item" data-group="department" data-id="${x.IDNo}" data-label="${srEsc(x.RowDescription)}" onclick="srToggle(this,'department')">`
+            + '<div class="sr-item-cb"></div>'
+            + `<div class="sr-item-label">${srEsc(x.RowDescription)}</div></div>`
+          ).join('');
+          srUpdateSelCount('department');
+        })
+        .catch(() => { document.getElementById('sr-department-list').innerHTML = '<div class="sr-empty">Failed to load</div>'; });
+    }
+    function srSearchUsers(query, tab) {
+      tab = tab || 'users';
+      const listId = tab === 'role' ? 'sr-role-list' : 'sr-users-list';
+      clearTimeout(_srSearchTimer);
+      const q = (query || '').trim();
+      if (q.length < 2) { document.getElementById(listId).innerHTML = '<div class="sr-empty">No results \u2014 type to search</div>'; return; }
+      document.getElementById(listId).innerHTML = '<div class="sr-loading">Searching\u2026</div>';
+      _srSearchTimer = setTimeout(() => {
+        fetch(`${_SR_ASMX_BASE}/GetAuditedLimit`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { StoreID: SESSION.storeId, LocType: 0, LocID: 0, MemberId: SESSION.userId, Search: q } })
+        })
+        .then(r => r.json())
+        .then(j => {
+          const records = (j.d && j.d.recordList) ? j.d.recordList : [];
+          const list = document.getElementById(listId);
+          if (!records.length) { list.innerHTML = '<div class="sr-empty">No results found</div>'; return; }
+          const colors = ['','t','a','r','i'];
+          list.innerHTML = records.map((r, idx) => {
+            const initials = (r.RowDescription || '?').split(' ').slice(0,2).map(w => w[0]||'').join('').toUpperCase();
+            const col = colors[idx % colors.length];
+            return `<div class="sr-item" data-group="${tab}" data-id="${r.IDNo}" data-label="${srEsc(r.RowDescription)}" onclick="srToggle(this,'${tab}')">`
+              + '<div class="sr-item-cb"></div>'
+              + `<div class="sr-item-av ${col}">${initials}</div>`
+              + `<div class="sr-item-label">${srEsc(r.RowDescription)}</div></div>`;
+          }).join('');
+          Object.keys(_srSel[tab]).forEach(id => {
+            const el = list.querySelector(`[data-id="${id}"]`);
+            if (el) el.classList.add('selected');
+          });
+        })
+        .catch(() => { document.getElementById(listId).innerHTML = '<div class="sr-empty">Search failed</div>'; });
+      }, 300);
+    }
+    function srToggle(el, group) {
+      const id = el.dataset.id, label = el.dataset.label;
+      if (el.classList.contains('selected')) { el.classList.remove('selected'); delete _srSel[group][id]; }
+      else { el.classList.add('selected'); _srSel[group][id] = label; }
+      srUpdateUI(group);
+    }
+    function srSelectAll(listId, group) {
+      const items = document.querySelectorAll(`#${listId} .sr-item:not([style*="display:none"]):not([style*="display: none"])`);
+      const allSel = [...items].every(i => i.classList.contains('selected'));
+      items.forEach(el => {
+        const id = el.dataset.id, label = el.dataset.label;
+        if (allSel) { el.classList.remove('selected'); delete _srSel[group][id]; }
+        else { el.classList.add('selected'); _srSel[group][id] = label; }
+      });
+      srUpdateUI(group);
+    }
+    function srFilter(listId, query) {
+      const q = query.toLowerCase();
+      document.querySelectorAll(`#${listId} .sr-item`).forEach(el => {
+        el.style.display = el.dataset.label.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+    function srUpdateSelCount(group) {
+      const el = document.getElementById('sr-selcount-' + group);
+      if (el) el.textContent = `${Object.keys(_srSel[group]).length} of ${_srTotal[group]} selected`;
+    }
+    function srUpdateUI(group) {
+      document.getElementById('sr-cnt-' + group).textContent = Object.keys(_srSel[group]).length;
+      srUpdateSelCount(group);
+      srRenderChips();
+      const total = Object.keys(_srSel.users).length + Object.keys(_srSel.division).length
+                  + Object.keys(_srSel.department).length + Object.keys(_srSel.role).length;
+      document.getElementById('sr-total').textContent = total === 0 ? '0 selected' : `${total} recipient${total !== 1 ? 's' : ''}`;
+      document.getElementById('sr-send-btn').disabled = total === 0;
+    }
+    function srRenderChips() {
+      const wrap = document.getElementById('sr-chips-wrap');
+      wrap.innerHTML = '';
+      const addChip = (group, id, label, cls) => {
+        const c = document.createElement('div');
+        c.className = 'sr-chip ' + (cls || '');
+        c.innerHTML = srEsc(label) + `<span class="sr-chip-x" onclick="srRemoveChip('${group}','${id}')"><i class="ph ph-x"></i></span>`;
+        wrap.appendChild(c);
+      };
+      Object.keys(_srSel.users).forEach(id => addChip('users', id, _srSel.users[id], ''));
+      Object.keys(_srSel.division).forEach(id => addChip('division', id, _srSel.division[id], 'div'));
+      Object.keys(_srSel.department).forEach(id => addChip('department', id, _srSel.department[id], 'dep'));
+      Object.keys(_srSel.role).forEach(id => addChip('role', id, _srSel.role[id], 'rol'));
+    }
+    function srRemoveChip(group, id) {
+      delete _srSel[group][id];
+      const el = document.querySelector(`[data-group="${group}"][data-id="${id}"]`);
+      if (el) el.classList.remove('selected');
+      srUpdateUI(group);
+    }
+    function srHandleSend() {
+      const btn = document.getElementById('sr-send-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="ph ph-circle-notch" style="display:inline-block;animation:sr-spin .8s linear infinite"></i>\u00a0 Sending\u2026';
+      const payload = {
+        storeId:       SESSION.storeId,
+        userId:        SESSION.userId,
+        userIds:       Object.keys(_srSel.users).map(Number),
+        divisionIds:   Object.keys(_srSel.division).map(Number),
+        departmentIds: Object.keys(_srSel.department).map(Number),
+        roleIds:       Object.keys(_srSel.role).map(Number),
+        subject:       document.getElementById('sr-subject').value,
+        message:       document.getElementById('sr-message').value,
+        reportHtml:    _reportHtml
+      };
+      fetch(_SR_SEND_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || 'Send failed'); }))
+        .then(j => {
+          btn.innerHTML = `<i class="ph ph-check"></i>\u00a0 Sent to ${j.sent} recipient${j.sent === 1 ? '' : 's'}!`;
+          btn.style.background = '#16a34a';
+          setTimeout(() => { srClose(); btn.innerHTML = '<i class="ph ph-paper-plane-tilt"></i>\u00a0 Send Report'; btn.style.background = ''; btn.disabled = false; }, 2000);
+        })
+        .catch(e => {
+          btn.innerHTML = `<i class="ph ph-warning"></i>\u00a0 Error: ${e.message}`;
+          btn.style.background = '#dc2626';
+          setTimeout(() => { btn.innerHTML = '<i class="ph ph-paper-plane-tilt"></i>\u00a0 Send Report'; btn.style.background = ''; btn.disabled = false; }, 3000);
+        });
+    }
+    function srEsc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
   </script>
 
   <!-- ── PDF Report Drawer ────────────────────────────────────────────────── -->
@@ -653,11 +859,181 @@ ${tablePagesHtml}
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;border-bottom:1px solid #eceef2;flex-shrink:0">
       <span style="font-family:'Nunito',sans-serif;font-weight:700;font-size:14px;color:#212950">Report Preview</span>
       <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="srOpen()" style="border:0;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-family:'Nunito',sans-serif;font-weight:700;font-size:13px;cursor:pointer"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
         <button onclick="printPdfFrame()" style="border:0;background:#3B98F1;color:#fff;border-radius:8px;padding:8px 16px;font-family:'Nunito',sans-serif;font-weight:700;font-size:13px;cursor:pointer">Print / Save as PDF</button>
         <button onclick="closePdfDrawer()" style="border:1px solid #eceef2;background:#fff;color:#6b7280;border-radius:8px;padding:8px 12px;font-size:18px;line-height:1;cursor:pointer">&times;</button>
       </div>
     </div>
     <iframe id="pdfFrame" style="flex:1;border:none;width:100%;background:#f8f7f5"></iframe>
+  </div>
+
+  <!-- ── Send Report Modal ──────────────────────────────────────────────── -->
+  <style>
+    @keyframes sr-spin{to{transform:rotate(360deg)}}
+    .sr-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:24px;z-index:10000}
+    .sr-backdrop.open{display:flex}
+    .sr-modal{background:#fff;border-radius:12px;width:100%;max-width:680px;box-shadow:0 24px 60px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:92vh;overflow:hidden;font-family:'Nunito',sans-serif}
+    .sr-hdr{background:#3B98F1;padding:20px 24px 18px;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0}
+    .sr-hdr-left{display:flex;flex-direction:column;gap:4px}
+    .sr-eyebrow{font-size:9px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.14em}
+    .sr-title{font-size:20px;font-weight:800;color:#fff;line-height:1.1}
+    .sr-close{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:16px;flex-shrink:0;margin-top:2px}
+    .sr-close:hover{background:rgba(255,255,255,.25)}
+    .sr-pill{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin:16px 24px 0;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+    .sr-pill-icon{font-size:18px;flex-shrink:0}
+    .sr-pill-info{flex:1;min-width:0}
+    .sr-pill-name{font-size:11px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sr-pill-meta{font-size:9px;color:#6b7280;margin-top:1px}
+    .sr-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+    .sr-sec-lbl{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+    .sr-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+    .sr-tab{font-size:11px;font-weight:600;padding:5px 12px;border-radius:20px;border:1.5px solid #e5e7eb;color:#6b7280;cursor:pointer;transition:all .15s;background:#fff;user-select:none}
+    .sr-tab:hover{border-color:#3B98F1;color:#3B98F1}
+    .sr-tab.active{background:#3B98F1;color:#fff;border-color:#3B98F1}
+    .sr-tab .sr-tab-cnt{display:inline-block;background:rgba(255,255,255,.3);border-radius:8px;font-size:9px;padding:0 5px;margin-left:4px;font-weight:700}
+    .sr-tab:not(.active) .sr-tab-cnt{background:#f3f4f6;color:#6b7280}
+    .sr-panel{display:none}.sr-panel.visible{display:block}
+    .sr-ms-wrap{border:1.5px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff}
+    .sr-ms-wrap:focus-within{border-color:#3B98F1;box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+    .sr-search-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #e5e7eb;background:#fafafa}
+    .sr-search-row input{border:none;background:transparent;outline:none;font-size:11px;color:#111827;width:100%;font-family:inherit}
+    .sr-search-row input::placeholder{color:#9ca3af}
+    .sr-sel-all-row{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb}
+    .sr-sel-all-btn{font-size:10px;color:#3B98F1;cursor:pointer;font-weight:600}.sr-sel-all-btn:hover{text-decoration:underline}
+    .sr-sel-count{font-size:10px;color:#6b7280}
+    .sr-list{max-height:160px;overflow-y:auto}
+    .sr-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background .1s;user-select:none}
+    .sr-item:hover{background:#f9fafb}.sr-item.selected{background:#eff6ff}
+    .sr-item-cb{width:15px;height:15px;border:1.5px solid #e5e7eb;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+    .sr-item.selected .sr-item-cb{background:#3B98F1;border-color:#3B98F1}
+    .sr-item.selected .sr-item-cb::after{content:'\2713';color:#fff;font-size:9px;font-weight:700}
+    .sr-item-label{font-size:11px;color:#111827;flex:1}
+    .sr-item-av{width:22px;height:22px;border-radius:50%;background:#3B98F1;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .sr-item-av.t{background:#0d9488}.sr-item-av.a{background:#d97706}.sr-item-av.r{background:#e11d48}.sr-item-av.i{background:#4f46e5}
+    .sr-empty{padding:16px 12px;font-size:11px;color:#6b7280;text-align:center}
+    .sr-loading{padding:14px 12px;font-size:11px;color:#6b7280;text-align:center}
+    .sr-chips-wrap{display:flex;flex-wrap:wrap;gap:6px;min-height:22px;margin-top:10px}
+    .sr-chip{display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:3px 10px 3px 8px;font-size:10px;color:#2563eb;font-weight:600}
+    .sr-chip.div{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+    .sr-chip.dep{background:#fef3c7;border-color:#fde68a;color:#92400e}
+    .sr-chip.rol{background:#f5f3ff;border-color:#ddd6fe;color:#5b21b6}
+    .sr-chip-x{cursor:pointer;font-size:11px;opacity:.6;line-height:1}.sr-chip-x:hover{opacity:1}
+    .sr-summary-row{display:flex;align-items:center;gap:6px;padding:8px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-top:8px}
+    .sr-summary-dot{width:7px;height:7px;border-radius:50%;background:#3B98F1;flex-shrink:0}
+    .sr-summary-text{font-size:10px;color:#6b7280;flex:1}
+    .sr-summary-count{font-size:11px;font-weight:700;color:#3B98F1}
+    .sr-field{display:flex;flex-direction:column;gap:5px}
+    .sr-field label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.07em}
+    .sr-field input,.sr-field textarea{border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:12px;color:#111827;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s;resize:none}
+    .sr-field input:focus,.sr-field textarea:focus{border-color:#3B98F1;box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+    .sr-field textarea{min-height:72px}
+    .sr-ftr{padding:14px 24px;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px;background:#fafafa}
+    .sr-ftr-note{font-size:9.5px;color:#6b7280;display:flex;align-items:center;gap:5px}
+    .sr-ftr-btns{display:flex;gap:8px}
+    .sr-btn-ghost{background:transparent;border:1.5px solid #e5e7eb;color:#6b7280;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+    .sr-btn-ghost:hover{border-color:#9ca3af;color:#111827}
+    .sr-btn-primary{background:#3B98F1;color:#fff;box-shadow:0 2px 8px rgba(59,152,241,.35);border:none;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+    .sr-btn-primary:hover{opacity:.88}
+    .sr-btn-primary:disabled{opacity:.5;cursor:not-allowed}
+    .sr-user-search-hint{font-size:10px;color:#6b7280;padding:6px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-style:italic}
+    @media print { .sr-backdrop { display: none !important; } }
+  </style>
+  <div id="sr-backdrop" class="sr-backdrop" onclick="if(event.target===this)srClose()" role="dialog" aria-modal="true">
+    <div class="sr-modal">
+      <div class="sr-hdr">
+        <div class="sr-hdr-left">
+          <div class="sr-eyebrow">WHS Monitor</div>
+          <div class="sr-title"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</div>
+        </div>
+        <div class="sr-close" onclick="srClose()" title="Close"><i class="ph ph-x"></i></div>
+      </div>
+      <div class="sr-pill">
+        <div class="sr-pill-icon">&#128196;</div>
+        <div class="sr-pill-info">
+          <div class="sr-pill-name" id="sr-pill-name">Report</div>
+          <div class="sr-pill-meta">Dashboard Report &bull; Generated just now</div>
+        </div>
+        <div style="font-size:9px;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px;font-weight:600;flex-shrink:0">HTML</div>
+      </div>
+      <div class="sr-body">
+        <div>
+          <div class="sr-sec-lbl">Send To</div>
+          <div class="sr-tabs">
+            <div class="sr-tab active" data-sr-tab="users" onclick="srTab('users',this)">Users <span class="sr-tab-cnt" id="sr-cnt-users">0</span></div>
+            <div class="sr-tab" data-sr-tab="division" onclick="srTab('division',this)">Division <span class="sr-tab-cnt" id="sr-cnt-division">0</span></div>
+            <div class="sr-tab" data-sr-tab="department" onclick="srTab('department',this)">Department <span class="sr-tab-cnt" id="sr-cnt-department">0</span></div>
+            <div class="sr-tab" data-sr-tab="role" onclick="srTab('role',this)">Employee Role <span class="sr-tab-cnt" id="sr-cnt-role">0</span></div>
+          </div>
+          <div id="sr-panel-users" class="sr-panel visible">
+            <div class="sr-ms-wrap">
+              <div class="sr-search-row">
+                <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
+                <input type="text" id="sr-user-search" placeholder="Type a name to search users&hellip;" oninput="srSearchUsers(this.value)" autocomplete="off"/>
+              </div>
+              <div class="sr-user-search-hint">Start typing to search members by name</div>
+              <div class="sr-list" id="sr-users-list"><div class="sr-empty">No results &mdash; type to search</div></div>
+            </div>
+          </div>
+          <div id="sr-panel-division" class="sr-panel">
+            <div class="sr-ms-wrap">
+              <div class="sr-search-row">
+                <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
+                <input type="text" placeholder="Search divisions&hellip;" oninput="srFilter('sr-division-list',this.value)" autocomplete="off"/>
+              </div>
+              <div class="sr-sel-all-row">
+                <span class="sr-sel-all-btn" onclick="srSelectAll('sr-division-list','division')">Select all</span>
+                <span class="sr-sel-count" id="sr-selcount-division">Loading&hellip;</span>
+              </div>
+              <div class="sr-list" id="sr-division-list"><div class="sr-loading">Loading&hellip;</div></div>
+            </div>
+          </div>
+          <div id="sr-panel-department" class="sr-panel">
+            <div class="sr-ms-wrap">
+              <div class="sr-search-row">
+                <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
+                <input type="text" placeholder="Search departments&hellip;" oninput="srFilter('sr-department-list',this.value)" autocomplete="off"/>
+              </div>
+              <div class="sr-sel-all-row">
+                <span class="sr-sel-all-btn" onclick="srSelectAll('sr-department-list','department')">Select all</span>
+                <span class="sr-sel-count" id="sr-selcount-department">Loading&hellip;</span>
+              </div>
+              <div class="sr-list" id="sr-department-list"><div class="sr-loading">Loading&hellip;</div></div>
+            </div>
+          </div>
+          <div id="sr-panel-role" class="sr-panel">
+            <div class="sr-ms-wrap">
+              <div class="sr-search-row">
+                <i class="ph ph-magnifying-glass" style="color:#6b7280;font-size:14px;flex-shrink:0"></i>
+                <input type="text" id="sr-role-search" placeholder="Type a name to search by role&hellip;" oninput="srSearchUsers(this.value,'role')" autocomplete="off"/>
+              </div>
+              <div class="sr-user-search-hint">Search members &mdash; select to add by employee role</div>
+              <div class="sr-list" id="sr-role-list"><div class="sr-empty">No results &mdash; type to search</div></div>
+            </div>
+          </div>
+          <div id="sr-chips-wrap" class="sr-chips-wrap"></div>
+          <div class="sr-summary-row">
+            <div class="sr-summary-dot"></div>
+            <span class="sr-summary-text">Total unique recipients</span>
+            <span class="sr-summary-count" id="sr-total">0 selected</span>
+          </div>
+        </div>
+        <div class="sr-field">
+          <label>Email Subject</label>
+          <input type="text" id="sr-subject" value=""/>
+        </div>
+        <div class="sr-field">
+          <label>Message (optional)</label>
+          <textarea id="sr-message" placeholder="Add a personal message to accompany the report&hellip;"></textarea>
+        </div>
+      </div>
+      <div class="sr-ftr">
+        <div class="sr-ftr-note"><i class="ph ph-lock-simple"></i> Report will be sent as an HTML attachment</div>
+        <div class="sr-ftr-btns">
+          <button class="sr-btn-ghost" onclick="srClose()">Cancel</button>
+          <button class="sr-btn-primary" id="sr-send-btn" disabled onclick="srHandleSend()"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <footer style="display:none;" class="print-footer">

@@ -63,6 +63,18 @@
         return el.textContent.replace(/\s+/g, ' ').trim();
     }
 
+    /** Sanitize a datatable cell's raw HTML — keep inline styles/colours, strip interactive elements */
+    function sanitizeCellHtml(html) {
+        const d = document.createElement('div');
+        d.innerHTML = String(html ?? '');
+        d.querySelectorAll('script,button,input,select,textarea').forEach(e => e.remove());
+        d.querySelectorAll('*').forEach(e => {
+            [...e.attributes].forEach(a => { if (a.name.startsWith('on')) e.removeAttribute(a.name); });
+            if (e.tagName === 'A') { e.removeAttribute('href'); e.removeAttribute('onclick'); }
+        });
+        return d.innerHTML.trim() || d.textContent.trim() || '-';
+    }
+
     /**
      * Extract all rows from a legacy DataTable widget (bypasses pagination).
      * Returns { title, cols, rows, totalCount } or null if no table found.
@@ -88,11 +100,14 @@
                 rows = rowIndexes.map(rowIdx =>
                     cols.map((_, ci) => {
                         try {
+                            // Prefer the actual DOM node — captures colours/styles applied by
+                            // createdCell / rowCallback that render('display') cannot see.
+                            const node = dt.cell(rowIdx, ci).node();
+                            if (node) return sanitizeCellHtml(node.innerHTML);
+                            // Off-page rows have no DOM node; fall back to render('display').
                             const display = dt.cell(rowIdx, ci).render('display');
-                            const tmp = document.createElement('div');
-                            tmp.innerHTML = String(display ?? '');
-                            return tmp.textContent.trim();
-                        } catch (e) { return ''; }
+                            return sanitizeCellHtml(String(display ?? ''));
+                        } catch (e) { return '-'; }
                     })
                 );
             } catch (dtErr) {
@@ -103,7 +118,7 @@
         // Fallback: only visible (current-page) DOM rows
         if (!rows.length) {
             rows = [...tableEl.querySelectorAll('tbody tr')].map(tr =>
-                [...tr.querySelectorAll('td')].map(td => td.textContent.trim())
+                [...tr.querySelectorAll('td')].map(td => sanitizeCellHtml(td.innerHTML))
             );
         }
 
@@ -430,12 +445,11 @@
             let kpiStripHtml = '';
             countItems.forEach((item, idx) => {
                 const val = esc(extractCountValue(item.el) || '—');
-                const cc = ACCENT_COLORS[idx % ACCENT_COLORS.length];
                 const kpiNote = aiMode ? getInsight(descriptions, item.title) : null;
-                kpiStripHtml += `<div class="kpi-mini${cc ? ' ' + cc : ''}">
-          <div class="kpi-mini-val">${val}</div>
-          <div class="kpi-mini-lbl">${esc(item.title)}</div>
-          ${kpiNote?.description ? `<div style="display: none !important;" class="d-none kpi-mini-note">${esc(kpiNote.description)}</div>` : ''}
+                kpiStripHtml += `<div class="kpi-card">
+          <div class="metric-value">${val}</div>
+          <div class="metric-label">${esc(item.title)}</div>
+          ${kpiNote?.description ? `<div class="trend">${esc(kpiNote.description)}</div>` : ''}
         </div>`;
             });
 
@@ -516,35 +530,35 @@
 
                 if (layout === 'right') {
                     cardsHtml += `
-            <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
+            <div class="wc wide"${spanFull}>
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
               <div class="wc-body-right">
                 <div class="wc-img">${img ? imgTag : noCapture}</div>
-                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+                <div class="insight-panel"><p>${esc(insight.description)}</p></div>
               </div>
             </div>`;
                 } else if (layout === 'left') {
                     cardsHtml += `
-            <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
+            <div class="wc wide"${spanFull}>
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
               <div class="wc-body-left">
-                <div class="wc-aside"><p>${esc(insight.description)}</p></div>
+                <div class="insight-panel"><p>${esc(insight.description)}</p></div>
                 <div class="wc-img">${img ? imgTag : noCapture}</div>
               </div>
             </div>`;
                 } else if (layout === 'bottom') {
                     cardsHtml += `
-            <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
+            <div class="wc${item.gsW >= 10 ? ' wide' : ''}"${spanFull}>
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
               <div class="wc-body-bottom">
                 <div class="wc-img">${img ? imgTag : noCapture}</div>
-                ${insight?.description ? `<div class="wc-note">${esc(insight.description)}</div>` : ''}
+                ${insight?.description ? `<div class="wc-note"><span class="note-label">Insight</span>${esc(insight.description)}</div>` : ''}
               </div>
             </div>`;
                 } else {
                     // full — no text
                     cardsHtml += `
-            <div class="wc${cc ? ' ' + cc : ''}"${spanFull}>
+            <div class="wc${item.gsW >= 10 ? ' wide' : ''}"${spanFull}>
               <div class="wc-head"><span class="wc-head-title">${esc(item.title) || 'Chart'}</span></div>
               <div class="wc-body-bottom">
                 <div class="wc-img">${img ? imgTag : noCapture}</div>
@@ -587,11 +601,7 @@
                 } else {
                     const headerCells = td.cols.map(c => `<th>${esc(c)}</th>`).join('');
                     const bodyRows = td.rows.map(row =>
-                        `<tr>${row.map((cell, ci) => {
-                            const val = fmtCell(cell);
-                            const bc = ci < 3 ? badgeClass(cell) : '';   // only badge first few cols
-                            return `<td>${bc ? `<span class="badge ${bc}">${val}</span>` : val}</td>`;
-                        }).join('')}</tr>`
+                        `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`
                     ).join('');
                     bodyHtml = `<div class="data-table-wrap"><table class="data-table">
             <thead><tr>${headerCells}</tr></thead>
@@ -601,7 +611,7 @@
 
                 const tableInsight = aiMode ? getInsight(descriptions, tItem.title) : null;
                 const tableNote = tableInsight && tableInsight.description
-                    ? `<div class="table-insight"><div class="table-insight-text">${esc(tableInsight.description)}</div></div>`
+                    ? `<div class="table-insight">${esc(tableInsight.description)}</div>`
                     : '';
 
                 tablePagesHtml += `<div class="page">
@@ -612,8 +622,8 @@
   ${tableNote}
   ${bodyHtml}
   <div class="page-footer">
-    <span class="doc-title">${esc(printTitle)}</span>
-    <span class="pg">Table</span>
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+    <span>${esc(printTitle)}</span>
   </div>
 </div>`;
             }
@@ -631,104 +641,146 @@
 <title>${esc(printTitle)} — Report</title>
 <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Poppins:wght@700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:40px}
 :root{
+  /* Dynamic brand colour */
   --blue:${brandColor};--blue-lt:${brandLt};--blue-dk:${brandDk};
+  /* Semantic palette — mirrors dashboard.html */
+  --primary:${brandColor};--secondary:#212950;--bg:#F8F7F5;--white:#FFFFFF;
+  --text:#231F21;--muted:#6F7482;--line:#ECEEF2;--soft-blue:#EEF6FF;
+  --success:#12A37F;--warning:#F59E0B;--danger:#E45E5E;--radius:10px;
+  --shadow:0 10px 25px rgba(33,41,80,.06);
+  /* Legacy accent colours */
   --teal:#0d9488;--amber:#d97706;--indigo:#4f46e5;--rose:#e11d48;
-  --dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#e5e7eb
+  --dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#ECEEF2
 }
+body{min-height:100vh;background:var(--bg);font-family:'Nunito',Arial,sans-serif;color:var(--text);padding:32px 20px 56px;display:flex;flex-direction:column;align-items:center;gap:28px}
+h1,h2,h3{font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
+p{line-height:1.65;color:var(--muted)}
 
-/* ── A4 page shell ────────────────────────────────────── */
-.page{
-  width:595px;min-height:842px;background:#fff;
-  box-shadow:0 2px 12px rgba(0,0,0,.18);
-  border-radius:3px;position:relative;overflow:hidden;
-  display:flex;flex-direction:column
-}
+/* ── Page shell ──────────────────────────────────────────── */
+.page{width:min(960px,100%);min-height:1120px;background:var(--white);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
 
-/* ── Cover ─────────────────────────────────────────────── */
-.cover-top{
-  background:var(--blue);height:354px;
-  display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
-  padding-bottom:28px;position:relative;overflow:hidden
-}
-.cover-top::before{content:'';position:absolute;width:320px;height:320px;border-radius:50%;
-  border:50px solid rgba(255,255,255,.07);top:-80px;right:-80px}
-.cover-top::after{content:'';position:absolute;width:180px;height:180px;border-radius:50%;
-  border:30px solid rgba(255,255,255,.06);bottom:40px;left:-50px}
-.cover-logo{background:white;border-radius:10px;padding:10px 20px;margin-bottom:24px;
-  position:relative;z-index:1;font-size:15px;font-weight:700;color:var(--blue);
-  letter-spacing:.02em;display:flex;align-items:center;gap:8px}
-.cover-divider{width:50px;height:3px;background:rgba(255,255,255,.4);border-radius:2px;
-  margin-bottom:16px;position:relative;z-index:1}
-.cover-title{font-size:22px;font-weight:800;color:#fff;text-align:center;
-  position:relative;z-index:1;padding:0 32px;line-height:1.25}
-.cover-subtitle{font-size:11px;color:rgba(255,255,255,.65);text-transform:uppercase;
-  letter-spacing:.12em;margin-top:8px;position:relative;z-index:1}
-.cover-bottom{background:var(--blue-lt);flex:1;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:12px;padding:32px}
-.cover-meta-row{display:flex;gap:32px}
-.cover-meta-item{text-align:center}
-.cover-meta-item .val{font-size:22px;font-weight:700;color:var(--blue)}
-.cover-meta-item .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-top:2px}
-.cover-date{font-size:10px;color:var(--mid);margin-top:8px}
-.cover-dots{display:flex;gap:8px;margin-top:6px}
-.cover-dots span{width:6px;height:6px;border-radius:50%;background:var(--blue)}
-.cover-dots span:not(:first-child){opacity:.35}
-.cover-summary{font-size:9px;color:#374151;text-align:center;max-width:440px;line-height:1.75;background:rgba(255,255,255,.7);border-radius:6px;padding:10px 16px;margin-top:4px}
+/* ── Cover ───────────────────────────────────────────────── */
+.cover{padding:54px 56px 44px;background:#fff}
+.brand-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:90px}
+.logo-mark{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--secondary)}
+.cover-chip{border:1px solid var(--line);border-radius:8px;padding:8px 14px;color:var(--secondary);font-weight:600;font-size:12px;background:white}
+.cover-eyebrow{font-size:20px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
+.cover-title{font-size:40px;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
+.cover-sub{font-size:17px;max-width:520px;color:var(--muted)}
+.cover-meta-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 56px 56px;background:white}
+.cover-meta-item{background:var(--bg);border-radius:10px;padding:22px 24px;border:1px solid #F0EFED;min-height:120px;display:flex;flex-direction:column;justify-content:space-between;text-align:center}
+.cover-meta-val{font-family:'Nunito',sans-serif;font-size:34px;line-height:1;color:var(--secondary);font-weight:600;margin:auto 0}
+.cover-meta-val.accent{color:var(--primary)}
+.cover-meta-val.date{font-size:20px;letter-spacing:-.03em}
+.cover-meta-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:auto}
 
-/* ── Cards grid ─────────────────────────────────────────── */
-.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 28px 20px}
-.wc{border-radius:6px;overflow:hidden;box-shadow:none;display:flex;flex-direction:column;background:#fff}
-.wc-head{display:flex;flex-direction:column;padding:14px 16px 10px;border-bottom:none;flex-shrink:0;background:#fff;position:relative;padding-left:0px !important}
-.wc-head-title{font-size:14px;color:#000;letter-spacing:.08em;text-transform:uppercase}
+/* ── Content area ────────────────────────────────────────── */
+.content{padding:34px 40px 30px;display:flex;flex-direction:column;gap:24px;flex:1}
+.section-header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:4px 0 2px}
+.section-kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);font-weight:700;margin-bottom:4px}
+.section-title{font-size:25px;letter-spacing:-.03em}
+.section-date{font-size:13px;color:var(--muted);font-weight:600}
+
+/* ── KPI strip ───────────────────────────────────────────── */
+.kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.kpi-card{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:20px;position:relative;overflow:hidden}
+.metric-value{font-size:34px;letter-spacing:-.05em;margin-bottom:4px;font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
+.metric-label{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-height:32px}
+.trend{margin-top:12px;font-size:12px;color:222 !important;}
+.trend.down{color:var(--danger)}.trend.warn{color:var(--warning)}
+
+/* ── Cards grid ──────────────────────────────────────────── */
+.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.wc{background:var(--white);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:330px}
+.wc.wide{grid-column:1/-1;min-height:300px}
+.wc-head{padding:22px 24px 12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.wc-head-title{font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary);font-size:20px;line-height:1.2;letter-spacing:-.03em}
+.wc-body-right,.wc-body-left{display:grid;grid-template-columns:1.55fr 1fr;gap:0;flex:1}
+.wc-body-left{grid-template-columns:1fr 1.55fr}
+.wc-body-left .wc-img{order:2}.wc-body-left .insight-panel{order:1}
 .wc-body-bottom{display:flex;flex-direction:column;flex:1}
-.wc-body-bottom .wc-img{overflow:hidden}
-.wc-body-bottom .wc-img img{display:block;width:100%}
-.wc-note{padding:10px 14px;background:#fafafa;border-top:1px solid var(--border);font-size:9px;color:#374151;line-height:1.8}
-.wc-body-right{display:flex;flex-direction:row;flex:1}
-.wc-body-right .wc-img{flex:1.6;overflow:hidden}
-.wc-body-right .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
-.wc-body-left{display:flex;flex-direction:row;flex:1}
-.wc-body-left .wc-img{flex:1.6;overflow:hidden}
-.wc-body-left .wc-img img{display:block;width:100%;height:100%;object-fit:cover}
-.wc-aside{flex:1;padding:14px 12px;display:flex;flex-direction:column;justify-content:center;background:#fafafa}
-.wc-body-left .wc-aside{background:#fafafa}
-.wc-aside p{font-size:9px;color:#374151;line-height:1.8;margin:0}
+.wc-img{background:#fff;padding:14px 18px 20px;display:flex;align-items:center;justify-content:center}
+.wc-img img{width:100%;display:block}
+.insight-panel{background:#fff;padding:28px 26px;display:flex;align-items:center}
+.insight-panel p{font-size:14px;color:#545A6B}
+.wc-note{border-top:1px solid var(--line);background:var(--bg);padding:18px 22px;color:#545A6B;font-size:13px;line-height:1.6}
+.note-label{display:block;color:var(--primary);text-transform:uppercase;letter-spacing:.1em;font-size:10px;font-weight:700;margin-bottom:6px}
 
-/* ── AI table insight callout ───────────────────────────── */
-.table-insight{display:flex;align-items:flex-start;margin:14px 28px 0;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:4px;background:#fafafa}
-.table-insight-text{font-size:9px;color:#374151;line-height:1.75}
+/* ── AI table insight callout ────────────────────────────── */
+.table-insight{margin:20px 24px;background:var(--bg);border-radius:8px;padding:18px 20px;color:#545A6B;font-size:14px;line-height:1.65;border-left:4px solid var(--primary)}
 
-/* ── Section banner (replaces quicklinks heading) ───────── */
-.section-banner{
-  background:var(--blue-dk);padding:12px 16px;
-  margin-top:6px;border-radius:4px
-}
-.section-banner-text{font-size:10px;font-weight:700;color:#fff;
-  text-transform:uppercase;letter-spacing:.07em}
+/* ── Table page ──────────────────────────────────────────── */
+.table-banner{padding:24px 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:white}
+.table-banner .tit{font-family:'Nunito',sans-serif;font-size:23px;color:var(--secondary);font-weight:600;letter-spacing:-.03em}
+.cnt{background:#f1f5f9;color:#475569;border:1px solid var(--line);padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600}
+.data-table-wrap{padding:0 24px 26px;overflow-x:auto}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.data-table th{padding:10px 14px;text-align:left;background:var(--bg);color:#6b7280;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid var(--line)}
+.data-table th:first-child{border-radius:4px 0 0 4px}
+.data-table th:last-child{border-radius:0 4px 4px 0}
+.data-table td{padding:14px;border-bottom:1px solid var(--line);color:#1a1d27}
+.badge{display:inline-block;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700}
+.badge.red{background:#FFF0F0;color:var(--danger)}
+.badge.green{background:#EAF8F4;color:var(--success)}.badge.amber{background:#FFF7E8;color:var(--warning)}
 
-/* ── KPI mini strip ─────────────────────────────────────── */
-.kpi-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 28px 8px;flex-shrink:0}
-.kpi-mini{background:var(--light);border-radius:6px;padding:10px 12px;border-left:3px solid var(--blue)}
-.kpi-mini.teal{border-color:var(--teal)}.kpi-mini.indigo{border-color:#4f46e5}.kpi-mini.amber{border-color:#d97706}
-.kpi-mini-val{font-size:18px;font-weight:800;color:var(--dark)}
-.kpi-mini-lbl{font-size:8px;color:var(--mid);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
-.kpi-mini-note{font-size:7.5px;color:var(--mid);line-height:1.5;margin-top:4px}
+/* ── Bootstrap colour utilities (for datatable cell classes) ─ */
+.text-danger,.text-danger *{color:#dc3545!important}
+.text-warning,.text-warning *{color:#ffc107!important}
+.text-success,.text-success *{color:#198754!important}
+.text-primary,.text-primary *{color:#0d6efd!important}
+.text-info,.text-info *{color:#0dcaf0!important}
+.text-muted,.text-muted *{color:#6c757d!important}
+.text-secondary,.text-secondary *{color:#6c757d!important}
+.text-dark,.text-dark *{color:#212529!important}
+.text-white,.text-white *{color:#fff!important}
+.bg-danger{background-color:#dc3545!important}
+.bg-warning{background-color:#ffc107!important}
+.bg-success{background-color:#198754!important}
+.bg-primary{background-color:#0d6efd!important}
+.bg-info{background-color:#0dcaf0!important}
+.bg-secondary{background-color:#6c757d!important}
+.bg-light{background-color:#f8f9fa!important}
+.bg-dark{background-color:#212529!important}
+.badge.bg-danger,.badge.text-bg-danger{background:#dc3545!important;color:#fff!important}
+.badge.bg-warning,.badge.text-bg-warning{background:#ffc107!important;color:#000!important}
+.badge.bg-success,.badge.text-bg-success{background:#198754!important;color:#fff!important}
+.badge.bg-primary,.badge.text-bg-primary{background:#0d6efd!important;color:#fff!important}
+.badge.bg-info,.badge.text-bg-info{background:#0dcaf0!important;color:#000!important}
+.badge.bg-secondary,.badge.text-bg-secondary{background:#6c757d!important;color:#fff!important}
+.badge.bg-light,.badge.text-bg-light{background:#f8f9fa!important;color:#000!important}
+.badge.bg-dark,.badge.text-bg-dark{background:#212529!important;color:#fff!important}
 
-/* ── Key Findings page ──────────────────────────────────── */
-.kf-hero{background:var(--blue);padding:28px 32px 24px;position:relative;overflow:hidden;flex-shrink:0}
-.kf-hero::before{content:'';position:absolute;width:260px;height:260px;border-radius:50%;border:44px solid rgba(255,255,255,.07);top:-80px;right:-60px}
-.kf-hero::after{content:'';position:absolute;width:140px;height:140px;border-radius:50%;border:24px solid rgba(255,255,255,.06);bottom:-30px;left:40px}
-.kf-hero-eyebrow{font-size:8px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.14em;margin-bottom:8px;position:relative;z-index:1}
+/* ── Page footer ─────────────────────────────────────────── */
+.page-footer{margin-top:auto;padding:18px 40px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:700}
+.brand{color:var(--secondary)}
+
+/* ── Sticky print bar (screen only) ─────────────────────── */
+.print-bar{width:min(960px,100%);background:var(--white);border:1px solid var(--line);box-shadow:0 6px 18px rgba(33,41,80,.05);border-radius:8px;padding:10px 12px 10px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:16px;z-index:20}
+.print-bar-title{font-size:13px;color:var(--secondary);font-weight:600;display:flex;gap:10px;align-items:center}
+.ai-badge{background:var(--soft-blue);color:var(--primary);font-size:11px;font-weight:600;padding:5px 10px;border-radius:8px}
+.print-btn{border:0;background:var(--primary);color:white;border-radius:8px;padding:11px 18px;font-weight:600;font-family:'Nunito',Arial,sans-serif;cursor:pointer;box-shadow:0 8px 20px rgba(59,152,241,.25)}
+.print-btn:hover{opacity:.88}
+.send-btn{border:0;background:#16a34a;color:white;border-radius:8px;padding:11px 18px;font-weight:600;font-family:'Nunito',Arial,sans-serif;cursor:pointer;margin-right:8px}
+.send-btn:hover{opacity:.88}
+
+/* ── Phosphor icon alignment ──────────────────────────────── */
+.ph{vertical-align:-0.125em;font-size:1em}
+@keyframes sr-spin{to{transform:rotate(360deg)}}
+.ph-spin{display:inline-block;animation:sr-spin .8s linear infinite}
+
+/* ── Key Findings page ───────────────────────────────────── */
+.kf-hero{background:white;border-bottom:2px solid var(--line);padding:28px 32px 24px;position:relative;overflow:hidden;flex-shrink:0}
+.kf-hero-eyebrow{font-size:8px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.14em;margin-bottom:8px;position:relative;z-index:1}
 .kf-hero-row{display:flex;align-items:flex-end;justify-content:space-between;position:relative;z-index:1}
-.kf-hero-title{font-size:24px;font-weight:800;color:#fff;line-height:1.1;letter-spacing:-.01em}
-.kf-hero-title span{display:block;font-size:10px;font-weight:400;color:rgba(255,255,255,.6);letter-spacing:.04em;margin-top:4px}
-.kf-hero-badge{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:5px 14px;font-size:8.5px;color:rgba(255,255,255,.85);font-weight:600;letter-spacing:.04em;white-space:nowrap}
-.kf-subhead{background:var(--blue-lt);border-bottom:1px solid #dbeafe;padding:9px 32px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.kf-subhead-left{font-size:8.5px;color:var(--blue-dk);font-weight:600}
-.kf-subhead-right{font-size:8px;color:var(--mid)}
+.kf-hero-title{font-size:24px;font-weight:800;color:var(--secondary);line-height:1.1;letter-spacing:-.01em}
+.kf-hero-title span{display:block;font-size:10px;font-weight:400;color:var(--muted);letter-spacing:.04em;margin-top:4px}
+.kf-hero-badge{background:var(--soft-blue);border:1px solid var(--line);border-radius:20px;padding:5px 14px;font-size:8.5px;color:var(--primary);font-weight:600;letter-spacing:.04em;white-space:nowrap}
+.kf-subhead{background:var(--bg);border-bottom:1px solid var(--line);padding:9px 32px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.kf-subhead-left{font-size:13px;color:var(--secondary);font-weight:600}
+.kf-subhead-right{font-size:11px;color:var(--muted)}
 .kf-grid{padding:14px 28px 0;display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;align-content:start}
 .kf-card{background:#fff;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 4px rgba(0,0,0,.05)}
 .kf-card.full{grid-column:1 / -1}
@@ -738,16 +790,14 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kf-num{flex-shrink:0;font-size:24px;font-weight:900;line-height:1;color:var(--blue);opacity:.18;letter-spacing:-.02em;min-width:28px;margin-top:-2px}
 .kf-num.c-teal{color:var(--teal)}.kf-num.c-indigo{color:var(--indigo)}.kf-num.c-amber{color:var(--amber)}.kf-num.c-rose{color:var(--rose)}
 .kf-text{flex:1}
-.kf-text p{font-size:9.5px;color:#374151;line-height:1.8;margin:0}
+.kf-text p{font-size:14px;color:#374151;line-height:1.8;margin:0}
 .kf-attribution{margin:0 28px 20px;padding:8px 14px;background:#f8fafc;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;gap:8px;flex-shrink:0}
 .kf-attr-dot{width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0}
 .kf-attribution span{font-size:7.5px;color:var(--mid);letter-spacing:.02em}
 .kf-attribution strong{color:var(--blue);font-weight:600}
-/* ── Recommendations subhead (amber tint) ──────────────── */
-.kf-rec-subhead{background:#fffbeb;border-top:1px solid #fde68a;border-bottom:1px solid #fde68a;padding:9px 32px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-top:14px}
-.kf-rec-subhead-left{font-size:8.5px;color:#92400e;font-weight:600}
-.kf-rec-subhead-right{font-size:8px;color:var(--mid)}
-/* ── Actions Required & Sign-Off page ───────────────────── */
+.kf-rec-subhead{background:var(--bg);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:9px 32px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-top:14px}
+.kf-rec-subhead-left{font-size:13px;color:var(--secondary);font-weight:600}
+.kf-rec-subhead-right{font-size:11px;color:var(--muted)}
 .kf-section-header{font-size:8.5px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;display:flex;align-items:center;gap:5px}
 .kf-actions{margin:20px 28px 0;flex-shrink:0}
 .kf-actions-table{width:100%;border-collapse:collapse;font-size:8px;color:#374151}
@@ -765,52 +815,10 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .kf-signoff-field-line{border-bottom:1px solid #d1d5db;min-height:15px}
 .kf-signoff-field-line.sig{min-height:22px}
 
-/* ── Table page ─────────────────────────────────────────── */
-.table-banner{background:var(--blue);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.table-banner .tit{font-size:13px;font-weight:700;color:white;display:flex;align-items:center;gap:8px}
-.table-banner .cnt{font-size:8.5px;color:rgba(255,255,255,.65);background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px}
-.data-table-wrap{padding:16px 28px 20px;overflow:hidden}
-.data-table{width:100%;border-collapse:collapse;font-size:8px}
-.data-table thead th{background:var(--blue);color:white;padding:8px 12px;text-align:left;font-weight:600;letter-spacing:.03em}
-.data-table tbody tr:nth-child(even) td{background:#f9fafb}
-.data-table tbody td{padding:6px 12px;color:var(--dark);border-bottom:1px solid var(--border)}
-.badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:7px;font-weight:600}
-.badge.green{background:#d1fae5;color:#065f46}.badge.red{background:#fee2e2;color:#991b1b}.badge.amber{background:#fef3c7;color:#92400e}
-/* ── Page footer ────────────────────────────────────────── */
-.page-footer{
-  margin-top:auto;padding:8px 28px;border-top:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;flex-shrink:0
-}
-.page-footer .doc-title{font-size:7px;color:#9ca3af}
-.page-footer .pg{font-size:7.5px;color:var(--mid)}
-
-/* ── Sticky print bar (screen only) ─────────────────────── */
-.print-bar{
-  background:#1e293b;padding:10px 24px;
-  display:flex;align-items:center;justify-content:space-between;
-  width:100%;position:sticky;top:0;z-index:99
-}
-.print-bar-title{color:rgba(255,255,255,.65);font-size:12px}
-.print-btn{
-  background:#2563eb;color:white;border:none;border-radius:6px;
-  padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;
-  letter-spacing:.02em;font-family:inherit
-}
-.print-btn:hover{background:#1d4ed8}
-.send-btn{
-  background:#16a34a;color:white;border:none;border-radius:6px;
-  padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;
-  letter-spacing:.02em;font-family:inherit;margin-right:8px
-}
-.send-btn:hover{background:#15803d}
-/* ── Phosphor icon alignment ──────────────────────────────── */
-.ph{vertical-align:-0.125em;font-size:1em}
-@keyframes sr-spin{to{transform:rotate(360deg)}}
-.ph-spin{display:inline-block;animation:sr-spin .8s linear infinite}
 /* ── Send Report modal (screen only) ─────────────────────── */
 .sr-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:24px;z-index:1000}
 .sr-backdrop.open{display:flex}
-.sr-modal{background:#fff;border-radius:12px;width:100%;max-width:680px;box-shadow:0 24px 60px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:92vh;overflow:hidden;font-family:Segoe UI,Arial,sans-serif}
+.sr-modal{background:#fff;border-radius:12px;width:100%;max-width:680px;box-shadow:0 24px 60px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:92vh;overflow:hidden;font-family:'Nunito',Arial,sans-serif}
 .sr-hdr{background:#3B98F1;padding:20px 24px 18px;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0}
 .sr-hdr-left{display:flex;flex-direction:column;gap:4px}
 .sr-eyebrow{font-size:9px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.14em}
@@ -880,24 +888,21 @@ body{background:#e8eaed;font-family:'Segoe UI',Arial,sans-serif;padding:32px 24p
 .sr-btn-primary:disabled{opacity:.5;cursor:not-allowed}
 .sr-user-search-hint{font-size:10px;color:#6b7280;padding:6px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-style:italic}
 
-/* ── Print media ─────────────────────────────────────────── */
+/* ── Print media ──────────────────────────────────────────── */
 @page{size:A4 portrait;margin:0}
 @media print{
   body{background:white;padding:0;gap:0}
   .print-bar{display:none}
   .sr-backdrop{display:none!important}
-  .page{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;width:100%;min-height:100vh}
+  .page{width:100%;min-height:100vh;border:0;border-radius:0;box-shadow:none;page-break-after:always;break-after:page}
   .page:last-child{page-break-after:avoid;break-after:avoid}
-  .cover-top{height:42vh;print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .cover-bottom{min-height:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .section-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .kpi-mini{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .kpi-summary-row{page-break-inside:avoid;break-inside:avoid}
+  .cover{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .data-table th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .wc{page-break-inside:avoid;break-inside:avoid}
-  .data-table thead th{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .table-banner{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kpi-strip{page-break-inside:avoid;break-inside:avoid}
   .data-table tbody tr{page-break-inside:avoid;break-inside:avoid}
   .table-insight{page-break-inside:avoid;break-inside:avoid}
+  .insight-panel{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-hero{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-card-accent{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .kf-num{print-color-adjust:exact;-webkit-print-color-adjust:exact}
@@ -1153,8 +1158,8 @@ function srEsc(s) {
 <body>
 
 <div class="print-bar">
-  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span style="background:#7c3aed;color:white;padding:2px 8px;border-radius:10px;font-size:10px;margin-left:8px">AI Annotated</span>' : ''}</span>
-  <div style="display:flex;align-items:center;gap:0">
+  <span class="print-bar-title">${esc(printTitle)} &mdash; ${printDate}${aiMode ? ' <span class="ai-badge">AI Annotated</span>' : ''}</span>
+  <div style="display:flex;align-items:center;gap:8px">
     <button class="send-btn" onclick="srOpen()"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
     <button class="print-btn" onclick="window.print()"><i class="ph ph-printer"></i>&nbsp; Save as PDF</button>
   </div>
@@ -1162,25 +1167,32 @@ function srEsc(s) {
 
 <!-- ── Cover page ─────────────────────────────────────────────────────── -->
 <div class="page">
-  <div class="cover-top">
-    <div class="cover-logo">${logoHtml}</div>
-    <div class="cover-divider"></div>
-    <div class="cover-title">${esc(printTitle)}</div>
-    <div class="cover-subtitle">${esc(CONFIG.reportSubtitle)}</div>
-  </div>
-  <div class="cover-bottom">
-    <div class="cover-meta-row">
-      <div class="cover-meta-item">
-        <div class="val" style="font-size:14px;color:var(--indigo)">${printDate}</div>
-        <div class="lbl">Report Date</div>
-      </div>
+  <div class="cover">
+    <div class="brand-row">
+      <div class="logo-mark">${logoHtml || esc(printTitle)}</div>
+      <div class="cover-chip">WHS Monitor Report</div>
     </div>
-    ${executiveSummary ? `<div class="cover-summary">${esc(executiveSummary)}</div>` : ''}
-    <div class="cover-dots"><span></span><span></span><span></span></div>
+    <div class="cover-eyebrow">${esc(_md.StoreName || 'Workplace Health &amp; Safety')}</div>
+    <h1 class="cover-title">${esc(printTitle)}</h1>
+    <p class="cover-sub">${esc(CONFIG.reportSubtitle) || `An executive-ready snapshot of your dashboard data${aiMode ? ', with AI-generated insights and analysis' : ''}.`}</p>
+  </div>
+  <div class="cover-meta-strip">
+    <div class="cover-meta-item">
+      <div class="cover-meta-val accent">${countItems.length + cardItems.length + tableItems.length}</div>
+      <div class="cover-meta-lbl">Total Widgets</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-val">${tableItems.length}</div>
+      <div class="cover-meta-lbl">Data Tables</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-val date">${printDate}</div>
+      <div class="cover-meta-lbl">Report Date</div>
+    </div>
   </div>
   <div class="page-footer">
-    <span class="doc-title">${esc(printTitle)}</span>
-    <span class="pg">Cover</span>
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+    <span>Cover</span>
   </div>
 </div>
 
@@ -1198,14 +1210,11 @@ ${keyFindings.length ? `<div class="page">
   </div>
   <div class="kf-grid">
     ${keyFindings.map((f, idx) => {
-      const KF_ACCENTS = ['', 'c-teal', 'c-rose', 'c-indigo', 'c-amber'];
-      const ac     = KF_ACCENTS[idx % KF_ACCENTS.length];
       const isFull = idx === keyFindings.length - 1 && keyFindings.length % 2 !== 0;
       const num    = String(idx + 1).padStart(2, '0');
       return `<div class="kf-card${isFull ? ' full' : ''}">
-      <div class="kf-card-accent${ac ? ' ' + ac : ''}"></div>
       <div class="kf-card-body">
-        <div class="kf-num${ac ? ' ' + ac : ''}">${num}</div>
+        <div class="kf-num">${num}</div>
         <div class="kf-text"><p>${esc(f)}</p></div>
       </div>
     </div>`;
@@ -1217,38 +1226,40 @@ ${keyFindings.length ? `<div class="page">
   </div>
   <div class="kf-grid" style="padding-top:12px">
     ${recommendations.map((r, idx) => {
-      const REC_ACCENTS = ['c-amber', 'c-rose', 'c-teal', 'c-indigo', ''];
-      const ac     = REC_ACCENTS[idx % REC_ACCENTS.length];
       const isFull = idx === recommendations.length - 1 && recommendations.length % 2 !== 0;
       const num    = String(idx + 1).padStart(2, '0');
-      return `<div class="kf-card${isFull ? ' full' : ''}">
-      <div class="kf-card-accent${ac ? ' ' + ac : ''}"></div>
+      return `<div class="kf-card rec${isFull ? ' full' : ''}">
       <div class="kf-card-body">
-        <div class="kf-num${ac ? ' ' + ac : ''}">${num}</div>
+        <div class="kf-num">${num}</div>
         <div class="kf-text"><p>${esc(r)}</p></div>
       </div>
     </div>`;
     }).join('')}
   </div>` : ''}
   <div class="page-footer">
-    <span class="doc-title">${esc(printTitle)}</span>
-    <span class="pg">Key Findings</span>
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+    <span>Key Findings</span>
   </div>
 </div>` : ''}
 
 <!-- ── Dashboard charts page ─────────────────────────────────────────── -->
 <div class="page">
-  <div class="table-banner">
-    <span class="tit">${esc(printTitle)}</span>
-    <span class="cnt">${printDate}</span>
-  </div>
-  ${countItems.length ? `<div class="kpi-summary-row" style="grid-template-columns:repeat(${Math.min(countItems.length, 4)},1fr)">${kpiStripHtml}</div>` : ''}
-  <div class="cards-grid">
-    ${cardsHtml}
-  </div>
+  <main class="content">
+    <header class="section-header">
+      <div>
+        <div class="section-kicker">Dashboard Report</div>
+        <h2 class="section-title">${esc(printTitle)}</h2>
+      </div>
+      <span class="section-date">${printDate}</span>
+    </header>
+    ${countItems.length ? `<div class="kpi-strip" style="grid-template-columns:repeat(${Math.min(countItems.length, 4)},1fr)">${kpiStripHtml}</div>` : ''}
+    <div class="cards-grid">
+      ${cardsHtml}
+    </div>
+  </main>
   <div class="page-footer">
-    <span class="doc-title">${esc(printTitle)}</span>
-    <span class="pg">1</span>
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+    <span>1</span>
   </div>
 </div>
 
@@ -1325,10 +1336,10 @@ ${keyFindings.length ? `<!-- ── Actions & Sign-Off page (last page) ──�
     </div>
   </div>
   <div class="page-footer">
-    <span class="doc-title">${esc(printTitle)}</span>
-    <span class="pg">Actions &amp; Sign-Off</span>
+    <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:8px;color:#94a3b8;">Powered by <img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" alt="WHS Monitor" style="height:12px;width:auto;opacity:0.6;vertical-align:middle;position:relative;top:2px;"></span>
+    <span>Actions &amp; Sign-Off</span>
   </div>
-</div>` : ''}
+</div>` : ''}}
 
 <!-- ══════════════════════════════════════════════════════════════ -->
 <!--  SEND REPORT MODAL                                            -->
