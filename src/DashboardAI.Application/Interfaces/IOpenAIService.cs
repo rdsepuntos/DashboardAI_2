@@ -83,7 +83,9 @@ namespace DashboardAI.Application.Interfaces
         /// </summary>
         Task<Dictionary<string, WidgetInsight>> DescribeWidgetsAsync(
             string dashboardTitle,
-            IEnumerable<WidgetDescribeItem> widgets);
+            IEnumerable<WidgetDescribeItem> widgets,
+            string userId  = null,
+            int    storeId = 0);
 
         /// <summary>
         /// Generates an executive summary and per-widget insights for a print report.
@@ -92,7 +94,9 @@ namespace DashboardAI.Application.Interfaces
         Task<ReportInsightsResult> GenerateReportInsightsAsync(
             string dashboardTitle,
             IEnumerable<ReportWidgetItem> widgets,
-            Dictionary<string, string> activeFilters = null);
+            Dictionary<string, string> activeFilters = null,
+            string userId  = null,
+            int    storeId = 0);
 
         /// <summary>
         /// Routes a hazard-related question through the Arventa MCP server via the

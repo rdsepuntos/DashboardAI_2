@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>WHS Dashboard Report — Sign-Off Demo</title>
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Poppins:wght@700;800&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#3B98F1;--blue-lt:#EEF6FF;--blue-dk:rgb(39,100,156);
+  --primary:#3B98F1;--secondary:#212950;--bg:#F8F7F5;--white:#FFFFFF;
+  --text:#231F21;--muted:#6F7482;--line:#ECEEF2;--soft-blue:#EEF6FF;
+  --success:#12A37F;--warning:#F59E0B;--danger:#E45E5E;--radius:10px;
+  --shadow:0 10px 25px rgba(33,41,80,.06);
+  --teal:#0d9488;--amber:#d97706;--indigo:#4f46e5;--rose:#e11d48;
+  --dark:#111827;--mid:#6b7280;--light:#f3f4f6;--border:#ECEEF2
+}
+body{min-height:100vh;background:var(--bg);font-family:'Nunito',Arial,sans-serif;color:var(--text);padding:32px 20px 56px;display:flex;flex-direction:column;align-items:center;gap:28px}
+h1,h2,h3{font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
+p{line-height:1.65;color:var(--muted)}
+
+/* ── Page shell ──────────────────────────────────────────── */
+.page{width:min(960px,100%);min-height:1120px;background:var(--white);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
+
+/* ── Cover ───────────────────────────────────────────────── */
+.cover{padding:54px 56px 44px;background:#fff}
+.brand-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:90px}
+.logo-mark{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--secondary);font-size:18px}
+.cover-chip{border:1px solid var(--line);border-radius:8px;padding:8px 14px;color:var(--secondary);font-weight:600;font-size:12px;background:white}
+.cover-eyebrow{font-size:20px;text-transform:uppercase;letter-spacing:.18em;color:var(--primary);font-weight:700;margin-bottom:14px}
+.cover-title{font-size:40px;line-height:1.05;max-width:600px;letter-spacing:-.05em;margin-bottom:18px;font-family:'Nunito',sans-serif;font-weight:600;color:var(--secondary)}
+.cover-sub{font-size:17px;max-width:520px;color:var(--muted)}
+.cover-meta-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 56px 56px;background:white}
+.cover-meta-item{background:var(--bg);border-radius:10px;padding:22px 24px;border:1px solid #F0EFED;min-height:120px;display:flex;flex-direction:column;justify-content:space-between;text-align:center}
+.cover-meta-val{font-family:'Nunito',sans-serif;font-size:34px;line-height:1;color:var(--secondary);font-weight:600;margin:auto 0}
+.cover-meta-val.accent{color:var(--primary)}
+.cover-meta-val.date{font-size:20px;letter-spacing:-.03em}
+.cover-meta-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:auto}
+
+/* ── KF hero ─────────────────────────────────────────────── */
+.kf-hero{background:white;border-bottom:2px solid var(--line);padding:28px 32px 24px;position:relative;overflow:hidden;flex-shrink:0}
+.kf-hero-eyebrow{font-size:8px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.14em;margin-bottom:8px;position:relative;z-index:1}
+.kf-hero-row{display:flex;align-items:flex-end;justify-content:space-between;position:relative;z-index:1}
+.kf-hero-title{font-size:24px;font-weight:800;color:var(--secondary);line-height:1.1;letter-spacing:-.01em}
+.kf-hero-title span{display:block;font-size:10px;font-weight:400;color:var(--muted);letter-spacing:.04em;margin-top:4px}
+.kf-hero-badge{background:var(--soft-blue);border:1px solid var(--line);border-radius:20px;padding:5px 14px;font-size:8.5px;color:var(--primary);font-weight:600;letter-spacing:.04em;white-space:nowrap}
+
+/* ── Sign-off print section ──────────────────────────────── */
+.kf-signoff{margin:24px 28px 0;flex-shrink:0}
+.kf-signoff-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kf-signoff-block{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.kf-signoff-block-header{background:#f3f4f6;padding:5px 10px;font-size:7.5px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border)}
+.kf-signoff-fields{padding:8px 10px;display:flex;flex-direction:column;gap:7px}
+.kf-signoff-field{display:flex;flex-direction:column;gap:1px}
+.kf-signoff-field-label{font-size:7px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em}
+.kf-signoff-field-value{font-size:8.5px;color:#111827;font-weight:500;padding-bottom:1px;border-bottom:1px solid #d1d5db;min-height:15px}
+.kf-signoff-field-line{border-bottom:1px solid #d1d5db;min-height:15px}
+.kf-signoff-field-line.sig{min-height:22px}
+.kf-section-header{font-size:8.5px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+
+/* ── Digital acknowledgment section ─────────────────────── */
+.so-section{margin:20px 28px 0;flex-shrink:0}
+.so-digital-banner{background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.so-digital-text{flex:1}
+.so-digital-title{font-size:14px;font-weight:700;color:#1e40af;margin-bottom:4px}
+.so-digital-sub{font-size:11px;color:#3b82f6;line-height:1.5}
+.so-btn{background:#3B98F1;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 4px 12px rgba(59,152,241,.35);transition:opacity .2s;flex-shrink:0}
+.so-btn:hover{opacity:.88}
+.so-btn.acknowledged{background:#16a34a;cursor:default;opacity:1}
+
+/* ── Acknowledgment modal ────────────────────────────────── */
+.so-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:24px;z-index:1001}
+.so-backdrop.open{display:flex}
+.so-modal{background:#fff;border-radius:12px;width:100%;max-width:440px;box-shadow:0 24px 60px rgba(0,0,0,.25);font-family:'Nunito',Arial,sans-serif;overflow:hidden}
+.so-hdr{background:#3B98F1;padding:20px 24px;display:flex;align-items:center;justify-content:space-between}
+.so-hdr-title{font-size:18px;font-weight:800;color:#fff}
+.so-hdr-close{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:14px}
+.so-hdr-close:hover{background:rgba(255,255,255,.25)}
+.so-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+.so-desc{font-size:12px;color:#374151;line-height:1.65;background:#f8fafc;border-radius:8px;padding:12px 14px;border:1px solid #e5e7eb}
+.so-field{display:flex;flex-direction:column;gap:4px}
+.so-field label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.07em}
+.so-field input{border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:12px;color:#111827;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s}
+.so-field input:focus{border-color:#3B98F1;box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+.so-ftr{padding:14px 24px;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:flex-end;gap:8px;background:#fafafa}
+.so-btn-ghost{background:transparent;border:1.5px solid #e5e7eb;color:#6b7280;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.so-btn-ghost:hover{border-color:#9ca3af;color:#111827}
+.so-btn-confirm{background:#3B98F1;color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.so-btn-confirm:hover{opacity:.88}
+.so-btn-confirm:disabled{opacity:.5;cursor:not-allowed}
+.so-sig-wrap{border:1.5px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fafafa;position:relative;cursor:crosshair;transition:border .15s}
+.so-sig-wrap:hover{border-color:#9ca3af}
+.so-sig-wrap canvas{display:block;touch-action:none}
+.so-sig-hint{font-size:12px;color:#9ca3af;position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity .2s}
+.so-sig-clear{font-size:11px;color:#6b7280;background:none;border:none;padding:2px 0;cursor:pointer;text-decoration:underline;align-self:flex-end}
+.so-sig-clear:hover{color:#111827}
+
+/* ── Send Report modal ───────────────────────────────────── */
+.sr-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;padding:24px;z-index:1000}
+.sr-backdrop.open{display:flex}
+.sr-modal{background:#fff;border-radius:12px;width:100%;max-width:680px;box-shadow:0 24px 60px rgba(0,0,0,.25);display:flex;flex-direction:column;max-height:92vh;overflow:hidden;font-family:'Nunito',Arial,sans-serif}
+.sr-hdr{background:#3B98F1;padding:20px 24px 18px;display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0}
+.sr-hdr-left{display:flex;flex-direction:column;gap:4px}
+.sr-eyebrow{font-size:9px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.14em}
+.sr-title{font-size:20px;font-weight:800;color:#fff;line-height:1.1}
+.sr-close{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:16px;flex-shrink:0;margin-top:2px}
+.sr-close:hover{background:rgba(255,255,255,.25)}
+.sr-pill{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin:16px 24px 0;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.sr-pill-icon{font-size:18px;flex-shrink:0}
+.sr-pill-info{flex:1;min-width:0}
+.sr-pill-name{font-size:11px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-pill-meta{font-size:9px;color:#6b7280;margin-top:1px}
+.sr-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+.sr-sec-lbl{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.sr-recipients-note{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;font-size:12px;color:#374151;line-height:1.6}
+.sr-recipients-note strong{color:var(--secondary)}
+.sr-field{display:flex;flex-direction:column;gap:5px}
+.sr-field label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.07em}
+.sr-field input,.sr-field textarea{border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:12px;color:#111827;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s;resize:none}
+.sr-field input:focus,.sr-field textarea:focus{border-color:#3B98F1;box-shadow:0 0 0 3px rgba(59,152,241,.12)}
+.sr-field textarea{min-height:72px}
+.sr-ftr{padding:14px 24px;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px;background:#fafafa}
+.sr-ftr-note{font-size:9.5px;color:#6b7280;display:flex;align-items:center;gap:5px}
+.sr-ftr-btns{display:flex;gap:8px}
+.sr-btn-ghost{background:transparent;border:1.5px solid #e5e7eb;color:#6b7280;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.sr-btn-ghost:hover{border-color:#9ca3af;color:#111827}
+.sr-btn-primary{background:#3B98F1;color:#fff;box-shadow:0 2px 8px rgba(59,152,241,.35);border:none;border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.sr-btn-primary:hover{opacity:.88}
+
+/* ── Print bar ───────────────────────────────────────────── */
+.print-bar{width:min(960px,100%);background:var(--white);border:1px solid var(--line);box-shadow:0 6px 18px rgba(33,41,80,.05);border-radius:8px;padding:10px 12px 10px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:16px;z-index:20}
+.print-bar-title{font-size:13px;color:var(--secondary);font-weight:600;display:flex;gap:10px;align-items:center}
+.print-btn{border:0;background:var(--primary);color:white;border-radius:8px;padding:11px 18px;font-weight:600;font-family:'Nunito',Arial,sans-serif;cursor:pointer;box-shadow:0 8px 20px rgba(59,152,241,.25)}
+.print-btn:hover{opacity:.88}
+.send-btn{border:0;background:#16a34a;color:white;border-radius:8px;padding:11px 18px;font-weight:600;font-family:'Nunito',Arial,sans-serif;cursor:pointer;margin-right:8px}
+.send-btn:hover{opacity:.88}
+
+/* ── Page footer ─────────────────────────────────────────── */
+.page-footer{margin-top:auto;padding:18px 40px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:700}
+
+/* ── Success toast ───────────────────────────────────────── */
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(80px);background:#111827;color:#fff;border-radius:10px;padding:12px 20px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:2000;transition:transform .3s ease,opacity .3s ease;opacity:0;pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast-icon{font-size:16px}
+
+/* ── Print ───────────────────────────────────────────────── */
+@page{size:A4 portrait;margin:0}
+@media print{
+  body{background:white;padding:0;gap:0}
+  .print-bar{display:none}
+  .sr-backdrop{display:none!important}
+  .so-section{display:none!important}
+  .so-backdrop{display:none!important}
+  .toast{display:none!important}
+  .page{width:100%;min-height:100vh;border:0;border-radius:0;box-shadow:none;page-break-after:always;break-after:page}
+  .page:last-child{page-break-after:avoid;break-after:avoid}
+  .kf-hero{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .kf-signoff-block-header{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+
+<!-- ── Demo notice banner ────────────────────────────────────── -->
+<div style="width:min(960px,100%);background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:10px;font-size:13px;color:#92400e;font-weight:600">
+  <i class="ph ph-envelope-open" style="font-size:18px;flex-shrink:0;color:#d97706"></i>
+  <span><strong>Email Recipient View</strong> &mdash; This demo simulates the report as received via email. The &ldquo;Acknowledge Receipt&rdquo; button is only visible to recipients of emailed reports, not to the report author.</span>
+</div>
+
+<!-- ── Sticky print / send bar ──────────────────────────────── -->
+<div class="print-bar">
+  <span class="print-bar-title">WHS Dashboard Report &mdash; 20 May 2026</span>
+  <div style="display:flex;align-items:center;gap:8px">
+    <button class="send-btn" onclick="srOpen()"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</button>
+    <button class="print-btn" onclick="window.print()"><i class="ph ph-printer"></i>&nbsp; Save as PDF</button>
+  </div>
+</div>
+
+<!-- ── Cover page ───────────────────────────────────────────── -->
+<div class="page">
+  <div class="cover">
+    <div class="brand-row">
+      <div class="logo-mark">
+        <i class="ph ph-shield-check" style="font-size:28px;color:#3B98F1"></i>
+        WHS Monitor
+      </div>
+      <div class="cover-chip">WHS Monitor Report</div>
+    </div>
+    <div class="cover-eyebrow">Acme Corporation</div>
+    <h1 class="cover-title">WHS Incident Dashboard</h1>
+    <p class="cover-sub">An executive-ready snapshot of your workplace health &amp; safety dashboard data.</p>
+  </div>
+  <div class="cover-meta-strip">
+    <div class="cover-meta-item">
+      <div class="cover-meta-val accent">12</div>
+      <div class="cover-meta-lbl">Total Widgets</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-val">3</div>
+      <div class="cover-meta-lbl">Data Tables</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-val date">20 May 2026</div>
+      <div class="cover-meta-lbl">Report Date</div>
+    </div>
+  </div>
+  <div class="page-footer">
+    <span style="font-size:10px;color:#94a3b8">Powered by WHS Monitor</span>
+    <span>Cover</span>
+  </div>
+</div>
+
+<!-- ── Report Acknowledgment page ───────────────────────────── -->
+<div class="page" id="so-signoff-page">
+  <div class="kf-hero" style="padding:20px 32px 18px">
+    <div class="kf-hero-eyebrow">WHS Incident Dashboard</div>
+    <div class="kf-hero-row">
+      <div class="kf-hero-title" style="font-size:20px">Report Acknowledgment</div>
+    </div>
+  </div>
+
+  <!-- Digital acknowledgment (screen only) -->
+  <div class="so-section">
+    <div class="so-digital-banner">
+      <div class="so-digital-text">
+        <div class="so-digital-title"><i class="ph ph-check-circle"></i>&nbsp; Digital Acknowledgment</div>
+        <div class="so-digital-sub">Click to digitally confirm you have received and reviewed this report.</div>
+        <div id="so-ack-ts" style="display:none;font-size:10px;color:#16a34a;margin-top:6px;font-weight:600"></div>
+      </div>
+      <button id="so-ack-btn" class="so-btn" onclick="soOpen()">
+        <i class="ph ph-pen-nib"></i>&nbsp; Acknowledge Receipt
+      </button>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <span style="font-size:10px;color:#94a3b8">Powered by WHS Monitor</span>
+    <span>Acknowledgment</span>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  DIGITAL ACKNOWLEDGMENT MODAL                                 -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="so-backdrop" class="so-backdrop" role="dialog" aria-modal="true">
+  <div class="so-modal">
+    <div class="so-hdr">
+      <div class="so-hdr-title"><i class="ph ph-check-circle"></i>&nbsp; Acknowledge Receipt</div>
+      <div class="so-hdr-close" onclick="soClose()" title="Close"><i class="ph ph-x"></i></div>
+    </div>
+    <div class="so-body">
+      <div class="so-desc">
+        By completing this form, you confirm that you have received and reviewed the
+        <strong>WHS Incident Dashboard</strong> report dated 20 May 2026.
+      </div>
+      <div class="so-field">
+        <label>Full Name *</label>
+        <input type="text" id="so-name" placeholder="Enter your full name" autocomplete="name"/>
+      </div>
+      <div class="so-field">
+        <label>Signature *</label>
+        <div class="so-sig-wrap" id="so-sig-wrap">
+          <canvas id="so-sig-canvas"></canvas>
+          <span class="so-sig-hint" id="so-sig-hint">Sign here</span>
+        </div>
+        <button type="button" class="so-sig-clear" onclick="soClearSig()">Clear signature</button>
+      </div>
+    </div>
+    <div class="so-ftr">
+      <button class="so-btn-ghost" onclick="soClose()">Cancel</button>
+      <button class="so-btn-confirm" id="so-confirm-btn" onclick="soSubmit()">
+        <i class="ph ph-check"></i>&nbsp; Confirm Acknowledgment
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  SEND REPORT MODAL                                            -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="sr-backdrop" class="sr-backdrop" role="dialog" aria-modal="true">
+  <div class="sr-modal">
+    <div class="sr-hdr">
+      <div class="sr-hdr-left">
+        <div class="sr-eyebrow">WHS Monitor</div>
+        <div class="sr-title"><i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report</div>
+      </div>
+      <div class="sr-close" onclick="srClose()" title="Close"><i class="ph ph-x"></i></div>
+    </div>
+    <div class="sr-pill">
+      <div class="sr-pill-icon">&#128196;</div>
+      <div class="sr-pill-info">
+        <div class="sr-pill-name">WHS Incident Dashboard &mdash; 20 May 2026</div>
+        <div class="sr-pill-meta">Dashboard Report &bull; Generated just now</div>
+      </div>
+      <div style="font-size:9px;color:#2563eb;background:#dbeafe;border-radius:10px;padding:2px 8px;font-weight:600;flex-shrink:0">HTML</div>
+    </div>
+    <div class="sr-body">
+      <div>
+        <div class="sr-sec-lbl">Send To</div>
+        <div class="sr-recipients-note">
+          <strong>Note:</strong> In the live system this panel lets you search and select individual users,
+          divisions, departments, or employee roles as recipients. For this demo, recipients are shown
+          as a placeholder.
+        </div>
+        <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">
+          <div style="display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:3px 10px 3px 8px;font-size:10px;color:#2563eb;font-weight:600">
+            <i class="ph ph-user" style="font-size:11px"></i> John Davis
+            <span style="cursor:pointer;font-size:11px;opacity:.6;margin-left:2px">×</span>
+          </div>
+          <div style="display:inline-flex;align-items:center;gap:5px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:20px;padding:3px 10px 3px 8px;font-size:10px;color:#166534;font-weight:600">
+            <i class="ph ph-buildings" style="font-size:11px"></i> Operations Division
+            <span style="cursor:pointer;font-size:11px;opacity:.6;margin-left:2px">×</span>
+          </div>
+          <div style="display:inline-flex;align-items:center;gap:5px;background:#fef3c7;border:1px solid #fde68a;border-radius:20px;padding:3px 10px 3px 8px;font-size:10px;color:#92400e;font-weight:600">
+            <i class="ph ph-git-branch" style="font-size:11px"></i> HR Department
+            <span style="cursor:pointer;font-size:11px;opacity:.6;margin-left:2px">×</span>
+          </div>
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">
+          <div style="width:7px;height:7px;border-radius:50%;background:#3B98F1;flex-shrink:0"></div>
+          <span style="font-size:10px;color:#6b7280;flex:1">Total unique recipients</span>
+          <span style="font-size:11px;font-weight:700;color:#3B98F1">3 recipients</span>
+        </div>
+      </div>
+      <div class="sr-field">
+        <label>Email Subject</label>
+        <input type="text" id="sr-subject" value="WHS Incident Dashboard — 20 May 2026"/>
+      </div>
+      <div class="sr-field">
+        <label>Message (optional)</label>
+        <textarea id="sr-message" placeholder="Add a personal message to accompany the report…"></textarea>
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px;cursor:pointer;margin-top:4px">
+        <input type="checkbox" id="sr-require-signoff" style="width:15px;height:15px;accent-color:#16a34a;cursor:pointer;flex-shrink:0;margin-top:2px"/>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#166534">Require Acknowledgment Sign-Off</div>
+          <div style="font-size:11px;color:#15803d;margin-top:2px">Recipients must digitally acknowledge receipt of this report</div>
+        </div>
+      </label>
+    </div>
+    <div class="sr-ftr">
+      <div class="sr-ftr-note"><i class="ph ph-lock-simple"></i> Report will be sent as an HTML attachment</div>
+      <div class="sr-ftr-btns">
+        <button class="sr-btn-ghost" onclick="srClose()">Cancel</button>
+        <button class="sr-btn-primary" id="sr-send-btn" onclick="srHandleSend()">
+          <i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Toast notification ──────────────────────────────────── -->
+<div id="toast" class="toast">
+  <span class="toast-icon" id="toast-icon"></span>
+  <span id="toast-msg"></span>
+</div>
+
+
+<script>
+var SO_ACKNOWLEDGED = false;
+var soSigInitDone = false; var soSigDrawing = false; var soSigHasMark = false;
+
+// ── Acknowledgment modal ──────────────────────────────────────
+function soOpen() {
+  if (SO_ACKNOWLEDGED) return;
+  document.getElementById('so-backdrop').classList.add('open');
+  // Pre-fill name from localStorage if available (mirrors real report behaviour)
+  var nameEl = document.getElementById('so-name');
+  if (nameEl && !nameEl.value) {
+    var md = {};
+    try { md = JSON.parse(localStorage.getItem('jmemberData') || '{}'); } catch(e) {}
+    var pre = [md.FirstName, md.Surname].filter(Boolean).join(' ');
+    if (pre) nameEl.value = pre;
+  }
+  if (!soSigInitDone) { soSigInitDone = true; setTimeout(soInitSig, 50); }
+}
+
+function soClose() {
+  document.getElementById('so-backdrop').classList.remove('open');
+}
+
+function soInitSig() {
+  var cv = document.getElementById('so-sig-canvas');
+  if (!cv) return;
+  var wrap = document.getElementById('so-sig-wrap');
+  cv.width  = wrap ? wrap.clientWidth : 392;
+  cv.height = 110;
+  var ctx = cv.getContext('2d');
+  ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  function pos(e) {
+    var r = cv.getBoundingClientRect();
+    var src = e.touches ? e.touches[0] : e;
+    return { x: (src.clientX - r.left) * (cv.width / r.width), y: (src.clientY - r.top) * (cv.height / r.height) };
+  }
+  function start(e) { e.preventDefault(); soSigDrawing = true; ctx.beginPath(); var p = pos(e); ctx.moveTo(p.x, p.y); }
+  function move(e)  { if (!soSigDrawing) return; e.preventDefault(); var p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); soSigHasMark = true; var h = document.getElementById('so-sig-hint'); if (h) h.style.opacity = '0'; }
+  function end()    { soSigDrawing = false; }
+  cv.addEventListener('mousedown',  start);
+  cv.addEventListener('mousemove',  move);
+  cv.addEventListener('mouseup',    end);
+  cv.addEventListener('mouseleave', end);
+  cv.addEventListener('touchstart', start, { passive: false });
+  cv.addEventListener('touchmove',  move,  { passive: false });
+  cv.addEventListener('touchend',   end);
+}
+
+function soClearSig() {
+  var cv = document.getElementById('so-sig-canvas');
+  if (!cv) return;
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  soSigHasMark = false;
+  var h = document.getElementById('so-sig-hint'); if (h) h.style.opacity = '1';
+}
+
+function soSubmit() {
+  var nameEl = document.getElementById('so-name');
+  var btn    = document.getElementById('so-confirm-btn');
+  var name   = nameEl ? nameEl.value.trim() : '';
+
+  if (!name) {
+    if (nameEl) { nameEl.style.borderColor = '#dc2626'; nameEl.focus(); }
+    return;
+  }
+  if (nameEl) nameEl.style.borderColor = '';
+
+  if (!soSigHasMark) {
+    var wrap = document.getElementById('so-sig-wrap');
+    if (wrap) { wrap.style.borderColor = '#dc2626'; setTimeout(function(){ wrap.style.borderColor = ''; }, 1500); }
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ph ph-circle-notch" style="animation:spin .8s linear infinite;display:inline-block"></i>&nbsp; Submitting…';
+
+  // Simulate a short network delay then confirm (no real API call)
+  setTimeout(function() { soConfirmed(name); }, 900);
+}
+
+function soConfirmed(name) {
+  SO_ACKNOWLEDGED = true;
+  soClose();
+
+  // Update the button
+  var btn = document.getElementById('so-ack-btn');
+  if (btn) {
+    btn.innerHTML = '<i class="ph ph-check-circle"></i>&nbsp; Acknowledged by ' + escHtml(name);
+    btn.className = 'so-btn acknowledged';
+    btn.onclick = null;
+  }
+
+  // Show timestamp
+  var ts = document.getElementById('so-ack-ts');
+  if (ts) {
+    var now = new Date();
+    var d = ('0'+now.getDate()).slice(-2)+'/'+('0'+(now.getMonth()+1)).slice(-2)+'/'+now.getFullYear();
+    var t = now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    ts.innerHTML = '<i class="ph ph-clock"></i>&nbsp; Acknowledged by <strong>' + escHtml(name) + '</strong>'
+      + ' on ' + d + ' at ' + t;
+    ts.style.display = 'block';
+  }
+
+  showToast('✓', 'Acknowledgment recorded for ' + name, '#16a34a');
+}
+
+// ── Send Report modal ─────────────────────────────────────────
+function srOpen() {
+  document.getElementById('sr-backdrop').classList.add('open');
+}
+
+function srClose() {
+  document.getElementById('sr-backdrop').classList.remove('open');
+}
+
+function srHandleSend() {
+  var btn        = document.getElementById('sr-send-btn');
+  var subject    = document.getElementById('sr-subject').value.trim();
+  var requireSO  = document.getElementById('sr-require-signoff').checked;
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ph ph-circle-notch" style="animation:spin .8s linear infinite;display:inline-block"></i>&nbsp; Sending…';
+
+  // Simulate send delay (no real API call)
+  setTimeout(function() {
+    srClose();
+    btn.innerHTML = '<i class="ph ph-paper-plane-tilt"></i>&nbsp; Send Report';
+    btn.disabled  = false;
+
+    var msg = 'Report sent to 3 recipients.';
+    if (requireSO) msg += ' Sign-off acknowledgment required.';
+    showToast('✉', msg, '#2563eb');
+  }, 1200);
+}
+
+// ── Toast helper ──────────────────────────────────────────────
+function showToast(icon, msg, color) {
+  var t = document.getElementById('toast');
+  document.getElementById('toast-icon').textContent = icon;
+  document.getElementById('toast-msg').textContent  = msg;
+  t.style.background = color || '#111827';
+  t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, 3500);
+}
+
+// ── Utility ───────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Close modals on backdrop click ────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('so-backdrop').addEventListener('click', function(e) {
+    if (e.target === this) soClose();
+  });
+  document.getElementById('sr-backdrop').addEventListener('click', function(e) {
+    if (e.target === this) srClose();
+  });
+});
+</script>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</body>
+</html>

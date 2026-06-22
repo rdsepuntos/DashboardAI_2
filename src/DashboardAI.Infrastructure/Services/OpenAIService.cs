@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -15,12 +16,13 @@ namespace DashboardAI.Infrastructure.Services
     {
         private const string BaseUrl = "https://api.openai.com/v1";
 
-        private readonly HttpClient _http;
-        private readonly string _apiKey;
-        private readonly string _generatePromptId;
-        private readonly string _generatePromptVersion;
-        private readonly string _chatPromptId;
-        private readonly string _chatPromptVersion;
+        private readonly HttpClient      _http;
+        private readonly string          _apiKey;
+        private readonly string          _generatePromptId;
+        private readonly string          _generatePromptVersion;
+        private readonly string          _chatPromptId;
+        private readonly string          _chatPromptVersion;
+        private readonly IAiUsageLogger  _usageLogger;
 
         public OpenAIService(
             HttpClient http,
@@ -28,7 +30,8 @@ namespace DashboardAI.Infrastructure.Services
             string generatePromptId,
             string generatePromptVersion,
             string chatPromptId,
-            string chatPromptVersion)
+            string chatPromptVersion,
+            IAiUsageLogger usageLogger = null)
         {
             _http                  = http                  ?? throw new ArgumentNullException(nameof(http));
             _apiKey                = apiKey                ?? throw new ArgumentNullException(nameof(apiKey));
@@ -36,6 +39,116 @@ namespace DashboardAI.Infrastructure.Services
             _generatePromptVersion = generatePromptVersion ?? "4";
             _chatPromptId          = chatPromptId          ?? throw new ArgumentNullException(nameof(chatPromptId));
             _chatPromptVersion     = chatPromptVersion     ?? "6";
+            _usageLogger           = usageLogger; // optional — null means "don't log"
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  Token pricing (USD per token).  Values mirror chat.js PRICING and
+        //  are used to compute InputCostUsd / OutputCostUsd for AIUsageLog.
+        //  Update here whenever OpenAI changes published pricing.
+        // ─────────────────────────────────────────────────────────────────────
+        private static readonly Dictionary<string, (decimal Input, decimal Output)> _pricing =
+            new Dictionary<string, (decimal, decimal)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["gpt-4o"]        = (2.50m  / 1_000_000m, 10.00m / 1_000_000m),
+            ["gpt-4o-mini"]   = (0.15m  / 1_000_000m, 0.60m  / 1_000_000m),
+            ["gpt-4.1"]       = (2.00m  / 1_000_000m, 8.00m  / 1_000_000m),
+            ["gpt-4.1-mini"]  = (0.40m  / 1_000_000m, 1.60m  / 1_000_000m),
+            ["gpt-4.1-nano"]  = (0.10m  / 1_000_000m, 0.40m  / 1_000_000m),
+            ["gpt-5"]              = (1.25m  / 1_000_000m, 10.00m / 1_000_000m),
+            ["gpt-5-mini"]         = (0.25m  / 1_000_000m, 2.00m  / 1_000_000m),
+            ["gpt-5-nano"]         = (0.05m  / 1_000_000m, 0.40m  / 1_000_000m),
+            ["gpt-5.2-chat-latest"]= (1.25m  / 1_000_000m, 10.00m / 1_000_000m),
+        };
+
+        private static (decimal Input, decimal Output) GetPricing(string model)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+                return _pricing["gpt-4o"];
+            if (_pricing.TryGetValue(model, out var exact))
+                return exact;
+            // Prefix match — handles versioned aliases like "gpt-4o-2024-08-06".
+            // Iterate longest key first so "gpt-4o-mini" beats "gpt-4o".
+            foreach (var kv in _pricing.OrderByDescending(k => k.Key.Length))
+            {
+                if (model.StartsWith(kv.Key, StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+            }
+            return _pricing["gpt-4o"];
+        }
+
+        /// <summary>
+        /// Result of a low-level OpenAI HTTP call — content text plus the
+        /// usage metadata we need to write an AIUsageLog row.
+        /// </summary>
+        private class OpenAICallResult
+        {
+            public string  Content          { get; set; }
+            public string  Model            { get; set; }
+            public int     PromptTokens     { get; set; }
+            public int     CompletionTokens { get; set; }
+            public decimal DurationSeconds  { get; set; }
+        }
+
+        /// <summary>
+        /// Extracts model name and token usage from a parsed OpenAI response.
+        /// Tolerant of both Responses API (input_tokens / output_tokens) and
+        /// Chat Completions API (prompt_tokens / completion_tokens) shapes.
+        /// </summary>
+        private static (string Model, int Prompt, int Completion) ExtractUsage(JObject parsed)
+        {
+            var model = parsed?["model"]?.ToString() ?? "";
+            var usage = parsed?["usage"];
+            if (usage == null) return (model, 0, 0);
+
+            int prompt =
+                (int?)usage["prompt_tokens"]
+             ?? (int?)usage["input_tokens"]
+             ?? 0;
+
+            int completion =
+                (int?)usage["completion_tokens"]
+             ?? (int?)usage["output_tokens"]
+             ?? 0;
+
+            return (model, prompt, completion);
+        }
+
+        /// <summary>
+        /// Fire-and-forget-style usage logger.  Always swallows exceptions —
+        /// AiUsageLogger itself catches; this extra try/catch guards against
+        /// a null logger or unexpected programmer errors.
+        /// </summary>
+        private async Task LogUsageAsync(
+            string operation, string endpoint,
+            OpenAICallResult call,
+            string userId, int storeId,
+            int? charCount = null)
+        {
+            if (_usageLogger == null || call == null) return;
+            try
+            {
+                var price = GetPricing(call.Model);
+                await _usageLogger.LogAsync(new AiUsageLogEntry
+                {
+                    UserId           = userId,
+                    StoreId          = storeId > 0 ? storeId : (int?)null,
+                    Operation        = operation,
+                    Endpoint         = endpoint,
+                    Model            = call.Model,
+                    PromptTokens     = call.PromptTokens,
+                    CompletionTokens = call.CompletionTokens,
+                    InputCostUsd     = call.PromptTokens     * price.Input,
+                    OutputCostUsd    = call.CompletionTokens * price.Output,
+                    DurationSeconds  = call.DurationSeconds,
+                    CharCount        = charCount,
+                    Source           = "server"
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[OpenAIService] Usage log failed ({operation}): {ex.Message}");
+            }
         }
 
         // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -59,7 +172,16 @@ namespace DashboardAI.Infrastructure.Services
                 ["guid"]             = Guid.NewGuid().ToString(),
                 ["dashboard_title"]  = ""
             };
-            var raw = await CallOpenAIResponsesAsync(_generatePromptId, _generatePromptVersion, variables);
+            var call = await CallOpenAIResponsesAsync(_generatePromptId, _generatePromptVersion, variables);
+            var raw  = call.Content;
+
+            await LogUsageAsync(
+                operation: "GenerateDashboard",
+                endpoint:  "responses",
+                call:      call,
+                userId:    userId,
+                storeId:   storeId,
+                charCount: userPrompt?.Length);
 
             // Normalise flat x/y/w/h at widget root → nested "position" object,
             // in case GPT returns { "x":0,"y":0,"w":3,"h":2 } instead of
@@ -100,7 +222,16 @@ namespace DashboardAI.Infrastructure.Services
                 ["user_message"]           = userMessage
             };
 
-            var raw = await CallOpenAIResponsesAsync(_chatPromptId, _chatPromptVersion, variables);
+            var call = await CallOpenAIResponsesAsync(_chatPromptId, _chatPromptVersion, variables);
+            var raw  = call.Content;
+
+            await LogUsageAsync(
+                operation: "ChatMessage",
+                endpoint:  "responses",
+                call:      call,
+                userId:    currentDashboard?.UserId,
+                storeId:   currentDashboard?.StoreId ?? 0,
+                charCount: userMessage?.Length);
 
             var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
             return commands ?? new List<ChatCommandDto>();
@@ -111,7 +242,9 @@ namespace DashboardAI.Infrastructure.Services
         // ────────────────────────────────────────────────────────────────────────
         public async Task<Dictionary<string, WidgetInsight>> DescribeWidgetsAsync(
             string dashboardTitle,
-            IEnumerable<WidgetDescribeItem> widgets)
+            IEnumerable<WidgetDescribeItem> widgets,
+            string userId  = null,
+            int    storeId = 0)
         {
             var list = widgets?.ToList() ?? new List<WidgetDescribeItem>();
             var widgetLines = string.Join("\n", list.Select((w, i) =>
@@ -143,8 +276,10 @@ namespace DashboardAI.Infrastructure.Services
             };
             req.Headers.Add("Authorization", $"Bearer {_apiKey}");
 
+            var sw       = Stopwatch.StartNew();
             var response = await _http.SendAsync(req);
             var json     = await response.Content.ReadAsStringAsync();
+            sw.Stop();
 
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException($"OpenAI error {(int)response.StatusCode}: {json}");
@@ -154,6 +289,22 @@ namespace DashboardAI.Infrastructure.Services
 
             if (string.IsNullOrWhiteSpace(content))
                 throw new InvalidOperationException($"OpenAI returned empty content. Raw: {json}");
+
+            var (model, prompt, completion) = ExtractUsage(parsed);
+            await LogUsageAsync(
+                operation: "DescribeWidgets",
+                endpoint:  "chat/completions",
+                call:      new OpenAICallResult
+                {
+                    Content          = content,
+                    Model            = model,
+                    PromptTokens     = prompt,
+                    CompletionTokens = completion,
+                    DurationSeconds  = (decimal)sw.Elapsed.TotalSeconds
+                },
+                userId:    userId,
+                storeId:   storeId,
+                charCount: userMsg?.Length);
 
             return JsonConvert.DeserializeObject<Dictionary<string, WidgetInsight>>(content)
                    ?? new Dictionary<string, WidgetInsight>();
@@ -166,7 +317,9 @@ namespace DashboardAI.Infrastructure.Services
         public async Task<ReportInsightsResult> GenerateReportInsightsAsync(
             string dashboardTitle,
             IEnumerable<ReportWidgetItem> widgets,
-            Dictionary<string, string> activeFilters = null)
+            Dictionary<string, string> activeFilters = null,
+            string userId  = null,
+            int    storeId = 0)
         {
             var list = widgets?.ToList() ?? new List<ReportWidgetItem>();
 
@@ -250,8 +403,10 @@ namespace DashboardAI.Infrastructure.Services
             };
             req.Headers.Add("Authorization", $"Bearer {_apiKey}");
 
+            var sw       = Stopwatch.StartNew();
             var response = await _http.SendAsync(req);
             var json     = await response.Content.ReadAsStringAsync();
+            sw.Stop();
 
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException($"OpenAI error {(int)response.StatusCode}: {json}");
@@ -261,6 +416,22 @@ namespace DashboardAI.Infrastructure.Services
 
             if (string.IsNullOrWhiteSpace(content))
                 throw new InvalidOperationException($"OpenAI returned empty content. Raw: {json}");
+
+            var (model, promptTok, completionTok) = ExtractUsage(parsed);
+            await LogUsageAsync(
+                operation: "ReportInsights",
+                endpoint:  "chat/completions",
+                call:      new OpenAICallResult
+                {
+                    Content          = content,
+                    Model            = model,
+                    PromptTokens     = promptTok,
+                    CompletionTokens = completionTok,
+                    DurationSeconds  = (decimal)sw.Elapsed.TotalSeconds
+                },
+                userId:    userId,
+                storeId:   storeId,
+                charCount: userMsg?.Length);
 
             var root = JObject.Parse(content);
             return new ReportInsightsResult
@@ -340,8 +511,10 @@ namespace DashboardAI.Infrastructure.Services
             };
             request.Headers.Add("Authorization", $"Bearer {_apiKey}");
 
+            var sw       = Stopwatch.StartNew();
             var response = await _http.SendAsync(request);
             var json     = await response.Content.ReadAsStringAsync();
+            sw.Stop();
 
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException($"OpenAI MCP error {(int)response.StatusCode}: {json}");
@@ -354,13 +527,29 @@ namespace DashboardAI.Infrastructure.Services
             if (string.IsNullOrWhiteSpace(content))
                 throw new InvalidOperationException($"OpenAI returned empty MCP response. Raw: {json}");
 
+            var (mcpModel, mcpPrompt, mcpCompletion) = ExtractUsage(parsed);
+            await LogUsageAsync(
+                operation: "HazardMcp",
+                endpoint:  "responses",
+                call:      new OpenAICallResult
+                {
+                    Content          = content,
+                    Model            = mcpModel,
+                    PromptTokens     = mcpPrompt,
+                    CompletionTokens = mcpCompletion,
+                    DurationSeconds  = (decimal)sw.Elapsed.TotalSeconds
+                },
+                userId:    userId,
+                storeId:   storeId,
+                charCount: message?.Length);
+
             return content.Trim();
         }
 
         // ─────────────────────────────────────────────────────────────────────
         //  OpenAI Responses API
         // ─────────────────────────────────────────────────────────────────────
-        private async Task<string> CallOpenAIResponsesAsync(
+        private async Task<OpenAICallResult> CallOpenAIResponsesAsync(
             string promptId,
             string promptVersion,
             Dictionary<string, string> variables,
@@ -400,8 +589,10 @@ namespace DashboardAI.Infrastructure.Services
             };
             request.Headers.Add("Authorization", $"Bearer {_apiKey}");
 
+            var sw       = Stopwatch.StartNew();
             var response = await _http.SendAsync(request);
             var json     = await response.Content.ReadAsStringAsync();
+            sw.Stop();
 
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException($"OpenAI Responses API error {(int)response.StatusCode}: {json}");
@@ -424,7 +615,16 @@ namespace DashboardAI.Infrastructure.Services
             if (content.StartsWith("```"))     content = content.Substring(3);
             if (content.EndsWith("```"))       content = content.Substring(0, content.Length - 3);
 
-            return content.Trim();
+            var (model, prompt, completion) = ExtractUsage(parsed);
+
+            return new OpenAICallResult
+            {
+                Content          = content.Trim(),
+                Model            = model,
+                PromptTokens     = prompt,
+                CompletionTokens = completion,
+                DurationSeconds  = (decimal)sw.Elapsed.TotalSeconds
+            };
         }
 
         //  Server-side fallbacks

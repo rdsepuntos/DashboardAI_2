@@ -56,7 +56,9 @@ namespace DashboardAI.API.Controllers
                 var result = await _aiService.GenerateReportInsightsAsync(
                     request.DashboardTitle ?? "Dashboard",
                     request.Widgets,
-                    request.ActiveFilters);
+                    request.ActiveFilters,
+                    request.UserId,
+                    request.StoreId);
 
                 return Ok(new
                 {

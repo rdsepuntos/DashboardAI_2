@@ -88,7 +88,9 @@ namespace DashboardAI.API.Controllers
             {
                 var descriptions = await _aiService.DescribeWidgetsAsync(
                     request.DashboardTitle ?? "Dashboard",
-                    request.Widgets);
+                    request.Widgets,
+                    request.UserId,
+                    request.StoreId);
                 return Ok(new { descriptions });
             }
             catch (Exception ex)

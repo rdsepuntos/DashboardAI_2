@@ -28,7 +28,8 @@ namespace DashboardAI.Infrastructure
 
             // ── Repositories ──────────────────────────────────────────────────
             services.AddScoped<IDashboardRepository>(_ => new DashboardRepository(connString));
-
+            // AI usage logger — writes to Agtech_Usermgmt.dbo.AIUsageLog via 3-part name.
+            services.AddSingleton<IAiUsageLogger>(_ => new AiUsageLogger(connString));
             // ── Data Source Registry (singleton — loaded from SQL at startup) ─
             //  To add a new view or stored procedure, INSERT a row into the
             //  DataSourceRegistry SQL table — no code changes needed here.
@@ -46,13 +47,14 @@ namespace DashboardAI.Infrastructure
                 connString,
                 sp.GetRequiredService<IDataSourceRegistry>()));
 
-            services.AddSingleton<IOpenAIService>(_ => new OpenAIService(
+            services.AddSingleton<IOpenAIService>(sp => new OpenAIService(
                 new HttpClient(),
                 openAiKey,
                 generatePromptId,
                 generatePromptVersion,
                 chatPromptId,
-                chatPromptVersion));
+                chatPromptVersion,
+                sp.GetRequiredService<IAiUsageLogger>()));
 
             services.AddScoped<IEmailService>(sp =>
                 new EmailService(configuration));
