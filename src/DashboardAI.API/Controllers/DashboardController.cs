@@ -39,7 +39,7 @@ namespace DashboardAI.API.Controllers
                 return Ok(new
                 {
                     dashboardId = result.DashboardId,
-                    redirectUrl = $"/dashboard/{result.DashboardId}?userId={Uri.EscapeDataString(request.UserId ?? string.Empty)}&storeId={request.StoreId}",
+                    redirectUrl = $"/dashboard/{result.DashboardId}?userId={Uri.EscapeDataString(request.UserId ?? string.Empty)}&storeId={request.StoreId}&sessionId={Uri.EscapeDataString(request.SessionId ?? string.Empty)}&module={Uri.EscapeDataString(request.Module ?? string.Empty)}",
                     dashboard   = result.Dashboard
                 });
             }

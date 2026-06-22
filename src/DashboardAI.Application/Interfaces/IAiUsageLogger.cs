@@ -12,6 +12,9 @@ namespace DashboardAI.Application.Interfaces
         public int?     StoreId          { get; set; }
         public int?     RegOthId         { get; set; }
         public int?     TranscriptId     { get; set; }
+        public string   Module           { get; set; }
+        public string   Action           { get; set; }
+        public string   SessionId        { get; set; }
         public string   Operation        { get; set; }
         public string   Endpoint         { get; set; }
         public string   Model            { get; set; }

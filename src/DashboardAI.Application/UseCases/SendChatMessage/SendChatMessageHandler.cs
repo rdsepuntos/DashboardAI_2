@@ -16,6 +16,8 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
         public string Message { get; set; }
         public string UserId { get; set; }
         public int StoreId { get; set; }
+        public string Module { get; set; }
+        public string SessionId { get; set; }
         /// <summary>Current full dashboard state sent from frontend (source of truth for mutations)</summary>
         public DashboardDto CurrentDashboard { get; set; }
     }
@@ -83,7 +85,9 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
                 request.Message,
                 request.CurrentDashboard,
                 dataSources,
-                currentDate)).ToList();
+                currentDate,
+                request.Module,
+                request.SessionId)).ToList();
 
             // Apply commands server-side to produce the updated dashboard state
             var updated = DashboardCommandApplier.Apply(request.CurrentDashboard, commands);

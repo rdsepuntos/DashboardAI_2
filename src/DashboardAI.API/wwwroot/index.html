@@ -57,12 +57,24 @@
       document.getElementById('promptInput').value = btn.textContent.trim();
     }
 
+    function inferDashboardModule(text) {
+      const lower = (text || '').toLowerCase();
+      if (lower.includes('rapid risk') || lower.includes('rapidrisk')) return 'RapidRisk';
+      if (lower.includes('hazard')) return 'Hazard Report';
+      if (lower.includes('incident') || lower.includes('injury') || lower.includes('accident') || lower.includes('near miss')) return 'Incident';
+      if (lower.includes('inspection')) return 'Inspection';
+      if (lower.includes('audit')) return 'Audit';
+      return '';
+    }
+
     document.getElementById('genForm').addEventListener('submit', async function(e) {
       e.preventDefault();
 
       const prompt  = document.getElementById('promptInput').value.trim();
       const storeId = parseInt(document.getElementById('storeId').value, 10);
       const userId  = document.getElementById('userId').value.trim();
+      const sessionId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : '';
+      const module = inferDashboardModule(prompt);
 
       if (!prompt) return;
 
@@ -80,7 +92,7 @@
         const res = await fetch(API_BASE + '/api/dashboard/generate', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ prompt, storeId, userId })
+          body:    JSON.stringify({ prompt, storeId, userId, module, sessionId })
         });
 
         const data = await res.json();

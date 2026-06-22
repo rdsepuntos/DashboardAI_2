@@ -16,6 +16,8 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
         public string Prompt { get; set; }
         public int StoreId { get; set; }
         public string UserId { get; set; }
+        public string Module { get; set; }
+        public string SessionId { get; set; }
     }
 
     public class GenerateDashboardResponse
@@ -48,6 +50,12 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
             if (request == null)       throw new ArgumentNullException(nameof(request));
             if (string.IsNullOrWhiteSpace(request.Prompt))  throw new ArgumentException("Prompt is required.");
             if (string.IsNullOrWhiteSpace(request.UserId))  throw new ArgumentException("UserId is required.");
+
+            if (string.IsNullOrWhiteSpace(request.SessionId))
+                request.SessionId = Guid.NewGuid().ToString();
+
+            if (string.IsNullOrWhiteSpace(request.Module))
+                request.Module = InferModuleFromText(request.Prompt);
 
             // Build data source metadata list for the AI prompt,
             // enriched with distinct known values — ONLY for low-cardinality categorical columns.
@@ -94,7 +102,9 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
                 request.StoreId,
                 request.UserId,
                 dataSources,
-                currentDate);
+                currentDate,
+                request.Module,
+                request.SessionId);
 
             // Map DTO → Domain entity and persist
             var dashboard = DashboardMapper.ToDomain(dashboardDto);
@@ -122,5 +132,16 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
 
         private static bool IsCategoricalColumn(string name)
             => _categoricalColumnNames.Contains(name);
+
+        private static string InferModuleFromText(string text)
+        {
+            var lower = (text ?? string.Empty).ToLowerInvariant();
+            if (lower.Contains("rapid risk") || lower.Contains("rapidrisk")) return "RapidRisk";
+            if (lower.Contains("hazard")) return "Hazard Report";
+            if (lower.Contains("incident") || lower.Contains("injury") || lower.Contains("accident") || lower.Contains("near miss")) return "Incident";
+            if (lower.Contains("inspection")) return "Inspection";
+            if (lower.Contains("audit")) return "Audit";
+            return null;
+        }
     }
 }

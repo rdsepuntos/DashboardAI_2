@@ -12,6 +12,19 @@ const DashboardEngine = (() => {
   let _filterState = {};     // { filterId: currentValue, ... }
   let _session     = {};
 
+  function _inferDashboardModule(dashboard) {
+    const title = (dashboard?.title || '').toLowerCase();
+    const prompt = (dashboard?.originalPrompt || '').toLowerCase();
+    const sources = (dashboard?.widgets || []).map(w => (w.dataSource || '').toLowerCase()).join(' ');
+    const haystack = `${title} ${prompt} ${sources}`;
+    if (haystack.includes('rapid risk') || haystack.includes('rapidrisk')) return 'RapidRisk';
+    if (haystack.includes('hazard')) return 'Hazard Report';
+    if (haystack.includes('incident') || haystack.includes('injury') || haystack.includes('accident') || haystack.includes('near miss')) return 'Incident';
+    if (haystack.includes('inspection')) return 'Inspection';
+    if (haystack.includes('audit')) return 'Audit';
+    return _session.module || '';
+  }
+
   // ── Init ────────────────────────────────────────────────────────────────────
   async function init(dashboardId, session) {
     _session = session;
@@ -538,6 +551,8 @@ const DashboardEngine = (() => {
         message:          '__layout_sync__',
         userId:           _session.userId,
         storeId:          _session.storeId,
+        module:           _inferDashboardModule(_dashboard),
+        sessionId:        _session.sessionId || _dashboard.id,
         currentDashboard: _dashboard
       })
     }).catch(() => {}); // fire-and-forget

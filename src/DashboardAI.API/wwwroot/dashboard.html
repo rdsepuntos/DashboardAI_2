@@ -143,7 +143,9 @@
     const _qs      = new URLSearchParams(window.location.search);
     const SESSION  = {
       userId:  _qs.get('userId')  || 'user_001',
-      storeId: parseInt(_qs.get('storeId') || '1', 10)
+      storeId: parseInt(_qs.get('storeId') || '1', 10),
+      sessionId: _qs.get('sessionId') || ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ''),
+      module: _qs.get('module') || ''
     };
 
     DashboardEngine.init(dashboardId, SESSION);

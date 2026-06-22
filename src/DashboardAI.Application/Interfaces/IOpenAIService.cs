@@ -65,7 +65,9 @@ namespace DashboardAI.Application.Interfaces
             int storeId,
             string userId,
             IEnumerable<DataSourceMetaDto> availableDataSources,
-            string currentDateIso);
+            string currentDateIso,
+            string module    = null,
+            string sessionId = null);
 
         /// <summary>
         /// Sends a chat message in the context of an existing dashboard.
@@ -75,7 +77,9 @@ namespace DashboardAI.Application.Interfaces
             string userMessage,
             DashboardDto currentDashboard,
             IEnumerable<DataSourceMetaDto> availableDataSources,
-            string currentDateIso);
+            string currentDateIso,
+            string module    = null,
+            string sessionId = null);
 
         /// <summary>
         /// Generates a professional insight and layout recommendation for each widget.

@@ -30,12 +30,14 @@ namespace DashboardAI.Infrastructure.Repositories
                     const string sql = @"
                         INSERT INTO Agtech_Usermgmt.dbo.AIUsageLog
                             (UserID, StoreID, RegOthID, TranscriptID,
+                             Module, [Action], SessionID,
                              Operation, Endpoint, Model,
                              PromptTokens, CompletionTokens,
                              DurationSeconds, CharCount,
                              InputCostUsd, OutputCostUsd, Source, CreatedAt)
                         VALUES
                             (@UserId, @StoreId, @RegOthId, @TranscriptId,
+                             @Module, @Action, @SessionId,
                              @Operation, @Endpoint, @Model,
                              @PromptTokens, @CompletionTokens,
                              @DurationSeconds, @CharCount,
@@ -47,12 +49,20 @@ namespace DashboardAI.Infrastructure.Repositories
                         && int.TryParse(entry.UserId, out var parsed))
                         userIdInt = parsed;
 
+                    Guid? sessionGuid = null;
+                    if (!string.IsNullOrWhiteSpace(entry.SessionId)
+                        && Guid.TryParse(entry.SessionId, out var parsedGuid))
+                        sessionGuid = parsedGuid;
+
                     await conn.ExecuteAsync(sql, new
                     {
                         UserId           = userIdInt,
                         StoreId          = entry.StoreId,
                         RegOthId         = entry.RegOthId,
                         TranscriptId     = entry.TranscriptId,
+                        Module           = string.IsNullOrWhiteSpace(entry.Module) ? null : entry.Module,
+                        Action           = string.IsNullOrWhiteSpace(entry.Action) ? null : entry.Action,
+                        SessionId        = sessionGuid,
                         Operation        = entry.Operation ?? "",
                         Endpoint         = entry.Endpoint,
                         Model            = entry.Model ?? "",

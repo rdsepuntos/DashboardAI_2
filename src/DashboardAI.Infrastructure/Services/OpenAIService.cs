@@ -123,7 +123,10 @@ namespace DashboardAI.Infrastructure.Services
             string operation, string endpoint,
             OpenAICallResult call,
             string userId, int storeId,
-            int? charCount = null)
+            int? charCount = null,
+            string module = null,
+            string action = null,
+            string sessionId = null)
         {
             if (_usageLogger == null || call == null) return;
             try
@@ -133,6 +136,9 @@ namespace DashboardAI.Infrastructure.Services
                 {
                     UserId           = userId,
                     StoreId          = storeId > 0 ? storeId : (int?)null,
+                    Module           = NormalizeModule(module),
+                    Action           = string.IsNullOrWhiteSpace(action) ? operation : action,
+                    SessionId        = NormalizeSessionId(sessionId),
                     Operation        = operation,
                     Endpoint         = endpoint,
                     Model            = call.Model,
@@ -159,7 +165,9 @@ namespace DashboardAI.Infrastructure.Services
             int storeId,
             string userId,
             IEnumerable<DataSourceMetaDto> availableDataSources,
-            string currentDateIso)
+            string currentDateIso,
+            string module    = null,
+            string sessionId = null)
         {
             var dsList = availableDataSources.ToList();
             var variables = new Dictionary<string, string>
@@ -202,6 +210,17 @@ namespace DashboardAI.Infrastructure.Services
             InferMissingConfigs(dto, availableDataSources);
             InferMissingAppliesFilters(dto);
 
+            await LogUsageAsync(
+                operation: "GenerateDashboard",
+                endpoint:  "responses",
+                call:      call,
+                userId:    userId,
+                storeId:   storeId,
+                charCount: userPrompt?.Length,
+                module:    ResolveModule(module, userPrompt, dto?.Title, dto?.OriginalPrompt, dto?.Widgets?.Select(w => w.DataSource)),
+                action:    "Create Dashboard",
+                sessionId: sessionId);
+
             return dto;
         }
 
@@ -212,7 +231,9 @@ namespace DashboardAI.Infrastructure.Services
             string userMessage,
             DashboardDto currentDashboard,
             IEnumerable<DataSourceMetaDto> availableDataSources,
-            string currentDateIso)
+            string currentDateIso,
+            string module    = null,
+            string sessionId = null)
         {
             var variables = new Dictionary<string, string>
             {
@@ -225,15 +246,19 @@ namespace DashboardAI.Infrastructure.Services
             var call = await CallOpenAIResponsesAsync(_chatPromptId, _chatPromptVersion, variables);
             var raw  = call.Content;
 
+            var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
+
             await LogUsageAsync(
                 operation: "ChatMessage",
                 endpoint:  "responses",
                 call:      call,
                 userId:    currentDashboard?.UserId,
                 storeId:   currentDashboard?.StoreId ?? 0,
-                charCount: userMessage?.Length);
+                charCount: userMessage?.Length,
+                module:    ResolveModule(module, userMessage, currentDashboard?.Title, currentDashboard?.OriginalPrompt, currentDashboard?.Widgets?.Select(w => w.DataSource)),
+                action:    "Update Dashboard",
+                sessionId: !string.IsNullOrWhiteSpace(sessionId) ? sessionId : currentDashboard?.Id.ToString());
 
-            var commands = JsonConvert.DeserializeObject<List<ChatCommandDto>>(raw);
             return commands ?? new List<ChatCommandDto>();
         }
 
@@ -304,7 +329,9 @@ namespace DashboardAI.Infrastructure.Services
                 },
                 userId:    userId,
                 storeId:   storeId,
-                charCount: userMsg?.Length);
+                charCount: userMsg?.Length,
+                module:    ResolveModule(null, dashboardTitle, dashboardTitle, null, null),
+                action:    "Describe Widgets");
 
             return JsonConvert.DeserializeObject<Dictionary<string, WidgetInsight>>(content)
                    ?? new Dictionary<string, WidgetInsight>();
@@ -431,7 +458,9 @@ namespace DashboardAI.Infrastructure.Services
                 },
                 userId:    userId,
                 storeId:   storeId,
-                charCount: userMsg?.Length);
+                charCount: userMsg?.Length,
+                module:    ResolveModule(null, dashboardTitle, dashboardTitle, null, null),
+                action:    "Generate Report Insights");
 
             var root = JObject.Parse(content);
             return new ReportInsightsResult
@@ -541,7 +570,10 @@ namespace DashboardAI.Infrastructure.Services
                 },
                 userId:    userId,
                 storeId:   storeId,
-                charCount: message?.Length);
+                charCount: message?.Length,
+                module:    "Hazard Report",
+                action:    "Hazard Query",
+                sessionId: null);
 
             return content.Trim();
         }
@@ -757,6 +789,47 @@ namespace DashboardAI.Infrastructure.Services
                 if (w.AppliesFilters == null || w.AppliesFilters.Count == 0)
                     w.AppliesFilters = new List<string>(nonLocked);
             }
+        }
+
+        private static string NormalizeModule(string module)
+        {
+            if (string.IsNullOrWhiteSpace(module)) return null;
+            var lower = module.Trim().ToLowerInvariant();
+            if (lower.Contains("rapid risk") || lower.Contains("rapidrisk")) return "RapidRisk";
+            if (lower.Contains("hazard")) return "Hazard Report";
+            if (lower.Contains("incident") || lower.Contains("injury") || lower.Contains("accident") || lower.Contains("near miss")) return "Incident";
+            if (lower.Contains("inspection")) return "Inspection";
+            if (lower.Contains("audit")) return "Audit";
+            return module.Trim();
+        }
+
+        private static string NormalizeSessionId(string sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId)) return null;
+            return Guid.TryParse(sessionId, out var parsed) ? parsed.ToString() : null;
+        }
+
+        private static string ResolveModule(
+            string explicitModule,
+            string userText,
+            string dashboardTitle,
+            string originalPrompt,
+            IEnumerable<string> dataSources)
+        {
+            var direct = NormalizeModule(explicitModule);
+            if (!string.IsNullOrWhiteSpace(direct)) return direct;
+
+            foreach (var dataSource in dataSources ?? Enumerable.Empty<string>())
+            {
+                var ds = dataSource ?? string.Empty;
+                if (ds.IndexOf("RapidRisk", StringComparison.OrdinalIgnoreCase) >= 0) return "RapidRisk";
+                if (ds.IndexOf("Hazard", StringComparison.OrdinalIgnoreCase) >= 0) return "Hazard Report";
+                if (ds.IndexOf("Incident", StringComparison.OrdinalIgnoreCase) >= 0) return "Incident";
+                if (ds.IndexOf("Inspection", StringComparison.OrdinalIgnoreCase) >= 0) return "Inspection";
+                if (ds.IndexOf("Audit", StringComparison.OrdinalIgnoreCase) >= 0) return "Audit";
+            }
+
+            return NormalizeModule($"{dashboardTitle} {originalPrompt} {userText}");
         }
 
         // ─────────────────────────────────────────────────────────────────────
