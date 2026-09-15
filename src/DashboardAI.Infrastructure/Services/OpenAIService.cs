@@ -189,7 +189,8 @@ namespace DashboardAI.Infrastructure.Services
                 call:      call,
                 userId:    userId,
                 storeId:   storeId,
-                charCount: userPrompt?.Length);
+                charCount: userPrompt?.Length,
+                module:    "Dashboard");
 
             // Normalise flat x/y/w/h at widget root → nested "position" object,
             // in case GPT returns { "x":0,"y":0,"w":3,"h":2 } instead of
@@ -217,7 +218,7 @@ namespace DashboardAI.Infrastructure.Services
                 userId:    userId,
                 storeId:   storeId,
                 charCount: userPrompt?.Length,
-                module:    ResolveModule(module, userPrompt, dto?.Title, dto?.OriginalPrompt, dto?.Widgets?.Select(w => w.DataSource)),
+                module:    "Dashboard",
                 action:    "Create Dashboard",
                 sessionId: sessionId);
 
@@ -255,7 +256,7 @@ namespace DashboardAI.Infrastructure.Services
                 userId:    currentDashboard?.UserId,
                 storeId:   currentDashboard?.StoreId ?? 0,
                 charCount: userMessage?.Length,
-                module:    ResolveModule(module, userMessage, currentDashboard?.Title, currentDashboard?.OriginalPrompt, currentDashboard?.Widgets?.Select(w => w.DataSource)),
+                module:    "Dashboard",
                 action:    "Update Dashboard",
                 sessionId: !string.IsNullOrWhiteSpace(sessionId) ? sessionId : currentDashboard?.Id.ToString());
 
@@ -330,7 +331,7 @@ namespace DashboardAI.Infrastructure.Services
                 userId:    userId,
                 storeId:   storeId,
                 charCount: userMsg?.Length,
-                module:    ResolveModule(null, dashboardTitle, dashboardTitle, null, null),
+                module:    "Dashboard",
                 action:    "Describe Widgets");
 
             return JsonConvert.DeserializeObject<Dictionary<string, WidgetInsight>>(content)
@@ -459,7 +460,7 @@ namespace DashboardAI.Infrastructure.Services
                 userId:    userId,
                 storeId:   storeId,
                 charCount: userMsg?.Length,
-                module:    ResolveModule(null, dashboardTitle, dashboardTitle, null, null),
+                module:    "Dashboard",
                 action:    "Generate Report Insights");
 
             var root = JObject.Parse(content);
