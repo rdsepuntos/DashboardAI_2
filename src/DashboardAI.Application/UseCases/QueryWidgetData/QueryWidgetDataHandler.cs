@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using DashboardAI.Application.Interfaces;
 using DashboardAI.Domain.Entities;
 using DashboardAI.Domain.Interfaces;
 
@@ -55,13 +57,16 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
     {
         private readonly IWidgetDataService _dataService;
         private readonly IDataSourceRegistry _registry;
+        private readonly ISiteScopeService _siteScopeService;
 
         public QueryWidgetDataHandler(
             IWidgetDataService dataService,
-            IDataSourceRegistry registry)
+            IDataSourceRegistry registry,
+            ISiteScopeService siteScopeService)
         {
             _dataService = dataService ?? throw new ArgumentNullException(nameof(dataService));
             _registry    = registry    ?? throw new ArgumentNullException(nameof(registry));
+            _siteScopeService = siteScopeService ?? throw new ArgumentNullException(nameof(siteScopeService));
         }
 
         public async Task<IEnumerable<IDictionary<string, object>>> HandleAsync(QueryWidgetDataRequest request)
@@ -74,12 +79,13 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                 throw new InvalidOperationException($"Data source '{request.DataSource}' is not registered.");
 
             // Use case-insensitive keys so "StoreId" from client matches "StoreID" in SupportedParams
+            var scopedStoreIds = await _siteScopeService.ResolveStoreIdsAsync(request.StoreId);
             var safeParams = new Dictionary<string, object>(
                 request.Parameters ?? new Dictionary<string, object>(),
                 StringComparer.OrdinalIgnoreCase)
             {
-                // Enforce server-side StoreId — always override what the client sends
-                ["StoreId"] = request.StoreId
+                // Keep the query inside the resolved scope, but honor a selected site.
+                ["StoreID"] = SelectStoreIds(request.Parameters, scopedStoreIds)
             };
 
             // If aggregation is requested, push the GROUP BY to the database.
@@ -110,11 +116,12 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
             if (definition == null)
                 throw new InvalidOperationException($"Data source '{request.DataSource}' is not registered.");
 
+            var scopedStoreIds = await _siteScopeService.ResolveStoreIdsAsync(request.StoreId);
             var safeParams = new Dictionary<string, object>(
                 request.Parameters ?? new Dictionary<string, object>(),
                 StringComparer.OrdinalIgnoreCase)
             {
-                ["StoreId"] = request.StoreId
+                ["StoreID"] = SelectStoreIds(request.Parameters, scopedStoreIds)
             };
 
             return await _dataService.QueryPagedAsync(
@@ -133,14 +140,47 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
             if (definition == null)
                 throw new InvalidOperationException($"Data source '{dataSource}' is not registered.");
 
+            var scopedStoreIds = await _siteScopeService.ResolveStoreIdsAsync(storeId);
             var safeParams = new Dictionary<string, object>(
                 parameters ?? new Dictionary<string, object>(),
                 StringComparer.OrdinalIgnoreCase)
             {
-                ["StoreId"] = storeId
+                ["StoreID"] = SelectStoreIds(parameters, scopedStoreIds)
             };
 
             return await _dataService.GetDistinctValuesAsync(dataSource, columnName, safeParams);
+        }
+
+        private static string SelectStoreIds(
+            IDictionary<string, object> parameters,
+            IReadOnlyList<int> scopedStoreIds)
+        {
+            if (parameters != null && parameters.TryGetValue("StoreID", out var requested)
+                && requested != null)
+            {
+                var selected = requested.ToString()
+                    .Split(',')
+                    .Select(value => int.TryParse(value.Trim(), out var id) ? (int?)id : null)
+                    .Where(id => id.HasValue)
+                    .Select(id => id.Value)
+                    .Distinct()
+                    .ToList();
+
+                if (selected.Count > 0)
+                {
+                    var authorized = selected
+                        .Where(scopedStoreIds.Contains)
+                        .ToList();
+
+                    // A selected site must never broaden to the full scope when
+                    // it cannot be resolved. -1 is outside the positive StoreID domain.
+                    return authorized.Count == selected.Count
+                        ? string.Join(",", authorized)
+                        : "-1";
+                }
+            }
+
+            return string.Join(",", scopedStoreIds);
         }
     }
 }

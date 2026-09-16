@@ -206,6 +206,7 @@ namespace DashboardAI.Infrastructure.Services
 
             // Always inject locked StoreId filter
             EnsureLockedStoreFilter(dto, storeId);
+            EnsureSiteFilter(dto);
 
             // Server-side fallbacks â€” fill in whatever GPT left empty
             InferMissingConfigs(dto, availableDataSources);
@@ -787,8 +788,14 @@ namespace DashboardAI.Infrastructure.Services
 
             foreach (var w in dto.Widgets ?? new List<WidgetDto>())
             {
-                if (w.AppliesFilters == null || w.AppliesFilters.Count == 0)
-                    w.AppliesFilters = new List<string>(nonLocked);
+                if (w.AppliesFilters == null)
+                    w.AppliesFilters = new List<string>();
+
+                foreach (var filterId in nonLocked)
+                {
+                    if (!w.AppliesFilters.Contains(filterId, StringComparer.OrdinalIgnoreCase))
+                        w.AppliesFilters.Add(filterId);
+                }
             }
         }
 
@@ -933,6 +940,28 @@ namespace DashboardAI.Infrastructure.Services
                     Param        = "StoreId",
                     IsLocked     = true,
                     DefaultValue = storeId.ToString()
+                });
+            }
+        }
+
+        private static void EnsureSiteFilter(DashboardDto dto)
+        {
+            if (dto.Filters == null) dto.Filters = new List<FilterDto>();
+
+            if (!dto.Filters.Any(f => string.Equals(f.Param, "StoreID", StringComparison.OrdinalIgnoreCase)
+                                  && !f.IsLocked))
+            {
+                dto.Filters.Add(new FilterDto
+                {
+                    Id           = "f_site",
+                    Type         = "dropdown",
+                    Label        = "Site",
+                    Param        = "StoreID",
+                    OptionsSource = "__site_scope",
+                    ValueKey     = "StoreId",
+                    LabelKey     = "SiteName",
+                    IsLocked     = false,
+                    DefaultValue = ""
                 });
             }
         }

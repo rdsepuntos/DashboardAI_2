@@ -34,17 +34,20 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
         private readonly IDashboardRepository _repository;
         private readonly IDataSourceRegistry _registry;
         private readonly IWidgetDataService _widgetDataService;
+        private readonly ISiteScopeService _siteScopeService;
 
         public SendChatMessageHandler(
             IOpenAIService aiService,
             IDashboardRepository repository,
             IDataSourceRegistry registry,
-            IWidgetDataService widgetDataService)
+            IWidgetDataService widgetDataService,
+            ISiteScopeService siteScopeService)
         {
             _aiService          = aiService          ?? throw new ArgumentNullException(nameof(aiService));
             _repository         = repository         ?? throw new ArgumentNullException(nameof(repository));
             _registry           = registry           ?? throw new ArgumentNullException(nameof(registry));
             _widgetDataService  = widgetDataService  ?? throw new ArgumentNullException(nameof(widgetDataService));
+            _siteScopeService   = siteScopeService   ?? throw new ArgumentNullException(nameof(siteScopeService));
         }
 
         public async Task<SendChatMessageResponse> HandleAsync(SendChatMessageRequest request)
@@ -53,7 +56,11 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
             if (string.IsNullOrWhiteSpace(request.Message)) throw new ArgumentException("Message is required.");
             if (request.CurrentDashboard == null)           throw new ArgumentException("CurrentDashboard is required.");
 
-            var storeParams = new Dictionary<string, object> { { "StoreId", request.StoreId } };
+            var scopedStoreIds = await _siteScopeService.ResolveStoreIdsAsync(request.StoreId);
+            var storeParams = new Dictionary<string, object>
+            {
+                { "StoreID", string.Join(",", scopedStoreIds) }
+            };
             var rawSources  = _registry.GetAll().ToList();
             var dataSources = new List<DataSourceMetaDto>();
             foreach (var src in rawSources)

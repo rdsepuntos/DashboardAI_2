@@ -57,6 +57,7 @@ const DashboardEngine = (() => {
 
   // ── Render full dashboard ────────────────────────────────────────────────────
   async function render(dashboardDto) {
+    _ensureSiteFilter(dashboardDto);
     _dashboard = dashboardDto;
     document.getElementById('dashboardTitle').textContent = dashboardDto.title || 'Dashboard';
     document.title = dashboardDto.title || 'DashboardAI';
@@ -66,11 +67,50 @@ const DashboardEngine = (() => {
     _renderWidgets(dashboardDto.widgets || []);
   }
 
+  function _ensureSiteFilter(dashboardDto) {
+    if (!dashboardDto) return;
+    if (!Array.isArray(dashboardDto.filters)) dashboardDto.filters = [];
+
+    let siteFilter = dashboardDto.filters.find(filter =>
+      !filter.isLocked && (
+        filter.id === 'f_site' ||
+        String(filter.param || '').toLowerCase() === 'storeid'
+      )
+    );
+
+    if (!siteFilter) {
+      siteFilter = {
+        id: 'f_site',
+        type: 'dropdown',
+        label: 'Site',
+        param: 'StoreID',
+        optionsSource: '__site_scope',
+        valueKey: 'StoreId',
+        labelKey: 'SiteName',
+        isLocked: false,
+        defaultValue: ''
+      };
+      dashboardDto.filters.push(siteFilter);
+    }
+
+    (dashboardDto.widgets || []).forEach(widget => {
+      if (!Array.isArray(widget.appliesFilters)) widget.appliesFilters = [];
+      if (!widget.appliesFilters.some(id => String(id).toLowerCase() === 'f_site')) {
+        widget.appliesFilters.push(siteFilter.id);
+      }
+    });
+  }
+
   // ── Filter bar ───────────────────────────────────────────────────────────────
   function _buildFilterBar(filters) {
     const bar = document.getElementById('filterBar');
     bar.innerHTML = '';
     _filterState  = {};
+    const orderedFilters = [...filters].sort((left, right) => {
+      const leftIsSite = left.id === 'f_site' || left.param?.toLowerCase() === 'storeid' && !left.isLocked;
+      const rightIsSite = right.id === 'f_site' || right.param?.toLowerCase() === 'storeid' && !right.isLocked;
+      return Number(rightIsSite) - Number(leftIsSite);
+    });
 
     // Clear All button handler
     const clearAllBtn = document.getElementById('filterClearAll');
@@ -97,7 +137,7 @@ const DashboardEngine = (() => {
       };
     }
 
-    filters.forEach(f => {
+    orderedFilters.forEach(f => {
       if (f.isLocked) {
         // Locked filters are invisible; their value comes from session
         _filterState[f.id] = _session.storeId;
@@ -189,7 +229,21 @@ const DashboardEngine = (() => {
 
   async function _loadDropdownOptions(filterId, source, valueKey, labelKey, defaultValue) {
     try {
-      const values = await _queryDataDistinct(source, valueKey);
+      let values;
+      if (source === '__site_scope') {
+        const response = await fetch(`${API_BASE}/api/sites?storeId=${_session.storeId}`);
+        const sites = await response.json();
+        if (!response.ok) throw new Error(sites.error || 'Site lookup failed');
+        values = (sites || []).map(site => ({
+          value: String(site.storeId),
+          label: site.siteName || `Site ${site.storeId}`
+        }));
+      } else {
+        values = (await _queryDataDistinct(source, valueKey)).map(value => ({
+          value: value,
+          label: value
+        }));
+      }
       const list   = document.getElementById(`f_${filterId}_list`);
       if (!list) return;
 
@@ -201,16 +255,16 @@ const DashboardEngine = (() => {
         _refreshWidgetsForFilter(filterId);
       };
 
-      values.forEach(v => {
+      values.forEach(option => {
         const item = document.createElement('label');
         item.className = 'filter-checkbox-item';
         const cb = document.createElement('input');
         cb.type    = 'checkbox';
-        cb.value   = v;
-        cb.checked = selected.has(v);
+        cb.value   = option.value;
+        cb.checked = selected.has(option.value);
         cb.addEventListener('change', _updateState);
         const txt = document.createElement('span');
-        txt.textContent = v;
+        txt.textContent = option.label;
         item.appendChild(cb);
         item.appendChild(txt);
         list.appendChild(item);
@@ -338,7 +392,7 @@ const DashboardEngine = (() => {
   }
 
   function _buildWidgetParams(widget) {
-    const params = { StoreId: _session.storeId };
+    const params = {};
 
     // Columns already pinned by a config *Filter key — dropdown must not override them
     const preFilteredCols = new Set(
@@ -399,6 +453,7 @@ const DashboardEngine = (() => {
 
   // ── Apply commands from chat ──────────────────────────────────────────────────
   function applyCommands(commands, updatedDashboard) {
+    _ensureSiteFilter(updatedDashboard);
     commands.forEach(cmd => {
       switch (cmd.action) {
         case 'add_widget': {

@@ -46,6 +46,7 @@ namespace DashboardAI.Infrastructure
             services.AddScoped<IWidgetDataService>(sp => new WidgetDataService(
                 connString,
                 sp.GetRequiredService<IDataSourceRegistry>()));
+            services.AddScoped<ISiteScopeService>(_ => new SiteScopeService(connString));
 
             services.AddSingleton<IOpenAIService>(sp => new OpenAIService(
                 new HttpClient(),

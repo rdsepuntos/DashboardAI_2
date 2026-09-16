@@ -32,17 +32,20 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
         private readonly IDashboardRepository _repository;
         private readonly IDataSourceRegistry _registry;
         private readonly IWidgetDataService _widgetDataService;
+        private readonly ISiteScopeService _siteScopeService;
 
         public GenerateDashboardHandler(
             IOpenAIService aiService,
             IDashboardRepository repository,
             IDataSourceRegistry registry,
-            IWidgetDataService widgetDataService)
+            IWidgetDataService widgetDataService,
+            ISiteScopeService siteScopeService)
         {
             _aiService          = aiService          ?? throw new ArgumentNullException(nameof(aiService));
             _repository         = repository         ?? throw new ArgumentNullException(nameof(repository));
             _registry           = registry           ?? throw new ArgumentNullException(nameof(registry));
             _widgetDataService  = widgetDataService  ?? throw new ArgumentNullException(nameof(widgetDataService));
+            _siteScopeService   = siteScopeService   ?? throw new ArgumentNullException(nameof(siteScopeService));
         }
 
         public async Task<GenerateDashboardResponse> HandleAsync(GenerateDashboardRequest request)
@@ -60,7 +63,11 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
             // Build data source metadata list for the AI prompt,
             // enriched with distinct known values — ONLY for low-cardinality categorical columns.
             // Free-text columns (RiskDescription, HazardSource, RecordName, etc.) are intentionally skipped.
-            var storeParams = new Dictionary<string, object> { { "StoreId", request.StoreId } };
+            var scopedStoreIds = await _siteScopeService.ResolveStoreIdsAsync(request.StoreId);
+            var storeParams = new Dictionary<string, object>
+            {
+                { "StoreID", string.Join(",", scopedStoreIds) }
+            };
             var rawSources  = _registry.GetAll().ToList();
             var dataSources = new List<DataSourceMetaDto>();
             foreach (var src in rawSources)
