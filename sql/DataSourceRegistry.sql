@@ -14,6 +14,7 @@ VALUES (
     'View',
     '[
         {"name":"StoreID",           "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",          "dataType":"string", "description":"Site name"},
         {"name":"RegOthID",          "dataType":"number", "description":"Record identifier"},
         {"name":"InternalNo",        "dataType":"string", "description":"Internal reference number"},
         {"name":"RecordName",        "dataType":"string", "description":"Title / name of the hazard record"},
@@ -51,6 +52,7 @@ VALUES (
     'View',
     '[
         {"name":"StoreID",           "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",          "dataType":"string", "description":"Site name"},
         {"name":"RegOthID",          "dataType":"number", "description":"Record identifier"},
         {"name":"InternalNo",        "dataType":"string", "description":"Internal reference number"},
         {"name":"RecordName",        "dataType":"string", "description":"Title / name of the audit or inspection record"},
@@ -88,6 +90,7 @@ VALUES (
     'View',
     '[
         {"name":"StoreID",           "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",          "dataType":"string", "description":"Site name"},
         {"name":"RegOthID",          "dataType":"number", "description":"Record identifier"},
         {"name":"InternalNo",        "dataType":"string", "description":"Internal reference number"},
         {"name":"RecordName",        "dataType":"string", "description":"Title / name of the incident record"},
@@ -124,6 +127,7 @@ VALUES (
     'View',
     '[
         {"name":"StoreID",           "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",          "dataType":"string", "description":"Site name"},
         {"name":"RegOthID",          "dataType":"number", "description":"Record identifier"},
         {"name":"InternalNo",        "dataType":"string", "description":"Internal reference number"},
         {"name":"RecordName",        "dataType":"string", "description":"Title / name of the rapid risk record"},
@@ -161,6 +165,7 @@ VALUES (
     '[
         {"name":"ControlID",          "dataType":"number", "description":"Unique action (control) identifier"},
         {"name":"StoreID",            "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",           "dataType":"string", "description":"Site name"},
         {"name":"RegOthID",           "dataType":"number", "description":"Parent record identifier"},
         {"name":"RegOthHazTempalteID","dataType":"number", "description":"Template question identifier when action was raised from a specific checklist question (NULL for record-level actions)"},
         {"name":"ModuleType",         "dataType":"string", "description":"WHS module the action belongs to: Hazard Report, Audit & Inspection, Incident, Risk Assessment, Job Procedure, Policy"},
@@ -197,6 +202,7 @@ VALUES (
         {"name":"HazardTemplateID", "dataType":"number", "description":"Unique template identifier"},
         {"name":"TemplateName",     "dataType":"string", "description":"Display name of the template"},
         {"name":"StoreID",          "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",         "dataType":"string", "description":"Site name"},
         {"name":"RegTypeID",        "dataType":"number", "description":"WHS module type identifier (foreign key)"},
         {"name":"ModuleType",       "dataType":"string", "description":"WHS module this template belongs to (human-readable)"},
         {"name":"TemplateNo",       "dataType":"string", "description":"Template reference number"},
@@ -214,6 +220,7 @@ VALUES (
         {"name":"RegOthHazTempalteID","dataType":"number", "description":"Unique identifier for this template question row — join to AID_Actions.RegOthHazTempalteID to see actions raised from this question"},
         {"name":"RegOthID",           "dataType":"number", "description":"Parent record identifier — join to module views on RegOthID"},
         {"name":"StoreID",            "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",           "dataType":"string", "description":"Site name"},
         {"name":"ModuleType",         "dataType":"string", "description":"WHS module: Hazard Report, Audit & Inspection, Incident, Risk Assessment, Job Procedure, Policy"},
         {"name":"RecordTitle",        "dataType":"string", "description":"Title of the parent WHS record"},
         {"name":"InternalNo",         "dataType":"string", "description":"Internal reference number of the parent record"},
