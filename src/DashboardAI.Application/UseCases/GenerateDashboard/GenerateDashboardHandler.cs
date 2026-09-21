@@ -86,6 +86,27 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
                             Console.Error.WriteLine($"[Enrich] {src.Name}.{col.Name} => {vals.Count} values: [{string.Join(", ", vals.Take(10))}]");
                             if (vals.Count > 0 && vals.Count <= 50)
                                 col.KnownValues = vals;
+
+                            if (string.Equals(col.Name, "Status", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var counts = await _widgetDataService.QueryAggregatedAsync(
+                                    src.Name,
+                                    storeParams,
+                                    new AggregationRequest
+                                    {
+                                        GroupBy = col.Name,
+                                        AggregateFunction = "count"
+                                    });
+
+                                col.StatusCounts = counts
+                                    .Where(row => row.ContainsKey(col.Name) && row[ col.Name ] != null)
+                                    .ToDictionary(
+                                        row => row[col.Name].ToString(),
+                                        row => row.ContainsKey("__value") && row["__value"] != null
+                                            ? Convert.ToInt32(row["__value"])
+                                            : 0,
+                                        StringComparer.OrdinalIgnoreCase);
+                            }
                         }
                         catch (Exception ex) { Console.Error.WriteLine($"[Enrich] FAILED {src.Name}.{col.Name}: {ex.Message}"); }
                     }

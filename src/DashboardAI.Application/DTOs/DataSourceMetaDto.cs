@@ -41,5 +41,8 @@ namespace DashboardAI.Application.DTOs
         /// </summary>
         [JsonProperty("knownValues", NullValueHandling = NullValueHandling.Ignore)]
         public List<string> KnownValues { get; set; }
+
+        [JsonProperty("statusCounts", NullValueHandling = NullValueHandling.Ignore)]
+        public Dictionary<string, int> StatusCounts { get; set; }
     }
 }

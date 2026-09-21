@@ -32,5 +32,6 @@ FROM            dbo.RegisterOthHdr AS A LEFT OUTER JOIN
                          dbo.RegisterOthHazardTemplateHazards AS haz ON A.RegOthID = haz.RegOthID LEFT OUTER JOIN
                          dbo.ref_HazardTypes AS hazt ON haz.HazardTypeID = hazt.HazardTypeID LEFT OUTER JOIN
                          dbo.ref_HazardTypesDet AS hazst ON haz.HazardTypeDetID = hazst.HazardTypeDetID
-WHERE        (ISNULL(A.deleted, 0) = 0) AND (ISNULL(A.IsDraft, 0) = 0) AND (ISNULL(A.RegTypeID, 0) = 46)
+WHERE        (ISNULL(A.deleted, 0) = 0) AND (ISNULL(A.IsDraft, 0) = 0) AND (ISNULL(A.RegTypeID, 0) = 46) AND ISNULL(A.TITLEDESC,'') <> ''
+AND ISNULL(A.INTERNALNO,'') <> ''   
 GO

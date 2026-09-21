@@ -156,39 +156,73 @@ VALUES (
     'StoreID,StartDate,EndDate,Status,HazardType,Department,Location'
 );
 
--- ── AID_Actions ───────────────────────────────────────────────────────────────
+---- ── AID_Actions ───────────────────────────────────────────────────────────────
+--INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
+--VALUES (
+--    'AID_Actions',
+--    'Corrective action controls across ALL WHS modules (hazard reports, audits, incidents, risk assessments, job procedures, policies) — each row is one action with its module type, status, priority, responsible person, deadline, and completion date. Use this data source when the user asks about actions, corrective actions, action status, overdue actions, action deadlines, action counts, or actions by module.',
+--    'View',
+--    '[
+--        {"name":"ControlID",          "dataType":"number", "description":"Unique action (control) identifier"},
+--        {"name":"StoreID",            "dataType":"number", "description":"Store identifier"},
+--        {"name":"SiteName",           "dataType":"string", "description":"Site name"},
+--        {"name":"RegOthID",           "dataType":"number", "description":"Parent record identifier"},
+--        {"name":"RegOthHazTempalteID","dataType":"number", "description":"Template question identifier when action was raised from a specific checklist question (NULL for record-level actions)"},
+--        {"name":"ModuleType",         "dataType":"string", "description":"WHS module the action belongs to: Hazard Report, Audit & Inspection, Incident, Risk Assessment, Job Procedure, Policy"},
+--        {"name":"ParentTitle",        "dataType":"string", "description":"Title of the parent WHS record this action is linked to"},
+--        {"name":"InternalNo",         "dataType":"string", "description":"Internal reference number of the parent record"},
+--        {"name":"TemplateQuestion",   "dataType":"string", "description":"The checklist question that triggered this action (NULL for record-level actions)"},
+--        {"name":"TemplateAnswer",     "dataType":"string", "description":"The answer value given for the question that triggered this action"},
+--        {"name":"Action",             "dataType":"string", "description":"Description of the corrective action to be taken"},
+--        {"name":"Category",           "dataType":"string", "description":"Action category"},
+--        {"name":"ActionStatus",       "dataType":"string", "description":"Current status of the action (e.g. Open, In Progress, Completed, Overdue)"},
+--        {"name":"Priority",           "dataType":"string", "description":"Priority level of the action (e.g. High, Medium, Low)"},
+--        {"name":"Responsible",        "dataType":"string", "description":"Name of the person responsible for completing the action"},
+--        {"name":"Deadline",           "dataType":"date",   "description":"Due date for the action (used for date range filtering)"},
+--        {"name":"DeadlineString",     "dataType":"string", "description":"Deadline as a formatted string (dd/MM/yyyy)"},
+--        {"name":"CompletedOn",        "dataType":"date",   "description":"Date the action was completed"},
+--        {"name":"StartDate",          "dataType":"date",   "description":"Start date of the action"},
+--        {"name":"Division",           "dataType":"string", "description":"Division name"},
+--        {"name":"Department",         "dataType":"string", "description":"Department name"},
+--        {"name":"Programme",          "dataType":"string", "description":"Programme name"},
+--        {"name":"LocationName",       "dataType":"string", "description":"Location name"},
+--        {"name":"LocationType",       "dataType":"string", "description":"Type of location"},
+--        {"name":"EstCost",            "dataType":"number", "description":"Estimated cost of the action"},
+--        {"name":"CreatedDt",          "dataType":"date",   "description":"Date the action was created"}
+--    ]',
+--    'StoreID,StartDate,EndDate,ActionStatus,Priority,Department,LocationName'
+--);
+-- ── AID_ControlActions ──────────────────────────────────────────────────────────
 INSERT INTO DataSourceRegistry (Name, Description, Kind, ColumnsJson, SupportedParams)
 VALUES (
-    'AID_Actions',
-    'Corrective action controls across ALL WHS modules (hazard reports, audits, incidents, risk assessments, job procedures, policies) — each row is one action with its module type, status, priority, responsible person, deadline, and completion date. Use this data source when the user asks about actions, corrective actions, action status, overdue actions, action deadlines, action counts, or actions by module.',
+    'AID_ControlActions',
+    'Plain corrective actions read directly from the _ControlsTable (no record-header join). Each row is one action with its status, priority, responsible person, deadline, department, location and estimated cost. Use this when the user only needs action attributes and does NOT need the parent record title or WHS module type — it is lighter than AID_Actions. For module type (Hazard Report/Audit/Incident/etc.), parent record title, or draft/deleted filtering, use AID_Actions instead.',
     'View',
     '[
-        {"name":"ControlID",          "dataType":"number", "description":"Unique action (control) identifier"},
-        {"name":"StoreID",            "dataType":"number", "description":"Store identifier"},
-        {"name":"SiteName",           "dataType":"string", "description":"Site name"},
-        {"name":"RegOthID",           "dataType":"number", "description":"Parent record identifier"},
-        {"name":"RegOthHazTempalteID","dataType":"number", "description":"Template question identifier when action was raised from a specific checklist question (NULL for record-level actions)"},
-        {"name":"ModuleType",         "dataType":"string", "description":"WHS module the action belongs to: Hazard Report, Audit & Inspection, Incident, Risk Assessment, Job Procedure, Policy"},
-        {"name":"ParentTitle",        "dataType":"string", "description":"Title of the parent WHS record this action is linked to"},
-        {"name":"InternalNo",         "dataType":"string", "description":"Internal reference number of the parent record"},
-        {"name":"TemplateQuestion",   "dataType":"string", "description":"The checklist question that triggered this action (NULL for record-level actions)"},
-        {"name":"TemplateAnswer",     "dataType":"string", "description":"The answer value given for the question that triggered this action"},
-        {"name":"Action",             "dataType":"string", "description":"Description of the corrective action to be taken"},
-        {"name":"Category",           "dataType":"string", "description":"Action category"},
-        {"name":"ActionStatus",       "dataType":"string", "description":"Current status of the action (e.g. Open, In Progress, Completed, Overdue)"},
-        {"name":"Priority",           "dataType":"string", "description":"Priority level of the action (e.g. High, Medium, Low)"},
-        {"name":"Responsible",        "dataType":"string", "description":"Name of the person responsible for completing the action"},
-        {"name":"Deadline",           "dataType":"date",   "description":"Due date for the action (used for date range filtering)"},
-        {"name":"DeadlineString",     "dataType":"string", "description":"Deadline as a formatted string (dd/MM/yyyy)"},
-        {"name":"CompletedOn",        "dataType":"date",   "description":"Date the action was completed"},
-        {"name":"StartDate",          "dataType":"date",   "description":"Start date of the action"},
-        {"name":"Division",           "dataType":"string", "description":"Division name"},
-        {"name":"Department",         "dataType":"string", "description":"Department name"},
-        {"name":"Programme",          "dataType":"string", "description":"Programme name"},
-        {"name":"LocationName",       "dataType":"string", "description":"Location name"},
-        {"name":"LocationType",       "dataType":"string", "description":"Type of location"},
-        {"name":"EstCost",            "dataType":"number", "description":"Estimated cost of the action"},
-        {"name":"CreatedDt",          "dataType":"date",   "description":"Date the action was created"}
+        {"name":"ControlID",       "dataType":"number", "description":"Unique action (control) identifier"},
+        {"name":"StoreID",         "dataType":"number", "description":"Store identifier"},
+        {"name":"ParentID",        "dataType":"number", "description":"Parent record/template-question identifier this action is linked to"},
+        {"name":"RefType",         "dataType":"string", "description":"Reference type of the parent link"},
+        {"name":"Action",          "dataType":"string", "description":"Description of the corrective action to be taken"},
+        {"name":"Category",        "dataType":"string", "description":"Action category"},
+        {"name":"Comment",         "dataType":"string", "description":"Free-text comment on the action"},
+        {"name":"ActionStatus",    "dataType":"string", "description":"Current status of the action (e.g. Open, In Progress, Completed, Overdue)"},
+        {"name":"Status",          "dataType":"string", "description":"Alias of ActionStatus — current status of the action (e.g. Open, In Progress, Completed, Overdue)"},
+        {"name":"Priority",        "dataType":"string", "description":"Priority level of the action (e.g. High, Medium, Low)"},
+        {"name":"Responsible",     "dataType":"string", "description":"Name of the person responsible for completing the action"},
+        {"name":"Deadline",        "dataType":"date",   "description":"Due date for the action (used for date range filtering)"},
+        {"name":"DeadlineString",  "dataType":"string", "description":"Deadline as a formatted string (dd/MM/yyyy)"},
+        {"name":"StartDate",       "dataType":"date",   "description":"Start date of the action"},
+        {"name":"StartDateString", "dataType":"string", "description":"Start date as a formatted string (dd/MM/yyyy)"},
+        {"name":"CompletedOn",     "dataType":"date",   "description":"Date the action was completed"},
+        {"name":"CompletedOnString","dataType":"string","description":"Completion date as a formatted string (dd/MM/yyyy)"},
+        {"name":"Division",        "dataType":"string", "description":"Division name"},
+        {"name":"Department",      "dataType":"string", "description":"Department name"},
+        {"name":"Programme",       "dataType":"string", "description":"Programme name"},
+        {"name":"LocationName",    "dataType":"string", "description":"Location name"},
+        {"name":"LocationType",    "dataType":"string", "description":"Type of location"},
+        {"name":"EstCost",         "dataType":"number", "description":"Estimated cost of the action"},
+        {"name":"CreatedDt",       "dataType":"date",   "description":"Date the action was created"}
     ]',
     'StoreID,StartDate,EndDate,ActionStatus,Priority,Department,LocationName'
 );
