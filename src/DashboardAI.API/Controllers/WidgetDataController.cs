@@ -16,6 +16,7 @@ namespace DashboardAI.API.Controllers
     {
         private readonly QueryWidgetDataHandler _handler;
         private readonly IDataSourceRegistry _registry;
+        private readonly IColumnCaptionService _captions;
 
         // Preserve original SQL column name casing — the global camelCase resolver
         // would turn "HazardType" into "hazardType", breaking widget config key lookups.
@@ -37,10 +38,11 @@ namespace DashboardAI.API.Controllers
             "Section", "Question", "Answer", "RecordTitle", "TemplateName"
         };
 
-        public WidgetDataController(QueryWidgetDataHandler handler, IDataSourceRegistry registry)
+        public WidgetDataController(QueryWidgetDataHandler handler, IDataSourceRegistry registry, IColumnCaptionService captions)
         {
             _handler  = handler  ?? throw new ArgumentNullException(nameof(handler));
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            _captions = captions ?? throw new ArgumentNullException(nameof(captions));
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -140,13 +142,15 @@ namespace DashboardAI.API.Controllers
 
                 // Wrap with explicit lowercase property names so DefaultContractResolver
                 // preserves them AND preserves original SQL column casing in the row data.
+                var captions = await _captions.GetCaptionsAsync(request.DataSource, request.StoreId);
                 var payload = new
                 {
                     data       = result.Data,
                     totalCount = result.TotalCount,
                     page       = result.Page,
                     pageSize   = result.PageSize,
-                    totalPages = result.TotalPages
+                    totalPages = result.TotalPages,
+                    columns    = captions
                 };
                 return new JsonResult(payload, _rawCasingSettings);
             }

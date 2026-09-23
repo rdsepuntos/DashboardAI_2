@@ -48,6 +48,11 @@ namespace DashboardAI.Infrastructure
                 sp.GetRequiredService<IDataSourceRegistry>()));
             services.AddScoped<ISiteScopeService>(_ => new SiteScopeService(connString));
 
+            // Per-account column captions (field names) resolved via spPageFields.
+            var pageFieldOptions = BindPageFieldOptions(configuration.GetSection("PageFields"));
+            services.AddSingleton<IColumnCaptionService>(_ =>
+                new ColumnCaptionService(connString, pageFieldOptions));
+
             services.AddSingleton<IOpenAIService>(sp => new OpenAIService(
                 new HttpClient(),
                 openAiKey,
@@ -73,6 +78,37 @@ namespace DashboardAI.Infrastructure
             services.AddScoped<QueryWidgetDataHandler>();
 
             return services;
+        }
+
+        // Manual binding — the config Binder package is not referenced in this project.
+        private static Services.PageFieldOptions BindPageFieldOptions(IConfigurationSection section)
+        {
+            var options = new Services.PageFieldOptions();
+            if (section == null || !section.Exists()) return options;
+
+            if (!string.IsNullOrWhiteSpace(section["ProcedureName"]))
+                options.ProcedureName = section["ProcedureName"];
+            if (!string.IsNullOrWhiteSpace(section["ApplicationName"]))
+                options.ApplicationName = section["ApplicationName"];
+            if (int.TryParse(section["DefaultParentPageId"], out var parentPageId))
+                options.DefaultParentPageId = parentPageId;
+            if (int.TryParse(section["DefaultUCPageId"], out var ucPageId))
+                options.DefaultUCPageId = ucPageId;
+
+            foreach (var map in section.GetSection("Mappings").GetChildren())
+            {
+                var mapping = new Services.PageFieldMapping();
+                if (int.TryParse(map["RegisterTypeId"], out var regTypeId))
+                    mapping.RegisterTypeId = regTypeId;
+                if (int.TryParse(map["ParentPageId"], out var mapParent))
+                    mapping.ParentPageId = mapParent;
+                if (int.TryParse(map["UCPageId"], out var mapUc))
+                    mapping.UCPageId = mapUc;
+                mapping.RefKey = map["RefKey"];
+                options.Mappings[map.Key] = mapping;
+            }
+
+            return options;
         }
     }
 }

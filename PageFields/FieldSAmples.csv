@@ -1,0 +1,39 @@
+﻿1068,5234,21,wcIDTB,ID,RadTextBox,ID,ID,1,ID is required,1,NULL,0,NULL,NULL,,2,1,InternalNo
+1069,5234,21,wcTitleTB,Hazard Title,RadTextBox,Title,Hazard Title,1,Hazard Title is required,1,NULL,0,NULL,NULL,,3,1,TitleDesc
+1070,5234,21,wcDescTB,Description,RadTextBox,Desc,Description,1,Description is required,0,NULL,0,NULL,NULL,,4,1,ExtDesc
+1071,5234,21,wcRegRecTypeCombo,Hazard Report Type,RadComboBox,Type,Hazard Report Type,1,Hazard Report Type is required,0,NULL,0,NULL,NULL,,5,1,OthTypeID
+1072,5234,21,wcRegRecSubTypeCombo,Hazard Report Sub-Type,RadComboBox,SubType,Hazard Report Sub-Type,1,Hazard Report Sub-Type is required,0,NULL,0,NULL,NULL,,6,1,OthSubTypeID
+1073,5234,21,wcStartDtPkr,Date,RadDateTimePicker,StartDt,Date,1,Date is required,0,NULL,0,NULL,NULL,,7,1,StartDt
+1775,5234,21,wcReportedByCmb,Reported By,RadComboBox,ReportedBy,Reported By,1,Reported By is required,0,NULL,0,NULL,NULL,,8,1,SDS
+1900,5234,21,,Audited By,API,ReportedByEmpID,Reported By Employee ID,1,NULL,0,NULL,0,NULL,NULL,,9,1,Mixing
+1074,5234,21,wcContractorCompanyCMB,Contractor,RadComboBox,Contractor,Contractor,1,Contractor is required,0,NULL,0,NULL,NULL,,9,1,Contractor
+1112,5234,21,wcProjectCmb,Project,RadComboBox,Project,Project,1,Project is required,0,NULL,0,NULL,NULL,,10,1,Project
+1075,5234,21,wcLocationIDRadCombo,Location,RadComboBox,LocType,Location,1,Location is required,0,NULL,0,NULL,NULL,,11,1,LocationName
+1076,5234,21,wcLocationTB,Location Address,RadTextBox,LocAddr,Location Address,1,Location Address is required,0,NULL,0,NULL,NULL,,12,1,LocationAddr
+1077,5234,21,wcSpecificLocTB,Specific Location Details,RadTextBox,LocDet,Specific Location Details,1,Specific location is required,0,NULL,0,NULL,NULL,,13,1,LocationDet
+1078,5234,21,wcEmpDivisionCmb,Division,RadComboBox,Division,Division,1,Division is required,0,NULL,0,NULL,NULL,,14,1,Division
+1079,5234,21,wcEmpDeptCmb,Department,RadComboBox,Department,Department,1,Department is required,0,NULL,0,NULL,NULL,,15,1,Department
+1863,5234,21,wcProgrammeCmb,Programme,RadComboBox,Programme,Programme,1,Programme is required,0,NULL,0,NULL,NULL,,16,1,Procedure Type
+1080,5234,21,wcStatusCombo,Status,RadComboBox,Status,Status,1,Status is required,0,NULL,0,NULL,NULL,,17,1,StatusID
+1081,5234,21,wcCommTB,Details,RadTextBox,Comm,Details,1,Details is required,0,NULL,0,NULL,NULL,,18,1,Details
+1082,5234,21,wcAttachRPI,Attachments,SECTION,Attach,Attachments,1,N/A,0,NULL,0,NULL,wcAttachRPI,,19,1,Attachments
+1083,5234,21,wcAttchRptr,List of Attachments,Repeater,Attach2,List of Attachments,1,,0,NULL,1,NULL,wcAttachRPI,,20,1,List of Attachments
+1084,5234,21,wcReqmtRPI,Requirements,SECTION,Reqmt,Requirements,1,N/A,0,NULL,0,NULL,wcReqmtRPI,,21,1,Requirements
+1085,5234,21,wcReqPolRadLB,Relevant Policies,RadListBox,ReqPol,Relevant Policies,1,Relevant Policies is required,0,NULL,0,NULL,wcReqmtRPI,,22,1,Relevant Policies
+1086,5234,21,wcReqLegsRadLB,Relevant Legislation,RadListBox,ReqLegs,Relevant Legislation,1,Relevant Legislation is required,0,NULL,0,NULL,wcReqmtRPI,,23,1,Relevant Legislation
+1087,5234,21,wcDetRespApvRPI,Responsibilities and Approval,SECTION,DetRespApv,Responsibilities and Approval,1,N/A,0,NULL,0,NULL,wcDetRespApvRPI,,24,1,Responsibilities and Approval
+1351,5234,21,wcWHSRespCmb,WHS Role Responsible,RadComboBox,WHSResp,WHS Role Responsible,1,WHS Role Responsible is required,0,NULL,0,NULL,wcDetRespApvRPI,,25,1,NULL
+1088,5234,21,wcRespCombo,Person Responsible,RadComboBox,PersonResp,Person Responsible,1,Person Responsible is required,0,NULL,0,NULL,wcDetRespApvRPI,,26,1,Person Responsible
+1089,5234,21,wcCheckedByLbl,Checked By,Label,CheckedBy,Checked By,1,N/A,0,NULL,0,NULL,wcDetRespApvRPI,,27,1,Checked By
+1902,5234,21,,Person Responsible,API,ResponsibleID,Person Responsible Employee ID,1,Person Responsible is required,0,NULL,0,NULL,wcDetRespApvRPI,,27,1,Safety Direction
+1090,5234,21,wcReviewedByLabel,Reviewed By,Label,ReviewedBy,Reviewed By,1,N/A,0,NULL,0,NULL,wcDetRespApvRPI,,28,1,Reviewed By
+1091,5234,21,wcNextReviewPkr,Next Review Date,RadDatePicker,NextReview,Next Review Date,1,Next review date is required,0,NULL,0,NULL,wcDetRespApvRPI,,29,1,Next Review Date
+1092,5234,21,wcAuthoriseLabel,Authorised By,Label,Authorise,Authorised By,1,N/A,0,NULL,0,NULL,wcDetRespApvRPI,,30,1,Authorised By
+1093,5234,21,wcApproveLabel,Approved By,Label,Approve,Approved By,1,N/A,0,NULL,0,NULL,wcDetRespApvRPI,,31,1,Approved By
+2300,5234,21,wcProjectsPanel,Active Linked Projects,SECTION,Projects,Active Linked Projects,1,N/A,0,NULL,0,NULL,wcProjectsPanel,,999,1,Projects
+1894,5234,21,wcCreatedBy,CreatedBy,API,CreatedByName,Created By,1,NULL,0,NULL,0,NULL,NULL,,999,1,Total Amount Used
+1895,5234,21,,CreatedByID,API,CreatedByID,Created By Employee ID,1,NULL,0,NULL,0,NULL,NULL,,999,1,Total Product Cost
+1896,5234,21,wcCreatedDate,CreatedDate,API,CreatedDate,Created Date,1,NULL,0,NULL,0,NULL,NULL,,999,1,Carrier
+1897,5234,21,wcUpdatedBy,UpdatedBy,API,UpdatedByName,Updated By,1,NULL,0,NULL,0,NULL,NULL,,999,1,Restraints
+1898,5234,21,,UpdatedByID,API,UpdatedByID,Updated By Employee ID,1,NULL,0,NULL,0,NULL,NULL,,999,1,Critical Comment
+1899,5234,21,wcUpdatedDate,UpdatedDate,API,UpdatedDate,Updated Date,1,NULL,0,NULL,0,NULL,NULL,,999,1,Resistance

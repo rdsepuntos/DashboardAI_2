@@ -70,6 +70,9 @@ const TableWidget = (() => {
       columns = Object.keys(data[0]);
     }
 
+    // Per-account column captions resolved server-side (spPageFields). Keyed by raw column name.
+    const captions = (meta && meta.columns) || {};
+
     // ── Outer wrapper (flex column so footer sticks to bottom) ──────────────
     const wrapper = document.createElement('div');
     wrapper.style.cssText = 'display:flex;flex-direction:column;width:100%;height:100%;';
@@ -84,7 +87,7 @@ const TableWidget = (() => {
     // Header
     const thead = document.createElement('thead');
     thead.innerHTML = '<tr>' + columns.map(c =>
-      `<th data-col="${c}" style="cursor:pointer">${_formatHeader(c)} <span class="sort-icon">⇅</span></th>`
+      `<th data-col="${c}" style="cursor:pointer">${captions[c] || _formatHeader(c)} <span class="sort-icon">⇅</span></th>`
     ).join('') + '</tr>';
     table.appendChild(thead);
 
