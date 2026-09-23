@@ -34,6 +34,27 @@ ELSE
 GO
 
 -- =============================================================================
+--  1b. DashboardFilterState  — per-session applied filter values (persist within a session)
+-- =============================================================================
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'DashboardFilterState')
+BEGIN
+    CREATE TABLE dbo.DashboardFilterState
+    (
+        DashboardId     UNIQUEIDENTIFIER  NOT NULL,
+        SessionId       NVARCHAR(100)     NOT NULL,
+        StoreId         INT               NOT NULL,
+        FilterStateJson NVARCHAR(MAX)     NOT NULL,
+        UpdatedAt       DATETIME2         NOT NULL  DEFAULT GETUTCDATE(),
+        CONSTRAINT PK_DashboardFilterState PRIMARY KEY (DashboardId, SessionId)
+    );
+
+    PRINT 'Created table: DashboardFilterState';
+END
+ELSE
+    PRINT 'Already exists, skipped: DashboardFilterState';
+GO
+
+-- =============================================================================
 --  2. DataSourceRegistry  — registers SQL views / SPs available to the AI
 -- =============================================================================
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'DataSourceRegistry')

@@ -62,9 +62,47 @@ const DashboardEngine = (() => {
     document.getElementById('dashboardTitle').textContent = dashboardDto.title || 'Dashboard';
     document.title = dashboardDto.title || 'DashboardAI';
 
-    _buildFilterBar(dashboardDto.filters || []);
+    // Restore previously applied filter values (per session) before building the bar.
+    await _applySavedFilterState(dashboardDto.filters || []);
+
+    const pendingFilters = _buildFilterBar(dashboardDto.filters || []);
     _grid.removeAll();
+    // Wait for async dropdown options so restored selections land in _filterState before widgets query.
+    await Promise.all(pendingFilters || []);
     _renderWidgets(dashboardDto.widgets || []);
+  }
+
+  // Loads the session's saved filter values and folds them into each filter's
+  // defaultValue so the existing filter-bar builder restores them (incl. async dropdowns).
+  async function _applySavedFilterState(filters) {
+    if (!_dashboard || !filters.length) return;
+
+    const sessionId = _session.sessionId || _dashboard.id;
+    let saved;
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/dashboard/${_dashboard.id}/filter-state?sessionId=${encodeURIComponent(sessionId)}`);
+      if (!res.ok) return;
+      saved = await res.json();
+    } catch (_) { return; }
+
+    if (!saved || typeof saved !== 'object') return;
+
+    filters.forEach(f => {
+      if (f.isLocked || !Object.prototype.hasOwnProperty.call(saved, f.id)) return;
+      const val = saved[f.id];
+      if (val === null || val === undefined || val === '') return;
+
+      if (f.type === 'daterange') {
+        // Persisted as an object; the builder expects a JSON string in defaultValue.
+        if (typeof val === 'object' && (val.StartDate || val.EndDate)) {
+          f.defaultValue = JSON.stringify(val);
+        }
+      } else {
+        // dropdown/multiselect (comma-separated), datepicker/text (plain string)
+        f.defaultValue = String(val);
+      }
+    });
   }
 
   function _ensureSiteFilter(dashboardDto) {
@@ -106,6 +144,7 @@ const DashboardEngine = (() => {
     const bar = document.getElementById('filterBar');
     bar.innerHTML = '';
     _filterState  = {};
+    const pending = [];   // async dropdown option loads to await before first widget query
     const orderedFilters = [...filters].sort((left, right) => {
       const leftIsSite = left.id === 'f_site' || left.param?.toLowerCase() === 'storeid' && !left.isLocked;
       const rightIsSite = right.id === 'f_site' || right.param?.toLowerCase() === 'storeid' && !right.isLocked;
@@ -201,7 +240,7 @@ const DashboardEngine = (() => {
         });
 
         if (f.optionsSource) {
-          _loadDropdownOptions(f.id, f.optionsSource, f.valueKey, f.labelKey, f.defaultValue);
+          pending.push(_loadDropdownOptions(f.id, f.optionsSource, f.valueKey, f.labelKey, f.defaultValue));
         }
 
       } else if (f.type === 'datepicker') {
@@ -225,6 +264,8 @@ const DashboardEngine = (() => {
 
       bar.appendChild(wrap);
     });
+
+    return pending;
   }
 
   async function _loadDropdownOptions(filterId, source, valueKey, labelKey, defaultValue) {
@@ -445,7 +486,22 @@ const DashboardEngine = (() => {
         _loadWidgetData(w);
       }
     });
+    _persistFilterState();
   }
+
+  // Persists the current applied filter values per session so they survive within the session.
+  const _persistFilterState = _debounce(function() {
+    if (!_dashboard) return;
+    fetch(`${API_BASE}/api/dashboard/${_dashboard.id}/filter-state`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        sessionId:   _session.sessionId || _dashboard.id,
+        storeId:     _session.storeId,
+        filterState: _filterState
+      })
+    }).catch(() => {}); // fire-and-forget
+  }, 500);
 
   function refreshAllWidgets() {
     (_dashboard.widgets || []).forEach(w => _loadWidgetData(w));

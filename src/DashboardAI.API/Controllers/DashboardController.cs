@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using DashboardAI.Application.UseCases.GenerateDashboard;
 using DashboardAI.Application.UseCases.GetDashboard;
+using DashboardAI.Domain.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
 
 namespace DashboardAI.API.Controllers
 {
@@ -13,13 +15,16 @@ namespace DashboardAI.API.Controllers
     {
         private readonly GenerateDashboardHandler _generateHandler;
         private readonly GetDashboardHandler      _getHandler;
+        private readonly IDashboardRepository      _repository;
 
         public DashboardController(
             GenerateDashboardHandler generateHandler,
-            GetDashboardHandler      getHandler)
+            GetDashboardHandler      getHandler,
+            IDashboardRepository     repository)
         {
             _generateHandler = generateHandler ?? throw new ArgumentNullException(nameof(generateHandler));
             _getHandler      = getHandler      ?? throw new ArgumentNullException(nameof(getHandler));
+            _repository      = repository      ?? throw new ArgumentNullException(nameof(repository));
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -74,5 +79,56 @@ namespace DashboardAI.API.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // GET /api/dashboard/{id}/filter-state?sessionId=...
+        // Returns the applied filter values saved for this session, or {} if none.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpGet("{id:guid}/filter-state")]
+        public async Task<IActionResult> GetFilterState(Guid id, [FromQuery] string sessionId)
+        {
+            try
+            {
+                var json = await _repository.GetFilterStateAsync(id, sessionId);
+                return Content(string.IsNullOrWhiteSpace(json) ? "{}" : json, "application/json");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PUT /api/dashboard/{id}/filter-state
+        // Body: { "sessionId": "...", "storeId": 5, "filterState": { "f1": "value", ... } }
+        // Upserts the applied filter values so they persist for the current session.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpPut("{id:guid}/filter-state")]
+        public async Task<IActionResult> SaveFilterState(Guid id, [FromBody] SaveFilterStateRequest request)
+        {
+            if (request == null)
+                return BadRequest(new { error = "Request body is required." });
+
+            try
+            {
+                var json = request.FilterState == null
+                    ? "{}"
+                    : JsonConvert.SerializeObject(request.FilterState);
+
+                await _repository.SaveFilterStateAsync(id, request.SessionId, request.StoreId, json);
+                return Ok(new { saved = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+    }
+
+    public class SaveFilterStateRequest
+    {
+        public string SessionId { get; set; }
+        public int StoreId { get; set; }
+        public Dictionary<string, object> FilterState { get; set; }
     }
 }

@@ -90,6 +90,45 @@ namespace DashboardAI.Infrastructure.Repositories
             }
         }
 
+        public async Task<string> GetFilterStateAsync(Guid dashboardId, string sessionId)
+        {
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                const string sql = @"
+                    SELECT FilterStateJson
+                    FROM   DashboardFilterState
+                    WHERE  DashboardId = @DashboardId AND SessionId = @SessionId";
+
+                return await conn.QueryFirstOrDefaultAsync<string>(sql,
+                    new { DashboardId = dashboardId, SessionId = sessionId ?? string.Empty });
+            }
+        }
+
+        public async Task SaveFilterStateAsync(Guid dashboardId, string sessionId, int storeId, string filterStateJson)
+        {
+            using (var conn = new SqlConnection(_connectionString))
+            {
+                const string sql = @"
+                    MERGE DashboardFilterState AS target
+                    USING (SELECT @DashboardId AS DashboardId, @SessionId AS SessionId) AS source
+                        ON target.DashboardId = source.DashboardId AND target.SessionId = source.SessionId
+                    WHEN MATCHED THEN
+                        UPDATE SET FilterStateJson = @FilterStateJson, StoreId = @StoreId, UpdatedAt = @UpdatedAt
+                    WHEN NOT MATCHED THEN
+                        INSERT (DashboardId, SessionId, StoreId, FilterStateJson, UpdatedAt)
+                        VALUES (@DashboardId, @SessionId, @StoreId, @FilterStateJson, @UpdatedAt);";
+
+                await conn.ExecuteAsync(sql, new
+                {
+                    DashboardId     = dashboardId,
+                    SessionId       = sessionId ?? string.Empty,
+                    StoreId         = storeId,
+                    FilterStateJson = string.IsNullOrWhiteSpace(filterStateJson) ? "{}" : filterStateJson,
+                    UpdatedAt       = DateTime.UtcNow
+                });
+            }
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         private Dashboard Deserialize(DashboardRow row)
         {
