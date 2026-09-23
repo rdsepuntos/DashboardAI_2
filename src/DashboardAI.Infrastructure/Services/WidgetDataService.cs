@@ -15,6 +15,14 @@ namespace DashboardAI.Infrastructure.Services
         private readonly string _connectionString;
         private readonly IDataSourceRegistry _registry;
 
+        // Filter param → actual column, applied only when the target column exists on the view.
+        // The template dropdown sends "TemplateName" (from AID_TemplateList); register views expose it as "Checklist".
+        private static readonly Dictionary<string, string> ColumnAliases =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "TemplateName", "Checklist" }
+            };
+
         public WidgetDataService(string connectionString, IDataSourceRegistry registry)
         {
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
@@ -419,6 +427,62 @@ OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
                             conditions.Add($"{param} = @{param}");
                             dynParams.Add(param, value);
                         }
+                    }
+                }
+            }
+
+            // Apply filter-bar params that aren't SupportedParams but match a registered
+            // column (e.g. Status, Department, Location, Checklist). Column names are
+            // validated against the registry so only known columns reach the SQL.
+            if (def.Columns != null && parameters != null)
+            {
+                var supported = new HashSet<string>(
+                    def.SupportedParams ?? Enumerable.Empty<string>(),
+                    StringComparer.OrdinalIgnoreCase);
+
+                var columnByName = def.Columns
+                    .GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().Name, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var kv in parameters)
+                {
+                    if (string.IsNullOrEmpty(kv.Key)) continue;
+                    if (supported.Contains(kv.Key)) continue;                      // handled above
+                    if (kv.Key.Equals("StartDate", StringComparison.OrdinalIgnoreCase) ||
+                        kv.Key.Equals("EndDate",   StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!columnByName.TryGetValue(kv.Key, out var colName))
+                    {
+                        // Fall back to an alias whose target column exists on this view.
+                        if (!ColumnAliases.TryGetValue(kv.Key, out var aliasTarget) ||
+                            !columnByName.TryGetValue(aliasTarget, out colName))
+                            continue;                                              // unknown column → ignore
+                    }
+
+                    var raw = kv.Value?.ToString();
+                    if (string.IsNullOrWhiteSpace(raw)) continue;
+
+                    var values = raw.Split(',')
+                        .Select(v => v.Trim())
+                        .Where(v => v.Length > 0)
+                        .ToList();
+                    if (values.Count == 0) continue;
+
+                    if (values.Count == 1)
+                    {
+                        var pn = $"flt_{colName}";
+                        conditions.Add($"[{colName}] = @{pn}");
+                        dynParams.Add(pn, values[0]);
+                    }
+                    else
+                    {
+                        var pNames = new List<string>();
+                        for (int i = 0; i < values.Count; i++)
+                        {
+                            var pn = $"flt_{colName}_{i}";
+                            pNames.Add($"@{pn}");
+                            dynParams.Add(pn, values[i]);
+                        }
+                        conditions.Add($"[{colName}] IN ({string.Join(", ", pNames)})");
                     }
                 }
             }

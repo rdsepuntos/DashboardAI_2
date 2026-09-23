@@ -187,6 +187,9 @@ const TableWidget = (() => {
   }
 
   function _formatHeader(col) {
+    // Display-only label overrides — the underlying column name is unchanged.
+    const LABELS = { Checklist: 'Template' };
+    if (LABELS[col]) return LABELS[col];
     return col.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim();
   }
 
