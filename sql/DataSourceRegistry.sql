@@ -129,7 +129,7 @@ VALUES (
         {"name":"LocationType",      "dataType":"string", "description":"Type of location"},
         {"name":"Location",          "dataType":"string", "description":"Location name"},
         {"name":"Checklist",         "dataType":"string", "description":"Risk assessment checklist template name"},
-        {"name":"CreatedDate",       "dataType":"date "description":"Date the record was created (dd/MM/yyyy)"},
+        {"name":"CreatedDate",       "dataType":"date",   "description":"Date the record was created (dd/MM/yyyy)"},
         {"name":"CreatedBy",         "dataType":"string", "description":"Name of user who created the record"},
         {"name":"PersonResponsible", "dataType":"string", "description":"Full name of the responsible person"},
         {"name":"RiskDescription",   "dataType":"string", "description":"Description of the risk"},
