@@ -282,6 +282,12 @@ columns list, valueKey/labelKey in filters) MUST appear in the "columns" array o
 the dataSource in AVAILABLE DATA SOURCES. If a column does not exist in that list,
 do NOT use it. The only exception is the magic valueKey "count" (counts rows).
 Never use ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID) as xKey or valueKey.
+
+COLUMN CAPTION MATCHING — a column may include a "caption" field: the account's own
+display label for that column. When the user refers to a column by a label, match their
+wording against BOTH "name" and "caption" (case-insensitive). Example: if a column is
+{ "name": "InternalNo", "caption": "ID" } and the user says "add ID to the table", use
+"InternalNo". ALWAYS emit the raw "name" in config — never the caption.
 - Checklist responses / form answers / template findings
   inspection question results / audit question details
   what answers were given / question-level detail

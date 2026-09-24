@@ -8,8 +8,8 @@ namespace DashboardAI.Infrastructure.Services
     /// </summary>
     public class PageFieldOptions
     {
-        /// <summary>Fully-qualified stored procedure name (3-part), e.g. Agtech_Usermgmt.dbo.spPageFields.</summary>
-        public string ProcedureName { get; set; } = "Agtech_Usermgmt.dbo.spPageFields";
+        /// <summary>Fully-qualified stored procedure name (3-part), e.g. Agtech_Usermgmt.dbo.spPageFields_New.</summary>
+        public string ProcedureName { get; set; } = "Agtech_Usermgmt.dbo.spPageFields_New";
 
         /// <summary>Application name passed to the proc.</summary>
         public string ApplicationName { get; set; } = "WHSMONITOR";

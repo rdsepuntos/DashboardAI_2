@@ -35,19 +35,22 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
         private readonly IDataSourceRegistry _registry;
         private readonly IWidgetDataService _widgetDataService;
         private readonly ISiteScopeService _siteScopeService;
+        private readonly IColumnCaptionService _captionService;
 
         public SendChatMessageHandler(
             IOpenAIService aiService,
             IDashboardRepository repository,
             IDataSourceRegistry registry,
             IWidgetDataService widgetDataService,
-            ISiteScopeService siteScopeService)
+            ISiteScopeService siteScopeService,
+            IColumnCaptionService captionService)
         {
             _aiService          = aiService          ?? throw new ArgumentNullException(nameof(aiService));
             _repository         = repository         ?? throw new ArgumentNullException(nameof(repository));
             _registry           = registry           ?? throw new ArgumentNullException(nameof(registry));
             _widgetDataService  = widgetDataService  ?? throw new ArgumentNullException(nameof(widgetDataService));
             _siteScopeService   = siteScopeService   ?? throw new ArgumentNullException(nameof(siteScopeService));
+            _captionService     = captionService     ?? throw new ArgumentNullException(nameof(captionService));
         }
 
         public async Task<SendChatMessageResponse> HandleAsync(SendChatMessageRequest request)
@@ -66,6 +69,7 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
             foreach (var src in rawSources)
             {
                 var dto = DataSourceMapper.ToMetaDto(src);
+                await ApplyColumnCaptionsAsync(dto, request.StoreId);
                 if (dto.Columns != null)
                 {
                     foreach (var col in dto.Columns.Where(c =>
@@ -141,5 +145,28 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
 
         private static bool IsCategoricalColumn(string name)
             => _categoricalColumnNames.Contains(name);
+
+        // Attaches account-specific display captions (from spPageFields) to columns so the
+        // AI can match user wording like "ID" against the raw column name (e.g. InternalNo).
+        private async Task ApplyColumnCaptionsAsync(DataSourceMetaDto dto, int storeId)
+        {
+            if (dto?.Columns == null || dto.Columns.Count == 0) return;
+            try
+            {
+                var captions = await _captionService.GetCaptionsAsync(dto.Name, storeId);
+                if (captions == null || captions.Count == 0) return;
+
+                foreach (var col in dto.Columns)
+                {
+                    if (captions.TryGetValue(col.Name, out var caption)
+                        && !string.IsNullOrWhiteSpace(caption)
+                        && !string.Equals(caption, col.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        col.Caption = caption;
+                    }
+                }
+            }
+            catch { /* captions are an enhancement — never fail the chat over them */ }
+        }
     }
 }

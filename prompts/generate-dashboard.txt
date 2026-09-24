@@ -142,6 +142,10 @@ Choose based on what a user would want to see in a detail list:
   4. EXCLUDE raw ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID, *ID).
   5. EXCLUDE computed filter columns (DepartmentFilter, ProgrammeFilter, CreatedByID, etc.).
   6. Pick columns that actually exist in the dataSource columns list — do NOT invent column names.
+  7. A column may include a "caption" — the account's own display label. When the user names a
+     column by a label, match their wording against BOTH "name" and "caption" (case-insensitive),
+     e.g. { "name": "InternalNo", "caption": "ID" } means "ID" refers to InternalNo. Always emit
+     the raw "name" in config, never the caption.
 
 WRONG:  "config": {}
 RIGHT:  "config": { "columns": "<comma-separated column names chosen from the dataSource>" }

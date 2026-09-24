@@ -36,6 +36,14 @@ namespace DashboardAI.Application.DTOs
         public string Description { get; set; }
 
         /// <summary>
+        /// Account-specific display label resolved from spPageFields (PagesFieldMemberAccess
+        /// overrides). Present only when the account renames this column. The AI should match
+        /// the user's wording against this AND <see cref="Name"/>, but always emit Name in config.
+        /// </summary>
+        [JsonProperty("caption", NullValueHandling = NullValueHandling.Ignore)]
+        public string Caption { get; set; }
+
+        /// <summary>
         /// Populated at runtime for categorical columns (e.g. Status).
         /// Tells OpenAI exactly which values exist so it can use them in statusFilter.
         /// </summary>

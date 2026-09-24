@@ -1,6 +1,6 @@
 USE [Agtech_Usermgmt]
 GO
-/****** Object:  StoredProcedure [dbo].[spPageFields]    Script Date: 9/22/2026 12:23:24 PM ******/
+/****** Object:  StoredProcedure [dbo].[spPageFields_New]    Script Date: 9/24/2026 11:22:28 AM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14,10 +14,10 @@ GO
  
 */
 
-ALTER PROCEDURE [dbo].[spPageFields_new]
+ALTER PROCEDURE [dbo].[spPageFields_New]
 	@ParentPageID int,
 	@UCPageID int,
-	@MemberID int ,
+	@StoreID int ,
 	@ApplicationName varchar(256)  ,
 	@RefKey varchar(50) ='' ,
 	@IsVis bit =  0  ,
@@ -27,12 +27,17 @@ ALTER PROCEDURE [dbo].[spPageFields_new]
 	@ProcessTypeID INT  =   0 
 
 AS
+	set @IsVis = 0
+	DECLARE @MemberID INT
 	if @RegisterTypeID = '-46' 
 	begin
 		set @ParentPageID =820
 		set @UCPageID = 5333
 		set @RegisterTypeID = 0
 	end
+	SELECT @MemberID = MEMBERID FROM AGTECH_WHSMONITOR.DBO.STORE
+	WHERE STOREID = @STOREID
+
 	--if @RegisterTypeID = '46' 
 	--begin
 	--	set @ParentPageID =1009
