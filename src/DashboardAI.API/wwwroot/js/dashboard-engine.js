@@ -163,6 +163,14 @@ const DashboardEngine = (() => {
           if (start) start.value = '';
           if (end)   end.value   = '';
           if (start || end) _filterState[f.id] = {};
+          // Reset the date preset selector + hide the custom panel
+          const preset = document.getElementById(`f_${f.id}_preset`);
+          if (preset) {
+            preset.value = 'all';
+            const custom = document.getElementById(`f_${f.id}_custom`);
+            if (custom) custom.style.display = 'none';
+            _filterState[f.id] = {};
+          }
           // Clear checkbox lists
           const list = document.getElementById(`f_${f.id}_list`);
           if (list) {
@@ -196,33 +204,78 @@ const DashboardEngine = (() => {
       if (f.type === 'daterange') {
         wrap.innerHTML = `
           <label>${f.label}</label>
-          <div class="filter-daterange">
-            <div class="filter-daterange-row">
-              <span>From</span>
-              <input type="date" id="f_${f.id}_start" data-filter="${f.id}" data-key="StartDate" />
-            </div>
-            <div class="filter-daterange-row">
-              <span>To</span>
-              <input type="date" id="f_${f.id}_end" data-filter="${f.id}" data-key="EndDate" />
+          <select class="filter-date-preset" id="f_${f.id}_preset">${_buildDatePresetOptions()}</select>
+          <div class="filter-date-custom" id="f_${f.id}_custom" style="display:none">
+            <select class="filter-date-op" id="f_${f.id}_op">
+              <option value="between">Between</option>
+              <option value="on">On (=)</option>
+              <option value="after">After (&gt;)</option>
+              <option value="onafter">On or after (&ge;)</option>
+              <option value="before">Before (&lt;)</option>
+              <option value="onbefore">On or before (&le;)</option>
+            </select>
+            <div class="filter-daterange">
+              <div class="filter-daterange-row">
+                <span class="filter-date-fromlbl">From</span>
+                <input type="date" id="f_${f.id}_start" data-filter="${f.id}" data-key="StartDate" />
+              </div>
+              <div class="filter-daterange-row" id="f_${f.id}_endrow">
+                <span>To</span>
+                <input type="date" id="f_${f.id}_end" data-filter="${f.id}" data-key="EndDate" />
+              </div>
             </div>
           </div>`;
 
         _filterState[f.id] = {};
+
+        const presetEl = wrap.querySelector(`#f_${f.id}_preset`);
+        const customEl = wrap.querySelector(`#f_${f.id}_custom`);
+        const opEl     = wrap.querySelector(`#f_${f.id}_op`);
+        const startEl  = wrap.querySelector(`#f_${f.id}_start`);
+        const endEl    = wrap.querySelector(`#f_${f.id}_end`);
+        const endRow   = wrap.querySelector(`#f_${f.id}_endrow`);
+        const fromLbl  = wrap.querySelector('.filter-date-fromlbl');
+
+        const applyCustom = (refresh) => {
+          const isBetween = opEl.value === 'between';
+          endRow.style.display = isBetween ? '' : 'none';
+          fromLbl.textContent  = isBetween ? 'From' : 'Date';
+          const r = _customDateRange(opEl.value, startEl.value, endEl.value);
+          _filterState[f.id] = { StartDate: r.StartDate, EndDate: r.EndDate, __preset: 'custom', __op: opEl.value };
+          if (refresh) _refreshWidgetsForFilter(f.id);
+        };
+        const applyPreset = (refresh) => {
+          const token = presetEl.value;
+          if (token === 'custom') { customEl.style.display = ''; applyCustom(refresh); return; }
+          customEl.style.display = 'none';
+          const r = _computeDateRange(token);
+          _filterState[f.id] = { StartDate: r.StartDate, EndDate: r.EndDate, __preset: token };
+          if (refresh) _refreshWidgetsForFilter(f.id);
+        };
+
+        // Restore persisted / default selection
         if (f.defaultValue) {
           try {
-            const dv = JSON.parse(f.defaultValue);
-            wrap.querySelector('[data-key=StartDate]').value = dv.StartDate || '';
-            wrap.querySelector('[data-key=EndDate]').value   = dv.EndDate   || '';
-            _filterState[f.id] = dv;
+            const dv     = JSON.parse(f.defaultValue);
+            const preset = dv.__preset || ((dv.StartDate || dv.EndDate) ? 'custom' : 'all');
+            const known  = [...presetEl.options].some(o => o.value === preset);
+            presetEl.value = known ? preset : (dv.StartDate || dv.EndDate ? 'custom' : 'all');
+            if (presetEl.value === 'custom') {
+              customEl.style.display = '';
+              opEl.value = dv.__op || 'between';
+              startEl.value = (dv.StartDate || '').slice(0, 10);
+              endEl.value   = (dv.EndDate   || '').slice(0, 10);
+              const isBetween = opEl.value === 'between';
+              endRow.style.display = isBetween ? '' : 'none';
+              fromLbl.textContent  = isBetween ? 'From' : 'Date';
+            }
+            _filterState[f.id] = { StartDate: dv.StartDate || '', EndDate: dv.EndDate || '', __preset: presetEl.value, __op: dv.__op };
           } catch(_) {}
         }
 
-        $(wrap).find('input[type=date]').on('change', function() {
-          const startEl = document.getElementById(`f_${f.id}_start`);
-          const endEl   = document.getElementById(`f_${f.id}_end`);
-          _filterState[f.id] = { StartDate: startEl.value, EndDate: endEl.value };
-          _refreshWidgetsForFilter(f.id);
-        });
+        presetEl.addEventListener('change', () => applyPreset(true));
+        opEl.addEventListener('change', () => applyCustom(true));
+        $(wrap).find('input[type=date]').on('change', () => applyCustom(true));
 
       } else if (f.type === 'dropdown' || f.type === 'multiselect') {
         wrap.innerHTML = `
@@ -266,6 +319,118 @@ const DashboardEngine = (() => {
     });
 
     return pending;
+  }
+
+  // ── Date filter presets ────────────────────────────────────────────────────
+  // Builds grouped <option>s for the date-range preset selector.
+  function _buildDatePresetOptions() {
+    const now = new Date();
+    const y   = now.getFullYear();
+    const MONTHS = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+    const MIN_YEAR = 2012;
+    let h = '<option value="all">All dates</option>'
+          + '<option value="custom">Custom / operator…</option>';
+
+    h += '<optgroup label="Month">'
+       + '<option value="month:current">This month</option>'
+       + '<option value="month:prev">Last month</option>'
+       + '<option value="month:next">Next month</option>';
+    for (let n = 2; n <= 12; n++) h += `<option value="month:last:${n}">Last ${n} months</option>`;
+    for (let n = 2; n <= 12; n++) h += `<option value="month:nextn:${n}">Next ${n} months</option>`;
+    for (let m = 1; m <= 12; m++) h += `<option value="month:name:${m}:${y}">${MONTHS[m-1]} ${y}</option>`;
+    h += '</optgroup>';
+
+    h += '<optgroup label="Quarter">'
+       + '<option value="quarter:current">This quarter</option>'
+       + '<option value="quarter:prev">Last quarter</option>'
+       + '<option value="quarter:next">Next quarter</option>';
+    for (let yr = y + 1; yr >= MIN_YEAR; yr--)
+      for (let q = 1; q <= 4; q++) h += `<option value="quarter:${yr}:${q}">Q${q} ${yr}</option>`;
+    h += '</optgroup>';
+
+    h += '<optgroup label="Year">'
+       + '<option value="year:current">This year</option>'
+       + '<option value="year:prev">Last year</option>'
+       + '<option value="year:next">Next year</option>';
+    for (let yr = y + 1; yr >= MIN_YEAR; yr--) h += `<option value="year:${yr}">${yr}</option>`;
+    h += '</optgroup>';
+
+    // Australian financial year: 1 July – 30 June.
+    h += '<optgroup label="Financial Year">'
+       + '<option value="fy:current">This financial year</option>'
+       + '<option value="fy:prev">Last financial year</option>'
+       + '<option value="fy:next">Next financial year</option>';
+    for (let yr = y + 1; yr >= MIN_YEAR; yr--)
+      h += `<option value="fy:${yr}">FY ${yr}/${String((yr + 1) % 100).padStart(2, '0')}</option>`;
+    h += '</optgroup>';
+
+    return h;
+  }
+
+  // Resolves a preset token to a concrete { StartDate, EndDate } (yyyy-MM-dd).
+  function _computeDateRange(token) {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth(); // m is 0-based
+    const ymd        = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const monthStart = (yy, mm) => new Date(yy, mm, 1);
+    const monthEnd   = (yy, mm) => new Date(yy, mm + 1, 0);
+    const p = (token || '').split(':');
+
+    switch (p[0]) {
+      case 'month': {
+        if (p[1] === 'current') return { StartDate: ymd(monthStart(y, m)),     EndDate: ymd(monthEnd(y, m)) };
+        if (p[1] === 'prev')    return { StartDate: ymd(monthStart(y, m - 1)), EndDate: ymd(monthEnd(y, m - 1)) };
+        if (p[1] === 'next')    return { StartDate: ymd(monthStart(y, m + 1)), EndDate: ymd(monthEnd(y, m + 1)) };
+        if (p[1] === 'last')  { const n = +p[2]; return { StartDate: ymd(monthStart(y, m - (n - 1))), EndDate: ymd(monthEnd(y, m)) }; }
+        if (p[1] === 'nextn') { const n = +p[2]; return { StartDate: ymd(monthStart(y, m + 1)), EndDate: ymd(monthEnd(y, m + n)) }; }
+        if (p[1] === 'name')  { const mm = +p[2] - 1, yy = +p[3]; return { StartDate: ymd(monthStart(yy, mm)), EndDate: ymd(monthEnd(yy, mm)) }; }
+        break;
+      }
+      case 'quarter': {
+        let yy = y, q;
+        if (p[1] === 'current' || p[1] === 'prev' || p[1] === 'next') {
+          q = Math.floor(m / 3);
+          if (p[1] === 'prev') { q -= 1; if (q < 0) { q = 3; yy--; } }
+          if (p[1] === 'next') { q += 1; if (q > 3) { q = 0; yy++; } }
+        } else { yy = +p[1]; q = +p[2] - 1; }
+        const sm = q * 3;
+        return { StartDate: ymd(monthStart(yy, sm)), EndDate: ymd(monthEnd(yy, sm + 2)) };
+      }
+      case 'year': {
+        let yy = y;
+        if (p[1] === 'prev') yy = y - 1; else if (p[1] === 'next') yy = y + 1;
+        else if (p[1] !== 'current') yy = +p[1];
+        return { StartDate: `${yy}-01-01`, EndDate: `${yy}-12-31` };
+      }
+      case 'fy': {
+        const curStart = (m >= 6) ? y : y - 1; // FY starts in July (month index 6)
+        let s = curStart;
+        if (p[1] === 'prev') s = curStart - 1; else if (p[1] === 'next') s = curStart + 1;
+        else if (p[1] !== 'current') s = +p[1];
+        return { StartDate: `${s}-07-01`, EndDate: `${s + 1}-06-30` };
+      }
+    }
+    return { StartDate: '', EndDate: '' }; // 'all' / 'custom' / unknown
+  }
+
+  // Resolves a custom operator + date(s) to a { StartDate, EndDate } range.
+  function _customDateRange(op, s, e) {
+    if (op === 'between') return { StartDate: s || '', EndDate: e || '' };
+    if (!s) return { StartDate: '', EndDate: '' };
+    const addDays = (ds, n) => {
+      const d = new Date(ds + 'T00:00:00');
+      d.setDate(d.getDate() + n);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+    switch (op) {
+      case 'on':       return { StartDate: s,             EndDate: s };
+      case 'after':    return { StartDate: addDays(s, 1), EndDate: '' };
+      case 'onafter':  return { StartDate: s,             EndDate: '' };
+      case 'before':   return { StartDate: '',            EndDate: addDays(s, -1) };
+      case 'onbefore': return { StartDate: '',            EndDate: s };
+      default:         return { StartDate: s,             EndDate: s };
+    }
   }
 
   async function _loadDropdownOptions(filterId, source, valueKey, labelKey, defaultValue) {
@@ -449,7 +614,8 @@ const DashboardEngine = (() => {
 
       if (filter.type === 'daterange' && val && typeof val === 'object') {
         if (val.StartDate) params['StartDate'] = val.StartDate;
-        if (val.EndDate)   params['EndDate']   = val.EndDate;
+        // Make the end date inclusive of the whole day (records may carry a time component).
+        if (val.EndDate)   params['EndDate']   = /^\d{4}-\d{2}-\d{2}$/.test(val.EndDate) ? val.EndDate + ' 23:59:59' : val.EndDate;
       } else if (val) {
         // Skip: this column is already filtered by a config pre-filter
         if (preFilteredCols.has(filter.param)) return;
@@ -609,8 +775,13 @@ const DashboardEngine = (() => {
     const type = filter && filter.type;
     if (type === 'daterange') {
       if (typeof value === 'string') return value; // already a JSON string
-      if (typeof value === 'object' && (value.StartDate || value.EndDate)) {
-        return JSON.stringify({ StartDate: value.StartDate || '', EndDate: value.EndDate || '' });
+      if (typeof value === 'object' && (value.StartDate || value.EndDate || value.__preset)) {
+        return JSON.stringify({
+          StartDate: value.StartDate || '',
+          EndDate:   value.EndDate   || '',
+          __preset:  value.__preset,
+          __op:      value.__op
+        });
       }
       return '';
     }
