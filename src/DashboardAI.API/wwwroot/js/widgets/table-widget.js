@@ -241,7 +241,28 @@ const TableWidget = (() => {
     if ('n' in ka && 'n' in kb) return ka.n - kb.n;
     if ('n' in ka) return -1;    // numbers/dates before free text
     if ('n' in kb) return 1;
-    return ka.s.localeCompare(kb.s, undefined, { numeric: true, sensitivity: 'base' });
+    return _naturalCompare(ka.s, kb.s);
+  }
+
+  // Natural alphanumeric compare: splits into digit / non-digit runs and compares
+  // digit runs as UNSIGNED integers, so "haz-2" < "haz-10" (hyphen is not a minus sign).
+  function _naturalCompare(a, b) {
+    const ax = a.match(/\d+|\D+/g) || [];
+    const bx = b.match(/\d+|\D+/g) || [];
+    const len = Math.max(ax.length, bx.length);
+    for (let i = 0; i < len; i++) {
+      const at = ax[i], bt = bx[i];
+      if (at === undefined) return -1;
+      if (bt === undefined) return 1;
+      const aNum = /^\d/.test(at), bNum = /^\d/.test(bt);
+      if (aNum && bNum) {
+        const d = parseInt(at, 10) - parseInt(bt, 10);
+        if (d !== 0) return d;
+      } else if (at !== bt) {
+        return at < bt ? -1 : 1;
+      }
+    }
+    return 0;
   }
 
   return { render };
