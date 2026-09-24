@@ -167,7 +167,8 @@ namespace DashboardAI.Infrastructure.Services
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso,
             string module    = null,
-            string sessionId = null)
+            string sessionId = null,
+            int siteCount    = 1)
         {
             var dsList = availableDataSources.ToList();
             var variables = new Dictionary<string, string>
@@ -178,7 +179,9 @@ namespace DashboardAI.Infrastructure.Services
                 ["data_sources_json"]= JsonConvert.SerializeObject(dsList, Formatting.Indented),
                 ["user_request"]     = userPrompt,
                 ["guid"]             = Guid.NewGuid().ToString(),
-                ["dashboard_title"]  = ""
+                ["dashboard_title"]  = "",
+                ["is_multi_site"]    = siteCount > 1 ? "true" : "false",
+                ["site_count"]       = siteCount.ToString()
             };
             var call = await CallOpenAIResponsesAsync(_generatePromptId, _generatePromptVersion, variables);
             var raw  = call.Content;

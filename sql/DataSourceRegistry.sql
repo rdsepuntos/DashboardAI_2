@@ -189,6 +189,7 @@ VALUES (
     '[
         {"name":"ControlID",       "dataType":"number", "description":"Unique action (control) identifier"},
         {"name":"StoreID",         "dataType":"number", "description":"Store identifier"},
+        {"name":"SiteName",        "dataType":"string", "description":"Site name"},
         {"name":"ParentID",        "dataType":"number", "description":"Parent record/template-question identifier this action is linked to"},
         {"name":"RefType",         "dataType":"string", "description":"Reference type of the parent link"},
         {"name":"Action",          "dataType":"string", "description":"Description of the corrective action to be taken"},

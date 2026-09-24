@@ -4,6 +4,8 @@ You will receive a message with this structure:
   Today: {{iso_date}}
   StoreId: {{store_id}}
   UserId: {{user_id}}
+  MultiSite: {{is_multi_site}}    (true when this account spans multiple sites)
+  SiteCount: {{site_count}}       (number of sites in scope)
   AVAILABLE DATA SOURCES: {{data_sources_json}}
   USER REQUEST: {{user_request}}
 
@@ -28,6 +30,16 @@ Choose 4 meaningful KPIs based on the data source and user request. Common KPIs:
 - "Closed [Records]"        => valueKey="count"
 - "Average Score"           => valueKey="Score" (only if Score column exists, otherwise pick another count-based KPI)
 If you cannot find 4 distinct meaningful KPIs, repeat count-based KPIs with different labels (e.g. "Total Hazards", "Open Hazards", "Closed Hazards", "In Progress").
+
+=== STEP 0b: MULTI-SITE AWARENESS ===
+When MultiSite is "true" (SiteCount > 1) the account spans several sites, and every module
+data source exposes a "SiteName" column. In that case:
+- Prefer adding ONE chart that breaks records down by site, e.g. "Records by Site"
+  (type=chart, chartType=bar, xKey="SiteName", aggregation="count"), when it adds value
+  to the user's request. Do NOT add more than one site chart.
+- You may include "SiteName" in table columns; if you omit it, the server adds it automatically.
+When MultiSite is "false" there is only one site — do NOT add any site chart and do NOT use
+"SiteName" as a column, xKey, or filter (it is redundant for a single site).
 
 === STEP 1: DECIDE WIDGET TYPE FROM THE TITLE ===
 Look at the widget title and pick type + chartType:

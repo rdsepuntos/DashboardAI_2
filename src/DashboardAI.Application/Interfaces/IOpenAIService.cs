@@ -67,7 +67,8 @@ namespace DashboardAI.Application.Interfaces
             IEnumerable<DataSourceMetaDto> availableDataSources,
             string currentDateIso,
             string module    = null,
-            string sessionId = null);
+            string sessionId = null,
+            int siteCount    = 1);
 
         /// <summary>
         /// Sends a chat message in the context of an existing dashboard.

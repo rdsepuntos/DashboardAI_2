@@ -136,7 +136,11 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
                 dataSources,
                 currentDate,
                 request.Module,
-                request.SessionId);
+                request.SessionId,
+                scopedStoreIds.Count);
+
+            // Multisite: surface the site on tables and add a "by Site" chart.
+            ApplyMultiSiteEnhancements(dashboardDto, scopedStoreIds.Count > 1);
 
             // Map DTO → Domain entity and persist
             var dashboard = DashboardMapper.ToDomain(dashboardDto);
@@ -164,6 +168,60 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
 
         private static bool IsCategoricalColumn(string name)
             => _categoricalColumnNames.Contains(name);
+
+        private const string SiteColumnName = "SiteName";
+
+        // When a store resolves to multiple sites, put the site on every table (sourced from a
+        // SiteName-capable view) and add one "Records by Site" chart. For a single site the
+        // column is redundant, so strip it back out.
+        private void ApplyMultiSiteEnhancements(DashboardDto dashboard, bool isMultiSite)
+        {
+            if (dashboard?.Widgets == null || dashboard.Widgets.Count == 0) return;
+
+            bool SourceHasSite(string dsName) =>
+                !string.IsNullOrEmpty(dsName)
+                && _registry.GetByName(dsName)?.Columns?.Any(c =>
+                    string.Equals(c.Name, SiteColumnName, StringComparison.OrdinalIgnoreCase)) == true;
+
+            bool IsTable(WidgetDto w) => string.Equals(w.Type, "table", StringComparison.OrdinalIgnoreCase);
+
+            bool IsPivot(WidgetDto w) =>
+                w.Config != null && w.Config.TryGetValue("pivot", out var p)
+                && string.Equals(p, "true", StringComparison.OrdinalIgnoreCase);
+
+            if (!isMultiSite)
+            {
+                foreach (var w in dashboard.Widgets.Where(w => IsTable(w) && w.Config != null))
+                {
+                    if (!w.Config.TryGetValue("columns", out var cols) || string.IsNullOrWhiteSpace(cols)) continue;
+                    var kept = SplitColumns(cols)
+                        .Where(c => !string.Equals(c, SiteColumnName, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    w.Config["columns"] = string.Join(",", kept);
+                }
+                return;
+            }
+
+            // Tables: prepend SiteName (skip pivot tables — their columns are generated dynamically).
+            foreach (var w in dashboard.Widgets.Where(w => IsTable(w) && SourceHasSite(w.DataSource) && !IsPivot(w)))
+            {
+                w.Config = w.Config ?? new Dictionary<string, string>();
+                var columns = w.Config.TryGetValue("columns", out var cols) && !string.IsNullOrWhiteSpace(cols)
+                    ? SplitColumns(cols)
+                    : new List<string>();
+                columns = columns
+                    .Where(c => !string.Equals(c, SiteColumnName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                columns.Insert(0, SiteColumnName);
+                w.Config["columns"] = string.Join(",", columns);
+            }
+
+            // Site charts are left to the AI's discretion — it already sees the SiteName column
+            // in the data source metadata and can group by it when the request calls for it.
+        }
+
+        private static List<string> SplitColumns(string csv)
+            => csv.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
 
         // Attaches account-specific display captions (from spPageFields) to columns so the
         // AI can match user wording like "ID" against the raw column name (e.g. InternalNo).
