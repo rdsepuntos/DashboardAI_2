@@ -29,12 +29,6 @@ namespace DashboardAI.Infrastructure.Services
                 SELECT StoreID AS StoreId, StoreName AS SiteName
                 FROM
                 (
-                    SELECT currentStore.StoreID, currentStore.StoreName
-                    FROM Agtech_WHSMonitor.dbo.Store currentStore
-                    WHERE currentStore.StoreID = @StoreId
-
-                    UNION
-
                     SELECT childStore.StoreID, childStore.StoreName
                     FROM Agtech_Usermgmt.dbo.Members childMember
                     INNER JOIN Agtech_WHSMonitor.dbo.Store childStore
@@ -54,6 +48,30 @@ namespace DashboardAI.Infrastructure.Services
                         ON omniParentStore.MemberID = childMember.OmniParentID
                     WHERE childMember.OmniParentID > 0
                       AND omniParentStore.StoreID = @StoreId
+
+                    UNION
+
+                    -- Current store itself: only when it is NOT a multisite parent
+                    -- (a multi-member's own StoreID must be excluded from its child scope)
+                    SELECT currentStore.StoreID, currentStore.StoreName
+                    FROM Agtech_WHSMonitor.dbo.Store currentStore
+                    WHERE currentStore.StoreID = @StoreId
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM Agtech_Usermgmt.dbo.Members childMember
+                          INNER JOIN Agtech_WHSMonitor.dbo.Store parentStore
+                              ON parentStore.MemberID = childMember.ParentMemberID
+                          WHERE childMember.ParentMemberID > 0
+                            AND parentStore.StoreID = @StoreId
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM Agtech_Usermgmt.dbo.Members childMember
+                          INNER JOIN Agtech_WHSMonitor.dbo.Store omniParentStore
+                              ON omniParentStore.MemberID = childMember.OmniParentID
+                          WHERE childMember.OmniParentID > 0
+                            AND omniParentStore.StoreID = @StoreId
+                      )
                 ) scopedStores
                 ORDER BY StoreName, StoreID;";
 
