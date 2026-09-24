@@ -104,9 +104,7 @@ const TableWidget = (() => {
       else { _sortCol = col; _sortAsc = true; }
 
       const sorted = [...data].sort((a, b) => {
-        const va = a[col], vb = b[col];
-        const na = parseFloat(va), nb = parseFloat(vb);
-        const cmp = !isNaN(na) && !isNaN(nb) ? na - nb : String(va ?? '').localeCompare(String(vb ?? ''));
+        const cmp = _compareValues(a[col], b[col]);
         return _sortAsc ? cmp : -cmp;
       });
 
@@ -209,6 +207,41 @@ const TableWidget = (() => {
     const num = parseFloat(val);
     if (!isNaN(num) && s !== '') return String(num);
     return s;
+  }
+
+  // Resolve a value into a comparable sort key.
+  // Detection order matters: dd/MM/yyyy → ISO date → pure number → natural text.
+  function _sortKey(v) {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim();
+    if (s === '') return null;
+
+    // dd/MM/yyyy (optionally with time) → chronological yyyymmdd number
+    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (dmy) return { n: (+dmy[3]) * 10000 + (+dmy[2]) * 100 + (+dmy[1]) };
+
+    // ISO date/datetime → timestamp
+    if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s)) {
+      const t = Date.parse(s);
+      if (!isNaN(t)) return { n: t };
+    }
+
+    // pure number (no letters) → numeric
+    if (/^-?\d+(\.\d+)?$/.test(s)) return { n: parseFloat(s) };
+
+    // alphanumeric / text → natural string (handles InternalNo like HAZ-2 vs HAZ-10)
+    return { s: s.toLowerCase() };
+  }
+
+  function _compareValues(a, b) {
+    const ka = _sortKey(a), kb = _sortKey(b);
+    if (ka === null && kb === null) return 0;
+    if (ka === null) return 1;   // blanks sort last (ascending)
+    if (kb === null) return -1;
+    if ('n' in ka && 'n' in kb) return ka.n - kb.n;
+    if ('n' in ka) return -1;    // numbers/dates before free text
+    if ('n' in kb) return 1;
+    return ka.s.localeCompare(kb.s, undefined, { numeric: true, sensitivity: 'base' });
   }
 
   return { render };
