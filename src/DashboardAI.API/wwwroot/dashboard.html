@@ -643,6 +643,14 @@ ${tablePagesHtml}
       document.getElementById('chatSidebar').classList.remove('hidden');
     });
 
+    // Enter sends the chat; Shift+Enter inserts a newline
+    document.getElementById('chatInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('chatForm').requestSubmit();
+      }
+    });
+
     function closePdfDrawer() {
       document.getElementById('pdfDrawer').style.right = '-100%';
       document.getElementById('pdfDrawerBackdrop').style.display = 'none';
