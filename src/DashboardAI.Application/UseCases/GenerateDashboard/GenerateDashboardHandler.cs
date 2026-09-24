@@ -142,6 +142,9 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
             // Multisite: surface the site on tables and add a "by Site" chart.
             ApplyMultiSiteEnhancements(dashboardDto, scopedStoreIds.Count > 1);
 
+            // Add a filter for every categorical column in the chosen data sources.
+            DashboardFilterAugmenter.EnsureCategoricalFilters(dashboardDto, _registry);
+
             // Map DTO → Domain entity and persist
             var dashboard = DashboardMapper.ToDomain(dashboardDto);
             await _repository.SaveAsync(dashboard);

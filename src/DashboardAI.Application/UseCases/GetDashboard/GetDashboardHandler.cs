@@ -17,9 +17,13 @@ namespace DashboardAI.Application.UseCases.GetDashboard
     public class GetDashboardHandler
     {
         private readonly IDashboardRepository _repository;
+        private readonly IDataSourceRegistry _registry;
 
-        public GetDashboardHandler(IDashboardRepository repository)
-            => _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        public GetDashboardHandler(IDashboardRepository repository, IDataSourceRegistry registry)
+        {
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _registry   = registry   ?? throw new ArgumentNullException(nameof(registry));
+        }
 
         public async Task<DashboardDto> HandleAsync(GetDashboardRequest request)
         {
@@ -29,7 +33,11 @@ namespace DashboardAI.Application.UseCases.GetDashboard
             if (dashboard == null)
                 throw new KeyNotFoundException($"Dashboard {request.DashboardId} not found.");
 
-            return DashboardMapper.ToDto(dashboard);
+            var dto = DashboardMapper.ToDto(dashboard);
+            // Backfill filters for every categorical column so the sidebar shows all
+            // usable filter fields, even on dashboards created before this existed.
+            DashboardFilterAugmenter.EnsureCategoricalFilters(dto, _registry);
+            return dto;
         }
     }
 }
