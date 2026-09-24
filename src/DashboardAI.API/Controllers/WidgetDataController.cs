@@ -87,6 +87,17 @@ namespace DashboardAI.API.Controllers
         }
 
         // ──────────────────────────────────────────────────────────────────────
+        // GET /api/widget-data/debug-captions?dataSource=AID_IncidentAssessor&storeId=21697
+        // Returns spPageFields resolution diagnostics: member, proc, row count, error.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpGet("debug-captions")]
+        public async Task<IActionResult> DebugCaptions([FromQuery] string dataSource, [FromQuery] int storeId)
+        {
+            var diag = await _captions.GetDiagnosticsAsync(dataSource, storeId);
+            return new JsonResult(diag, _rawCasingSettings);
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
         // POST /api/widget-data/query
         // Returns all matching rows (use for charts, KPIs, maps).
         // ──────────────────────────────────────────────────────────────────────

@@ -75,6 +75,64 @@ namespace DashboardAI.Infrastructure.Services
             return await conn.ExecuteScalarAsync<int?>(sql, new { StoreId = storeId }) ?? 0;
         }
 
+        public async Task<CaptionDiagnostics> GetDiagnosticsAsync(string dataSourceName, int storeId)
+        {
+            var diag = new CaptionDiagnostics
+            {
+                Procedure = _options.ProcedureName,
+                Captions  = Empty
+            };
+
+            if (string.IsNullOrWhiteSpace(dataSourceName) || storeId <= 0)
+            {
+                diag.Error = "Missing dataSource or invalid storeId.";
+                return diag;
+            }
+
+            if (_options.Mappings == null ||
+                !_options.Mappings.TryGetValue(dataSourceName, out var mapping) || mapping == null)
+            {
+                diag.Error = $"No PageFields mapping configured for '{dataSourceName}'.";
+                return diag;
+            }
+
+            diag.MappingFound   = true;
+            diag.RegisterTypeId = mapping.RegisterTypeId;
+            diag.ParentPageId   = mapping.ParentPageId ?? _options.DefaultParentPageId;
+            diag.UCPageId       = mapping.UCPageId ?? _options.DefaultUCPageId;
+
+            if (diag.ParentPageId <= 0 || diag.UCPageId <= 0)
+            {
+                diag.Error = "ParentPageId / UCPageId not configured.";
+                return diag;
+            }
+
+            try
+            {
+                using (var conn = new SqlConnection(_connectionString))
+                {
+                    diag.MemberId = await ResolveMemberIdAsync(conn, storeId);
+                    if (diag.MemberId <= 0)
+                    {
+                        diag.Error = $"No MemberID found for StoreID {storeId}.";
+                        return diag;
+                    }
+
+                    var captions   = await LoadCaptionsAsync(conn, mapping, diag.ParentPageId, diag.UCPageId, diag.MemberId);
+                    diag.Captions  = captions;
+                    diag.RowCount  = captions.Count;
+                    if (captions.Count == 0)
+                        diag.Error = "Procedure executed but returned no ColName/ColCaption rows.";
+                    return diag;
+                }
+            }
+            catch (Exception ex)
+            {
+                diag.Error = ex.Message;
+                return diag;
+            }
+        }
+
         private async Task<IReadOnlyDictionary<string, string>> LoadCaptionsAsync(
             SqlConnection conn, PageFieldMapping mapping, int parentPageId, int ucPageId, int memberId)
         {
