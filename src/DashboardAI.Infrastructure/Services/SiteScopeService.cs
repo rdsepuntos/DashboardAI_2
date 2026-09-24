@@ -25,7 +25,9 @@ namespace DashboardAI.Infrastructure.Services
         {
             if (storeId <= 0) return Array.Empty<SiteScopeItem>();
 
-            const string sql = @"
+            // Child sites of a multisite parent (via ParentMemberID or OmniParentID).
+            // Requires the child member to have its own Store row.
+            const string childSitesSql = @"
                 SELECT StoreID AS StoreId, StoreName AS SiteName
                 FROM
                 (
@@ -48,37 +50,30 @@ namespace DashboardAI.Infrastructure.Services
                         ON omniParentStore.MemberID = childMember.OmniParentID
                     WHERE childMember.OmniParentID > 0
                       AND omniParentStore.StoreID = @StoreId
-
-                    UNION
-
-                    -- Current store itself: only when it is NOT a multisite parent
-                    -- (a multi-member's own StoreID must be excluded from its child scope)
-                    SELECT currentStore.StoreID, currentStore.StoreName
-                    FROM Agtech_WHSMonitor.dbo.Store currentStore
-                    WHERE currentStore.StoreID = @StoreId
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM Agtech_Usermgmt.dbo.Members childMember
-                          INNER JOIN Agtech_WHSMonitor.dbo.Store parentStore
-                              ON parentStore.MemberID = childMember.ParentMemberID
-                          WHERE childMember.ParentMemberID > 0
-                            AND parentStore.StoreID = @StoreId
-                      )
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM Agtech_Usermgmt.dbo.Members childMember
-                          INNER JOIN Agtech_WHSMonitor.dbo.Store omniParentStore
-                              ON omniParentStore.MemberID = childMember.OmniParentID
-                          WHERE childMember.OmniParentID > 0
-                            AND omniParentStore.StoreID = @StoreId
-                      )
-                ) scopedStores
+                ) childStores
                 ORDER BY StoreName, StoreID;";
+
+            const string currentSiteSql = @"
+                SELECT StoreID AS StoreId, StoreName AS SiteName
+                FROM Agtech_WHSMonitor.dbo.Store
+                WHERE StoreID = @StoreId;";
 
             using (var connection = new SqlConnection(_connectionString))
             {
-                var sites = await connection.QueryAsync<SiteScopeItem>(sql, new { StoreId = storeId });
-                return sites.GroupBy(site => site.StoreId).Select(group => group.First()).ToList().AsReadOnly();
+                var childSites = (await connection.QueryAsync<SiteScopeItem>(
+                    childSitesSql, new { StoreId = storeId })).ToList();
+
+                // Multisite parent → return ONLY the child sites (exclude the parent's own store).
+                if (childSites.Count > 0)
+                    return childSites.GroupBy(s => s.StoreId).Select(g => g.First()).ToList().AsReadOnly();
+
+                // Single site → scope to the store itself.
+                var currentSite = (await connection.QueryAsync<SiteScopeItem>(
+                    currentSiteSql, new { StoreId = storeId })).ToList();
+
+                return currentSite.Count > 0
+                    ? currentSite.AsReadOnly()
+                    : new List<SiteScopeItem> { new SiteScopeItem { StoreId = storeId } }.AsReadOnly();
             }
         }
     }

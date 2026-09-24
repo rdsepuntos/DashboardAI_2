@@ -180,7 +180,9 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
                 }
             }
 
-            return string.Join(",", scopedStoreIds);
+            // Never return an empty string: an empty StoreID disables the store filter
+            // downstream and would leak every site's data. Fall back to an impossible id.
+            return scopedStoreIds.Count > 0 ? string.Join(",", scopedStoreIds) : "-1";
         }
     }
 }

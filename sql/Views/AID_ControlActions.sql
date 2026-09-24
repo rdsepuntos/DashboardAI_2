@@ -1,4 +1,14 @@
-CREATE OR ALTER VIEW dbo.AID_ControlActions AS
+USE [Agtech_WHSMonitor]
+GO
+
+/****** Object:  View [dbo].[AID_ControlActions]    Script Date: 9/24/2026 1:47:36 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   VIEW [dbo].[AID_ControlActions] AS
 
 -- Plain corrective actions straight from _ControlsTable (no record-header join).
 -- Use when you only need action attributes (status, priority, responsible, deadline,
@@ -37,6 +47,10 @@ SELECT
     c.LocationType,
     c.LocationTypeID,
     c.EstCost,
-    c.CreatedDt
+    c.CreatedDt,
+	d.StoreName SiteName
 FROM dbo._ControlsTable AS c
+JOIN STORE	 D ON D.StoreID = c.StoreID
 GO
+
+
