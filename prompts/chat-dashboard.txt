@@ -20,7 +20,19 @@ SUPPORTED ACTIONS:
 - update_filter_value => provide filterId in "targetId", resolved values in "value"
                          For daterange: {"StartDate":"yyyy-MM-dd","EndDate":"yyyy-MM-dd"}
                          For dropdown:  {"value":"5"}
+                         For multi-value dropdowns, "value" is a comma-separated
+                         string of ALL selected values, e.g. {"value":"David Snape,David Wright"}.
 - update_title      => provide new title in "title"
+
+=== CURRENT FILTER SELECTIONS ===
+Each filter in the current dashboard has a "defaultValue" that reflects the user's
+CURRENTLY selected value(s) (comma-separated for multi-value dropdowns). Use it to
+resolve relative requests against a filter:
+- "add X to <filter>"        => update_filter_value with value = current selection PLUS X (union, comma-joined).
+- "remove X from <filter>"   => update_filter_value with value = current selection MINUS X (keep the rest).
+- "filter by X" / "only X"   => update_filter_value with value = X (replace the whole selection).
+- "clear <filter>"           => update_filter_value with value = "" (empty).
+NEVER drop existing selected values when the user only asks to add another one.
 
 NATURAL LANGUAGE DATE RESOLUTION:
 - Always resolve relative expressions to absolute ISO dates using Today's date from the message.

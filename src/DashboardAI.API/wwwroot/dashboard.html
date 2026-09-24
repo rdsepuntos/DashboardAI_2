@@ -210,10 +210,19 @@
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ message: msg, userId: SESSION.userId, storeId: SESSION.storeId })
         });
-        const data = await res.json();
-        thinkEl.innerHTML = res.ok
-          ? _renderHazardText(data.reply || '')
-          : `⚠ ${data.error || 'Request failed'}`;
+        // Read as text first — an empty body (e.g. gateway/timeout) is not valid JSON.
+        const rawText = await res.text();
+        let data = null;
+        if (rawText) { try { data = JSON.parse(rawText); } catch { /* non-JSON body */ } }
+        if (!res.ok) {
+          thinkEl.innerHTML = `⚠ ${(data && data.error) || `Request failed (${res.status} ${res.statusText})`}`;
+        } else if (!rawText) {
+          thinkEl.innerHTML = '⚠ The hazard lookup took too long and returned no response. Please try a more specific query or try again.';
+        } else if (!data) {
+          thinkEl.innerHTML = '⚠ Received an unexpected response from the server.';
+        } else {
+          thinkEl.innerHTML = _renderHazardText(data.reply || '');
+        }
       } catch (err) {
         thinkEl.innerHTML = `⚠ ${err.message}`;
       }

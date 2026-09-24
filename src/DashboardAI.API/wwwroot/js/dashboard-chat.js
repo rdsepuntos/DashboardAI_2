@@ -49,6 +49,11 @@ const ChatManager = (() => {
     _setBusy(true);
 
     try {
+      // Snapshot includes the user's current filter selections so the AI can
+      // resolve "add/remove/only X" against what is already selected.
+      const currentDashboard = (DashboardEngine.getDashboardWithFilterState
+        ? DashboardEngine.getDashboardWithFilterState()
+        : dashboard) || dashboard;
       const response = await fetch(_apiBase() + '/api/chat/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,7 +64,7 @@ const ChatManager = (() => {
           storeId: _session.storeId,
           module: _session.module,
           sessionId: _session.sessionId,
-          currentDashboard: dashboard
+          currentDashboard
         })
       });
       const data = await response.json();

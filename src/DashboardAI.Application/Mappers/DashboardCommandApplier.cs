@@ -71,6 +71,11 @@ namespace DashboardAI.Application.Mappers
                 }
             }
 
+            // Ensure every non-locked filter is wired into each widget's AppliesFilters.
+            // Chat commands (e.g. add_filter) don't set this, so without it a newly added
+            // filter renders in the bar but never reaches the widget queries.
+            EnsureAppliesFilters(widgets, filters);
+
             return new DashboardDto
             {
                 Id             = dashboard.Id,
@@ -83,6 +88,34 @@ namespace DashboardAI.Application.Mappers
                 Widgets        = widgets,
                 Filters        = filters
             };
+        }
+
+        private static void EnsureAppliesFilters(List<WidgetDto> widgets, List<FilterDto> filters)
+        {
+            var nonLocked = filters
+                .Where(f => f != null && !f.IsLocked && !string.IsNullOrWhiteSpace(f.Id))
+                .Select(f => f.Id)
+                .ToList();
+            if (nonLocked.Count == 0) return;
+
+            var validIds = new HashSet<string>(
+                filters.Where(f => f?.Id != null).Select(f => f.Id),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var w in widgets)
+            {
+                if (w.AppliesFilters == null)
+                    w.AppliesFilters = new List<string>();
+
+                // Drop references to filters that no longer exist (e.g. after remove_filter).
+                w.AppliesFilters.RemoveAll(id => id != null && !validIds.Contains(id));
+
+                foreach (var filterId in nonLocked)
+                {
+                    if (!w.AppliesFilters.Contains(filterId, StringComparer.OrdinalIgnoreCase))
+                        w.AppliesFilters.Add(filterId);
+                }
+            }
         }
     }
 }

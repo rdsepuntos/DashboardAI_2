@@ -508,8 +508,11 @@ const DashboardEngine = (() => {
   }
 
   // ── Apply commands from chat ──────────────────────────────────────────────────
-  function applyCommands(commands, updatedDashboard) {
+  async function applyCommands(commands, updatedDashboard) {
     _ensureSiteFilter(updatedDashboard);
+    let filterChanged = false;                 // any add/update/remove filter or value change
+    const valueUpdates    = [];                // { targetId, value } from update_filter_value
+    const changedFilterIds = new Set();        // filters whose definition a command replaced
     commands.forEach(cmd => {
       switch (cmd.action) {
         case 'add_widget': {
@@ -546,21 +549,15 @@ const DashboardEngine = (() => {
         case 'add_filter':
         case 'update_filter':
         case 'remove_filter': {
-          // Re-render entire filter bar with updated dashboard
-          _buildFilterBar(updatedDashboard.filters || []);
+          // Defer the rebuild until after all commands are applied (see below).
+          filterChanged = true;
+          if (cmd.filter && cmd.filter.id) changedFilterIds.add(cmd.filter.id);
+          if (cmd.targetId)                changedFilterIds.add(cmd.targetId);
           break;
         }
         case 'update_filter_value': {
-          _filterState[cmd.targetId] = cmd.value;
-          // Update visible controls
-          const f = (_dashboard.filters || []).find(f => f.id === cmd.targetId);
-          if (f && f.type === 'daterange' && cmd.value) {
-            const s = document.getElementById(`f_${cmd.targetId}_start`);
-            const e = document.getElementById(`f_${cmd.targetId}_end`);
-            if (s) s.value = cmd.value.StartDate || '';
-            if (e) e.value = cmd.value.EndDate   || '';
-          }
-          _refreshWidgetsForFilter(cmd.targetId);
+          filterChanged = true;
+          valueUpdates.push({ targetId: cmd.targetId, value: cmd.value });
           break;
         }
         case 'update_title': {
@@ -575,6 +572,52 @@ const DashboardEngine = (() => {
 
     // Update internal state to the server-returned updated dashboard
     _dashboard = updatedDashboard;
+
+    // Rebuild the filter bar ONCE after state is updated, then apply the selected
+    // values to the data. Checkbox defaults set during the rebuild don't fire
+    // 'change', so we must await the async option loads and re-query the widgets
+    // ourselves — otherwise the filter shows as selected but the data isn't filtered.
+    if (filterChanged) {
+      const filters = updatedDashboard.filters || [];
+      // Fold explicit value updates + current in-UI selections into each filter's
+      // defaultValue so the rebuild restores and applies them.
+      filters.forEach(f => {
+        if (f.isLocked) return;
+        const upd = valueUpdates.find(u => u.targetId === f.id);
+        if (upd) {
+          // Explicit value change from chat — honor it, even when it clears to empty.
+          f.defaultValue = _filterValueToDefault(f, upd.value);
+        } else if (changedFilterIds.has(f.id)) {
+          // add/update_filter supplied this filter's definition — trust its own
+          // defaultValue; do NOT overwrite it with the stale in-UI selection.
+        } else if (Object.prototype.hasOwnProperty.call(_filterState, f.id)) {
+          // Untouched filter — preserve the current selection across the rebuild.
+          const asDefault = _filterValueToDefault(f, _filterState[f.id]);
+          if (asDefault) f.defaultValue = asDefault;
+        }
+      });
+      const pending = _buildFilterBar(filters);
+      await Promise.all(pending || []);
+      refreshAllWidgets();
+    }
+  }
+
+  // Converts a filter value (from _filterState or an update_filter_value command)
+  // into the plain-string defaultValue the filter-bar builder expects.
+  function _filterValueToDefault(filter, value) {
+    if (value == null) return '';
+    const type = filter && filter.type;
+    if (type === 'daterange') {
+      if (typeof value === 'string') return value; // already a JSON string
+      if (typeof value === 'object' && (value.StartDate || value.EndDate)) {
+        return JSON.stringify({ StartDate: value.StartDate || '', EndDate: value.EndDate || '' });
+      }
+      return '';
+    }
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value))      return value.join(',');
+    if (typeof value === 'object' && value.value != null) return String(value.value);
+    return String(value);
   }
 
   // ── Data fetch ───────────────────────────────────────────────────────────────
@@ -736,6 +779,21 @@ const DashboardEngine = (() => {
   function getSession()     { return _session; }
   function getFilterState() { return Object.assign({}, _filterState); }
 
+  // Returns a clone of the dashboard with each filter's defaultValue set to the
+  // user's CURRENT in-UI selection. Sent to the chat AI so it can correctly
+  // resolve add/remove/set requests against what is already selected.
+  function getDashboardWithFilterState() {
+    if (!_dashboard) return _dashboard;
+    const clone = JSON.parse(JSON.stringify(_dashboard));
+    (clone.filters || []).forEach(f => {
+      if (f.isLocked) return;
+      if (Object.prototype.hasOwnProperty.call(_filterState, f.id)) {
+        f.defaultValue = _filterValueToDefault(f, _filterState[f.id]);
+      }
+    });
+    return clone;
+  }
+
   /**
    * Fetches ALL widget data for PDF export — tables get every row (no pagination),
    * charts/KPIs get their aggregated results. Widgets are returned sorted by grid
@@ -795,6 +853,6 @@ const DashboardEngine = (() => {
     return results;
   }
 
-  return { init, render, applyCommands, refreshAllWidgets, getDashboard, getSession, getFilterState, getAllWidgetDataForPrint };
+  return { init, render, applyCommands, refreshAllWidgets, getDashboard, getSession, getFilterState, getDashboardWithFilterState, getAllWidgetDataForPrint };
 
 })();

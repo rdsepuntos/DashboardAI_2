@@ -40,6 +40,11 @@ namespace DashboardAI.Infrastructure.Services
             _chatPromptId          = chatPromptId          ?? throw new ArgumentNullException(nameof(chatPromptId));
             _chatPromptVersion     = chatPromptVersion     ?? "6";
             _usageLogger           = usageLogger; // optional — null means "don't log"
+
+            // MCP hazard queries can chain several tool calls; give them headroom
+            // beyond HttpClient's default 100s so the response body isn't cut off.
+            if (_http.Timeout < TimeSpan.FromSeconds(300))
+                _http.Timeout = TimeSpan.FromSeconds(300);
         }
 
         // ─────────────────────────────────────────────────────────────────────
