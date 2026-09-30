@@ -121,8 +121,13 @@ namespace DashboardAI.Application.UseCases.SendChatMessage
                 request.Module,
                 request.SessionId)).ToList();
 
+            // Hard rule: never add a TemplateName/all-sites filter — force it to a site-scoped Checklist.
+            TemplateFilterNormalizer.NormalizeCommands(commands, request.CurrentDashboard, _registry);
+
             // Apply commands server-side to produce the updated dashboard state
             var updated = DashboardCommandApplier.Apply(request.CurrentDashboard, commands);
+
+            TemplateFilterNormalizer.NormalizeDashboard(updated, _registry);
 
             // Persist updated state
             var domain = DashboardMapper.ToDomain(updated);

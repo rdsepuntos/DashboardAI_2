@@ -300,6 +300,19 @@ CRITICAL: "defaultValue" is ALWAYS a plain string — NEVER an object, array, or
   WRONG: "defaultValue": {}   WRONG: "defaultValue": null   WRONG: "defaultValue": []
   RIGHT: "defaultValue": ""   RIGHT: "defaultValue": "2026-01-01"   RIGHT: "defaultValue": "5"
 
+TEMPLATE / CHECKLIST FILTER RULE:
+When the user asks to add a "template", "template name", or "checklist" filter to a STANDARD
+register/module dashboard (dataSource is a register view such as AID_HazardReport,
+AID_IncidentAssessor, AID_RapidRiskAssessor, or AID_AuditAndInspection), add a dropdown filter
+on that view's own "Checklist" column — NOT a "TemplateName" filter from AID_TemplateList.
+Using AID_TemplateList lists every template across ALL sites; the Checklist column keeps the
+options scoped to the current site's records.
+  { "type": "dropdown", "label": "Checklist", "param": "Checklist",
+    "optionsSource": "<the dashboard's register dataSource>",
+    "valueKey": "Checklist", "labelKey": "Checklist", "defaultValue": "" }
+ONLY use a TemplateName filter (optionsSource: AID_TemplateList) for PIVOT dashboards built on
+AID_TemplateResponses, where it selects which template's questions to pivot.
+
 For dropdown filters: optionsSource, valueKey, and labelKey MUST reference a real column
 that exists in the chosen dataSource columns list.
 

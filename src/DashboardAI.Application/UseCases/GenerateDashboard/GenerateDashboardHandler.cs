@@ -142,6 +142,9 @@ namespace DashboardAI.Application.UseCases.GenerateDashboard
             // Multisite: surface the site on tables and add a "by Site" chart.
             ApplyMultiSiteEnhancements(dashboardDto, scopedStoreIds.Count > 1);
 
+            // Force any TemplateName/AID_TemplateList filter into a site-scoped Checklist filter.
+            TemplateFilterNormalizer.NormalizeDashboard(dashboardDto, _registry);
+
             // Add a filter for every categorical column in the chosen data sources.
             DashboardFilterAugmenter.EnsureCategoricalFilters(dashboardDto, _registry);
 

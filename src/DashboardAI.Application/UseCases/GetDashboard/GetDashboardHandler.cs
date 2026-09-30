@@ -36,6 +36,7 @@ namespace DashboardAI.Application.UseCases.GetDashboard
             var dto = DashboardMapper.ToDto(dashboard);
             // Backfill filters for every categorical column so the sidebar shows all
             // usable filter fields, even on dashboards created before this existed.
+            TemplateFilterNormalizer.NormalizeDashboard(dto, _registry);
             DashboardFilterAugmenter.EnsureCategoricalFilters(dto, _registry);
             return dto;
         }
@@ -51,6 +52,7 @@ namespace DashboardAI.Application.UseCases.GetDashboard
             foreach (var dashboard in dashboards ?? Array.Empty<Domain.Entities.Dashboard>())
             {
                 var dto = DashboardMapper.ToDto(dashboard);
+                TemplateFilterNormalizer.NormalizeDashboard(dto, _registry);
                 DashboardFilterAugmenter.EnsureCategoricalFilters(dto, _registry);
                 result.Add(dto);
             }
