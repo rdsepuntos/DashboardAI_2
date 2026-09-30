@@ -89,18 +89,20 @@ const DashboardEngine = (() => {
     if (!saved || typeof saved !== 'object') return;
 
     filters.forEach(f => {
+      // Presence of the key means the session persisted a value for this filter —
+      // including an explicit CLEARED value. Honor it so "Clear All" survives a reload
+      // instead of falling back to the dashboard's baked-in defaultValue.
       if (f.isLocked || !Object.prototype.hasOwnProperty.call(saved, f.id)) return;
       const val = saved[f.id];
-      if (val === null || val === undefined || val === '') return;
 
       if (f.type === 'daterange') {
         // Persisted as an object; the builder expects a JSON string in defaultValue.
-        if (typeof val === 'object' && (val.StartDate || val.EndDate)) {
-          f.defaultValue = JSON.stringify(val);
-        }
+        f.defaultValue = (val && typeof val === 'object' && (val.StartDate || val.EndDate))
+          ? JSON.stringify(val)
+          : '';
       } else {
         // dropdown/multiselect (comma-separated), datepicker/text (plain string)
-        f.defaultValue = String(val);
+        f.defaultValue = (val === null || val === undefined) ? '' : String(val);
       }
     });
   }
@@ -179,8 +181,17 @@ const DashboardEngine = (() => {
           }
           const el = document.getElementById(`f_${f.id}`);
           if (el) { el.value = ''; _filterState[f.id] = ''; }
-          _refreshWidgetsForFilter(f.id);
         });
+
+        // Also strip baked-in config pre-filters (config.*Filter) so widgets show all data.
+        (_dashboard.widgets || []).forEach(w => {
+          const cfg = w.config;
+          if (!cfg) return;
+          Object.keys(cfg).forEach(k => { if (k.endsWith('Filter')) cfg[k] = ''; });
+        });
+
+        refreshAllWidgets();
+        _persistFilterState();
       };
     }
 
