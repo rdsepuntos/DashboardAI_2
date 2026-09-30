@@ -554,10 +554,15 @@ const DashboardEngine = (() => {
 
     try {
       if (isTable) {
-        const result = await _queryDataPaged(widget.dataSource, params, curPage, pageSize);
+        const sort   = widget.__sort || null;
+        const result = await _queryDataPaged(widget.dataSource, params, curPage, pageSize, sort);
         if (widget.secondaryDataSource) {
           result.data = await _fetchAndMergeSecondary(result.data, widget.secondaryDataSource);
         }
+        // Expose current sort + a server-side sort callback to the table widget.
+        result.sortColumn = sort?.column || null;
+        result.sortDir    = sort?.dir    || null;
+        result.onSort     = (column, dir) => { widget.__sort = { column, dir }; return _loadWidgetData(widget, 1); };
         const fetchFn = (p) => _loadWidgetData(widget, p);
         _renderWidgetContent(widget, bodyEl, result.data, result, fetchFn);
 
@@ -848,7 +853,7 @@ const DashboardEngine = (() => {
     return data; // string[]
   }
 
-  async function _queryDataPaged(dataSource, params, page, pageSize) {
+  async function _queryDataPaged(dataSource, params, page, pageSize, sort) {
     const res  = await fetch(API_BASE + '/api/widget-data/query-paged', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -857,7 +862,9 @@ const DashboardEngine = (() => {
         storeId:    _session.storeId,
         page:       page     || 1,
         pageSize:   pageSize || 50,
-        parameters: params
+        parameters: params,
+        sortColumn:    sort?.column || null,
+        sortDirection: sort?.dir    || null
       })
     });
     const result = await res.json();

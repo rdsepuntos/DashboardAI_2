@@ -73,6 +73,11 @@ const TableWidget = (() => {
     // Per-account column captions resolved server-side (spPageFields). Keyed by raw column name.
     const captions = (meta && meta.columns) || {};
 
+    // Server-side sort is available when the engine supplied an onSort callback (paged tables).
+    const serverSort = !!(meta && typeof meta.onSort === 'function');
+    const curSortCol = (meta && meta.sortColumn) || null;
+    const curSortDir = (meta && meta.sortDir) || 'asc';
+
     // ── Outer wrapper (flex column so footer sticks to bottom) ──────────────
     const wrapper = document.createElement('div');
     wrapper.style.cssText = 'display:flex;flex-direction:column;width:100%;height:100%;';
@@ -86,9 +91,10 @@ const TableWidget = (() => {
 
     // Header
     const thead = document.createElement('thead');
-    thead.innerHTML = '<tr>' + columns.map(c =>
-      `<th data-col="${c}" style="cursor:pointer">${captions[c] || _formatHeader(c)} <span class="sort-icon">⇅</span></th>`
-    ).join('') + '</tr>';
+    thead.innerHTML = '<tr>' + columns.map(c => {
+      const icon = serverSort && c === curSortCol ? (curSortDir === 'desc' ? '↓' : '↑') : '⇅';
+      return `<th data-col="${c}" style="cursor:pointer">${captions[c] || _formatHeader(c)} <span class="sort-icon">${icon}</span></th>`;
+    }).join('') + '</tr>';
     table.appendChild(thead);
 
     // Body
@@ -96,10 +102,17 @@ const TableWidget = (() => {
     _populateBody(tbody, data, columns);
     table.appendChild(tbody);
 
-    // Client-side sort (within the current page)
+    // Sorting. Server-side across ALL pages when paged; otherwise sort the rows in memory.
     let _sortCol = null, _sortAsc = true;
     $(thead).on('click', 'th', function() {
       const col = this.dataset.col;
+
+      if (serverSort) {
+        const dir = (col === curSortCol && curSortDir === 'asc') ? 'desc' : 'asc';
+        meta.onSort(col, dir);   // re-fetches page 1 sorted and re-renders the widget
+        return;
+      }
+
       if (_sortCol === col) _sortAsc = !_sortAsc;
       else { _sortCol = col; _sortAsc = true; }
 

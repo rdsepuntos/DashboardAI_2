@@ -195,7 +195,9 @@ namespace DashboardAI.Infrastructure.Services
             string dataSourceName,
             IDictionary<string, object> parameters,
             int page,
-            int pageSize)
+            int pageSize,
+            string sortColumn = null,
+            bool sortDescending = false)
         {
             var definition = _registry.GetByName(dataSourceName)
                 ?? throw new InvalidOperationException($"Data source '{dataSourceName}' not found in registry.");
@@ -229,9 +231,20 @@ namespace DashboardAI.Infrastructure.Services
                 {
                     var (whereSql, whereParams) = BuildWhereClause(definition, parameters);
 
+                    // Resolve the ORDER BY safely: only a real column name is allowed, so the
+                    // client-supplied sortColumn can never be used for SQL injection.
+                    var orderBy = "(SELECT NULL)";
+                    if (!string.IsNullOrWhiteSpace(sortColumn) && definition.Columns != null)
+                    {
+                        var match = definition.Columns.FirstOrDefault(c =>
+                            string.Equals(c?.Name, sortColumn, StringComparison.OrdinalIgnoreCase));
+                        if (match != null)
+                            orderBy = $"[{match.Name}] {(sortDescending ? "DESC" : "ASC")}";
+                    }
+
                     var countSql = $"SELECT COUNT(*) FROM {dataSourceName}{whereSql}";
                     var dataSql  = $@"SELECT * FROM {dataSourceName}{whereSql}
-ORDER BY (SELECT NULL)
+ORDER BY {orderBy}
 OFFSET @_Offset ROWS FETCH NEXT @_PageSize ROWS ONLY";
 
                     // Clone params for paged query and add paging params

@@ -26,12 +26,15 @@ namespace DashboardAI.Domain.Interfaces
 
         /// <summary>
         /// Same as QueryAsync but returns one page of results plus the total row count.
+        /// Optional sortColumn applies a server-side ORDER BY (validated against the view's columns).
         /// </summary>
         Task<PagedResult<IDictionary<string, object>>> QueryPagedAsync(
             string dataSourceName,
             IDictionary<string, object> parameters,
             int page,
-            int pageSize);
+            int pageSize,
+            string sortColumn = null,
+            bool sortDescending = false);
 
         /// <summary>
         /// Returns the distinct non-null values for a single column in a view,

@@ -51,6 +51,8 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
         public int StoreId { get; set; }
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 50;
+        public string SortColumn { get; set; }
+        public bool SortDescending { get; set; }
     }
 
     public class QueryWidgetDataHandler
@@ -127,7 +129,9 @@ namespace DashboardAI.Application.UseCases.QueryWidgetData
             return await _dataService.QueryPagedAsync(
                 request.DataSource, safeParams,
                 request.Page > 0 ? request.Page : 1,
-                request.PageSize > 0 ? request.PageSize : 50);
+                request.PageSize > 0 ? request.PageSize : 50,
+                request.SortColumn,
+                request.SortDescending);
         }
 
         public async Task<IEnumerable<string>> GetDistinctValuesAsync(

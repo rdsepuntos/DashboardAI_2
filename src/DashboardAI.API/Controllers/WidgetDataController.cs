@@ -148,7 +148,9 @@ namespace DashboardAI.API.Controllers
                     Parameters = request.Parameters ?? new Dictionary<string, object>(),
                     StoreId    = request.StoreId,
                     Page       = request.Page > 0   ? request.Page     : 1,
-                    PageSize   = request.PageSize > 0 ? request.PageSize : 50
+                    PageSize   = request.PageSize > 0 ? request.PageSize : 50,
+                    SortColumn = request.SortColumn,
+                    SortDescending = string.Equals(request.SortDirection, "desc", StringComparison.OrdinalIgnoreCase)
                 });
 
                 // Wrap with explicit lowercase property names so DefaultContractResolver
@@ -235,5 +237,7 @@ namespace DashboardAI.API.Controllers
     {
         public int Page     { get; set; } = 1;
         public int PageSize { get; set; } = 50;
+        public string SortColumn { get; set; }
+        public string SortDirection { get; set; }   // "asc" | "desc"
     }
 }
