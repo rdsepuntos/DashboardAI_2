@@ -48,6 +48,7 @@
 	<img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" />
     </a>
     <div class="topbar-actions">
+      <select id="dashboardPicker" class="dashboard-picker" title="Switch dashboard" style="display:none"></select>
       <button onclick="generatePDF()" class="btn-icon" title="Generate Report" style="margin-right:4px"><i class="ph ph-file-text"></i></button>
       <button onclick="generatePDF(true)" class="btn-icon" title="Generate AI Report (with insights)" style="margin-right:4px"><i class="ph ph-sparkle"></i></button>
       <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
@@ -150,6 +151,41 @@
 
     DashboardEngine.init(dashboardId, SESSION);
     ChatManager.init(SESSION);
+
+    // ── Dashboard picker ────────────────────────────────────────────────────
+    // Shown when the URL contains ?picker=1. Lists the current user's dashboards
+    // and navigates to the selected one, preserving the existing query string.
+    (function initDashboardPicker() {
+      const flag = (_qs.get('picker') || '').toLowerCase();
+      if (flag !== '1' && flag !== 'true' && flag !== 'yes') return;
+
+      const sel = document.getElementById('dashboardPicker');
+      if (!sel) return;
+
+      const apiBase = location.protocol === 'file:'
+        ? 'http://localhost:56231'
+        : 'https://beta.whsmonitor.com.au/dashboardv2';
+
+      fetch(`${apiBase}/api/dashboard/list?userId=${encodeURIComponent(SESSION.userId)}&storeId=${SESSION.storeId}`)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to load dashboards')))
+        .then(list => {
+          if (!Array.isArray(list) || list.length === 0) return;
+          sel.innerHTML = list.map(d =>
+            `<option value="${d.id}">${(d.title || 'Untitled dashboard')
+              .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</option>`
+          ).join('');
+          sel.value = dashboardId;
+          sel.style.display = '';
+        })
+        .catch(err => console.warn('[Dashboard picker]', err.message));
+
+      sel.addEventListener('change', () => {
+        const id = sel.value;
+        if (!id || id === dashboardId) return;
+        // Keep the current query string (userId, storeId, sessionId, module, picker).
+        window.location.href = `/dashboardv2/dashboard/${id}${window.location.search}`;
+      });
+    })();
 
     // ── Hazard MCP intercept ────────────────────────────────────────────────
     // Capture-phase listener fires before ChatManager's regular listener.

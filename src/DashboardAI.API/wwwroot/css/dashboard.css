@@ -228,6 +228,27 @@ body {
   gap: 8px;
 }
 
+.dashboard-picker {
+  max-width: 240px;
+  padding: 7px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  align-self: center;
+  transition: border-color .2s;
+}
+
+.dashboard-picker:hover,
+.dashboard-picker:focus {
+  border-color: var(--color-primary);
+}
+
 /* Filter sidebar */
 .filter-sidebar {
   width: 260px;

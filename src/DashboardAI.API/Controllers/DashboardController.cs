@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using DashboardAI.Application.UseCases.GenerateDashboard;
 using DashboardAI.Application.UseCases.GetDashboard;
@@ -47,6 +48,55 @@ namespace DashboardAI.API.Controllers
                     redirectUrl = $"/dashboard/{result.DashboardId}?userId={Uri.EscapeDataString(request.UserId ?? string.Empty)}&storeId={request.StoreId}&sessionId={Uri.EscapeDataString(request.SessionId ?? string.Empty)}&module={Uri.EscapeDataString(request.Module ?? string.Empty)}",
                     dashboard   = result.Dashboard
                 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // GET /api/dashboard/list?userId=...&storeId=...
+        // Returns a lightweight list of the user's dashboards for the dashboard picker.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpGet("list")]
+        public async Task<IActionResult> List([FromQuery] string userId, [FromQuery] int storeId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                return BadRequest(new { error = "userId is required." });
+
+            try
+            {
+                var dashboards = await _repository.GetByUserAsync(userId, storeId);
+                var result = dashboards
+                    .Select(d => new
+                    {
+                        id        = d.Id,
+                        title     = d.Title,
+                        updatedAt = d.UpdatedAt
+                    });
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // GET /api/dashboard/by-user?userId=...&storeId=...
+        // Returns the FULL dashboards (widgets + filters) for a user/store — no id.
+        // ──────────────────────────────────────────────────────────────────────
+        [HttpGet("by-user")]
+        public async Task<IActionResult> ByUser([FromQuery] string userId, [FromQuery] int storeId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                return BadRequest(new { error = "userId is required." });
+
+            try
+            {
+                var dashboards = await _getHandler.HandleAllAsync(userId, storeId);
+                return Ok(dashboards);
             }
             catch (Exception ex)
             {

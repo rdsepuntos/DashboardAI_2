@@ -39,5 +39,22 @@ namespace DashboardAI.Application.UseCases.GetDashboard
             DashboardFilterAugmenter.EnsureCategoricalFilters(dto, _registry);
             return dto;
         }
+
+        // Returns every dashboard the user owns for a store — no dashboard id required.
+        public async Task<List<DashboardDto>> HandleAllAsync(string userId, int storeId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                throw new ArgumentException("UserId is required.", nameof(userId));
+
+            var dashboards = await _repository.GetByUserAsync(userId, storeId);
+            var result = new List<DashboardDto>();
+            foreach (var dashboard in dashboards ?? Array.Empty<Domain.Entities.Dashboard>())
+            {
+                var dto = DashboardMapper.ToDto(dashboard);
+                DashboardFilterAugmenter.EnsureCategoricalFilters(dto, _registry);
+                result.Add(dto);
+            }
+            return result;
+        }
     }
 }
