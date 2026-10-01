@@ -727,14 +727,26 @@ namespace DashboardAI.Infrastructure.Services
                         break;
 
                     case "table":
+                        // Score is only meaningful for audit/inspection/induction/training modules —
+                        // exclude it by default for hazard reports and every other module.
+                        var allowsScore = ScoreModuleSource(w.DataSource);
                         var tcols = cols
                             .Where(c => !_idColumns.Contains(c.Name))
+                            .Where(c => allowsScore || !string.Equals(c.Name, "Score", StringComparison.OrdinalIgnoreCase))
                             .Take(8)
                             .Select(c => c.Name);
                         w.Config["columns"] = string.Join(",", tcols);
                         break;
                 }
             }
+        }
+
+        // Score is only relevant to audit, inspection, induction, and training data sources.
+        private static bool ScoreModuleSource(string dataSource)
+        {
+            if (string.IsNullOrEmpty(dataSource)) return false;
+            return new[] { "Audit", "Inspection", "Induction", "Training" }
+                .Any(k => dataSource.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static string InferXKey(string title, List<ColumnMetaDto> cols)

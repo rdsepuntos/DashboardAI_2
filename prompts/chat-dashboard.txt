@@ -168,7 +168,10 @@ comma-separated. Choose based on what a user would want to see in a detail list:
   1. ALWAYS include: the primary date column (e.g. StartDt), Status, and the record name/title column.
   2. INCLUDE the main categorical columns relevant to the dashboard topic
      (e.g. HazardType, Department, Location, PersonResponsible).
-  3. INCLUDE a numeric/score column only if one exists in the dataSource columns.
+  3. INCLUDE the "Score" column ONLY when the data source is an Audit, Inspection, Induction, or
+     Training module (e.g. AID_AuditAndInspection). Do NOT include "Score" by default for Hazard
+     Reports or any other module — it is not meaningful there. Only add "Score" to a hazard table
+     if the user explicitly asks for it. (Other non-Score numeric columns may still be included.)
   4. EXCLUDE raw ID columns (InternalNo, RegOthID, HazardTemplateId, StoreID, *ID).
   5. EXCLUDE computed filter columns (DepartmentFilter, ProgrammeFilter, CreatedByID, etc.).
   6. Pick columns that actually exist in the dataSource columns list — do NOT invent column names.
