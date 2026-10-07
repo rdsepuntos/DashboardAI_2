@@ -18,48 +18,103 @@
   <!-- Phosphor Icons -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
-  <!-- Chat sidebar collapse overrides (remote engine uses .hidden; we restyle it as a 36px strip) -->
+  <!-- Layout overrides: no header, filters on the right, chat floating at the bottom -->
   <style>
-    .chat-sidebar.hidden {
-      display: flex !important; /* override .hidden { display: none !important } from remote CSS */
-      width: 36px !important;
-      min-width: 36px !important;
-      border-left: 1px solid var(--color-border) !important;
-      overflow: hidden;
+    /* Hide the old top bar / header */
+    .topbar { display: none !important; }
+
+    /* Title bar (pin + editable title + share/print) */
+    .dash-titlebar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 16px 24px; background: #fff;
+      flex-shrink: 0;
     }
-    .chat-sidebar.hidden .chat-header,
-    .chat-sidebar.hidden .chat-messages,
-    .chat-sidebar.hidden .chat-input-area {
-      opacity: 0;
-      pointer-events: none;
+    .dash-titlebar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .dash-pin { color: var(--color-muted); font-size: 18px; display: inline-flex; }
+    .dash-title-text {
+      font-size: 22px; font-weight: 800; color: var(--color-text); line-height: 1.2;
+      outline: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .chat-sidebar.hidden .chat-expand-btn {
-      display: flex !important;
+    .dash-title-text[contenteditable="true"] { border-bottom: 2px solid var(--color-primary); cursor: text; }
+    .dash-titlebar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .dash-titlebar .dash-action {
+      border: 1px solid var(--color-border); border-radius: 8px;
+      width: 40px; height: 40px; display: inline-flex; align-items: center;
+      justify-content: center; font-size: 18px; color: var(--color-muted);
+    }
+    .dash-titlebar .dash-action:hover { background: var(--color-bg); color: var(--color-text); }
+    .dash-edit-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; }
+
+    /* Filters on the RIGHT */
+    .main-layout { border-top: none !important; }
+    .canvas-area { order: 1; padding-bottom: 110px; }
+    .filter-sidebar { order: 2; border-right: none !important; border-left: 1px solid var(--color-border); }
+
+    /* Floating chat at the bottom, centred over the canvas */
+    .chat-sidebar {
+      order: 3; position: fixed; z-index: 600; flex-direction: column;
+      left: calc((100vw - 260px) / 2); transform: translateX(-50%);
+      bottom: 22px; width: min(620px, calc(100vw - 340px));
+      height: auto; background: transparent; border: none !important; overflow: visible;
+    }
+    .chat-sidebar.hidden { display: flex !important; width: min(620px, calc(100vw - 340px)) !important; }
+
+    /* Chat history is hidden in the floating bar */
+    #chatMessages { display: none !important; }
+
+    /* Pill-shaped input bar */
+    .chat-input-area {
+      flex-direction: row !important; align-items: center; gap: 10px;
+      padding: 8px 10px 8px 18px !important; border-top: none !important;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,.14);
+    }
+    .chat-pill-label {
+      font-size: 13px; font-weight: 600; color: var(--color-text); white-space: nowrap;
+      padding-right: 12px; border-right: 1px solid var(--color-border); flex-shrink: 0;
+    }
+    .chat-input-area textarea {
+      flex: 1; border: none !important; background: transparent !important; resize: none;
+      padding: 0 !important; height: 22px; line-height: 22px; font-size: 13px;
+      overflow: hidden; white-space: nowrap; word-wrap: normal;
+    }
+    .chat-input-area textarea:focus { border: none !important; }
+    .chat-mic-btn {
+      background: none; border: none; cursor: pointer; color: var(--color-muted);
+      font-size: 18px; padding: 4px; display: inline-flex; flex-shrink: 0;
+    }
+    .chat-mic-btn:hover { color: var(--color-text); }
+    #chatSendBtn {
+      width: 38px !important; height: 38px !important; min-width: 38px; border-radius: 50% !important;
+      padding: 0 !important; flex-shrink: 0; display: inline-flex; align-items: center;
+      justify-content: center; font-size: 18px; align-self: center !important;
+    }
+
+    @media (max-width: 860px) {
+      .chat-sidebar { left: 50%; width: calc(100vw - 32px); }
     }
   </style>
 </head>
 <body class="dashboard-page">
 
-  <!-- ── Top Bar ─────────────────────────────────────────────────────────── -->
-  <header class="topbar">
-    <a href="/" class="topbar-logo">
-	
-	 <span class="d-none topbar-title" style="display: none !important" id="dashboardTitle">Loading…</span>
-	<img src="https://whsmonitor.com.au/wp-content/themes/whs-monitor/assets/images/WHSLogo_Blue.png" />
-    </a>
-    <div class="topbar-actions">
-      <select id="dashboardPicker" class="dashboard-picker" title="Switch dashboard" style="display:none"></select>
-      <button onclick="generatePDF()" class="btn-icon" title="Generate Report" style="margin-right:4px"><i class="ph ph-file-text"></i></button>
-      <button onclick="generatePDF(true)" class="btn-icon" title="Generate AI Report (with insights)" style="margin-right:4px"><i class="ph ph-sparkle"></i></button>
-      <button id="toggleChatBtn" class="btn-icon" title="Toggle chat"><i class="ph ph-chat-circle-dots"></i></button>
+  <!-- ── Title Bar ───────────────────────────────────────────────────────── -->
+  <div class="dash-titlebar">
+    <div class="dash-titlebar-left">
+      <span class="dash-pin" title="Pinned"><i class="ph ph-push-pin"></i></span>
+      <span class="dash-title-text" id="dashboardTitle">Loading…</span>
+      <button type="button" class="dash-edit-btn btn-icon" id="editTitleBtn" title="Rename dashboard"><i class="ph ph-pencil-simple"></i></button>
     </div>
-  </header>
+    <div class="dash-titlebar-actions">
+      <button type="button" onclick="generatePDF(true)" class="btn-icon dash-action" title="Share report"><i class="ph ph-share-network"></i></button>
+      <button type="button" onclick="generatePDF()" class="btn-icon dash-action" title="Print / export"><i class="ph ph-printer"></i></button>
+    </div>
+  </div>
 
   <!-- ── Main Layout ────────────────────────────────────────────────────── -->
   <div class="main-layout">
 
-    <!-- Filter Sidebar -->
-    <aside class="filter-sidebar collapsed" id="filterSidebar">
+    <!-- Filter Sidebar (docked right via CSS order) -->
+    <aside class="filter-sidebar" id="filterSidebar">
       <div class="filter-sidebar-header">
         <span class="filter-sidebar-title">Filters</span>
         <div class="filter-sidebar-actions">
@@ -76,27 +131,15 @@
       <div class="grid-stack" id="gridContainer"></div>
     </main>
 
-    <!-- Chat sidebar -->
+    <!-- Floating chat bar -->
     <aside class="chat-sidebar" id="chatSidebar">
-      <button class="chat-expand-btn" id="chatExpandBtn" title="Expand chat"><i class="ph ph-caret-left"></i></button>
-      <div class="chat-header">
-        <span>AI Assistant</span>
-        <button class="chat-toggle-btn btn-icon" id="closeChatBtn" title="Collapse"><i class="ph ph-caret-right"></i></button>
-      </div>
-      <div class="chat-messages" id="chatMessages">
-        <div class="chat-bubble assistant">
-          Hi! I can modify this dashboard for you. Try:
-          <ul>
-            <li>"Add a hazard report for sales by location"</li>
-            <li>"Show hazard report for last quarter"</li>
-            <li>"Remove the table widget"</li>
-            <li>"Add a date range filter"</li>
-          </ul>
-        </div>
-      </div>
+      <!-- Hidden message sink kept for the engine / hazard handlers -->
+      <div class="chat-messages" id="chatMessages"></div>
       <form class="chat-input-area" id="chatForm">
-        <textarea id="chatInput" placeholder="Ask me to change the dashboard…" rows="2"></textarea>
-        <button type="submit" id="chatSendBtn">Send</button>
+        <span class="chat-pill-label">Edit your dashboard data</span>
+        <textarea id="chatInput" placeholder="Eg. Show Oct data only or Add table for attendance" rows="1"></textarea>
+        <button type="button" class="chat-mic-btn" id="chatMicBtn" title="Voice input"><i class="ph ph-microphone"></i></button>
+        <button type="submit" id="chatSendBtn" title="Send"><i class="ph ph-arrow-up"></i></button>
       </form>
     </aside>
   </div>
@@ -152,39 +195,26 @@
     DashboardEngine.init(dashboardId, SESSION);
     ChatManager.init(SESSION);
 
-    // ── Dashboard picker ────────────────────────────────────────────────────
-    // Shown when the URL contains ?picker=1. Lists the current user's dashboards
-    // and navigates to the selected one, preserving the existing query string.
-    (function initDashboardPicker() {
-      const flag = (_qs.get('picker') || '').toLowerCase();
-      if (flag !== '1' && flag !== 'true' && flag !== 'yes') return;
-
-      const sel = document.getElementById('dashboardPicker');
-      if (!sel) return;
-
-      const apiBase = location.protocol === 'file:'
-        ? 'http://localhost:56231'
-        : 'https://beta.whsmonitor.com.au/dashboardv2';
-
-      fetch(`${apiBase}/api/dashboard/list?userId=${encodeURIComponent(SESSION.userId)}&storeId=${SESSION.storeId}`)
-        .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to load dashboards')))
-        .then(list => {
-          if (!Array.isArray(list) || list.length === 0) return;
-          sel.innerHTML = list.map(d =>
-            `<option value="${d.id}">${(d.title || 'Untitled dashboard')
-              .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</option>`
-          ).join('');
-          sel.value = dashboardId;
-          sel.style.display = '';
-        })
-        .catch(err => console.warn('[Dashboard picker]', err.message));
-
-      sel.addEventListener('change', () => {
-        const id = sel.value;
-        if (!id || id === dashboardId) return;
-        // Keep the current query string (userId, storeId, sessionId, module, picker).
-        window.location.href = `/dashboardv2/dashboard/${id}${window.location.search}`;
-      });
+    // ── Inline title rename ────────────────────────────────────────
+    (function initTitleRename() {
+      const titleEl = document.getElementById('dashboardTitle');
+      const editBtn = document.getElementById('editTitleBtn');
+      if (editBtn && titleEl) {
+        const commit = () => {
+          titleEl.removeAttribute('contenteditable');
+          const t = (titleEl.textContent || '').trim() || 'Dashboard';
+          titleEl.textContent = t;
+          document.title = t;
+        };
+        editBtn.addEventListener('click', () => {
+          titleEl.setAttribute('contenteditable', 'true');
+          titleEl.focus();
+          const r = document.createRange(); r.selectNodeContents(titleEl);
+          const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        });
+        titleEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); } });
+        titleEl.addEventListener('blur', commit);
+      }
     })();
 
     // ── Hazard MCP intercept ────────────────────────────────────────────────
@@ -680,12 +710,6 @@ ${tablePagesHtml}
     });
     document.getElementById('filterExpandBtn').addEventListener('click', () => {
       document.getElementById('filterSidebar').classList.remove('collapsed');
-    });
-
-    // Chat expand button — remote engine owns closeChatBtn & toggleChatBtn (they add/toggle .hidden)
-    // We only need to handle the expand button to remove .hidden
-    document.getElementById('chatExpandBtn').addEventListener('click', () => {
-      document.getElementById('chatSidebar').classList.remove('hidden');
     });
 
     // Enter sends the chat; Shift+Enter inserts a newline
