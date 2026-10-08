@@ -50,11 +50,21 @@
     .canvas-area { order: 1; padding-bottom: 110px; }
     .filter-sidebar { order: 2; border-right: none !important; border-left: 1px solid var(--color-border); }
 
+    /* Wrapper spans the full width above the floating chat, fading the
+       --color-bg background in from transparent at the top so widgets
+       scrolling underneath blend smoothly into the bar. */
+    .chat-float-wrapper {
+      position: fixed; left: 0; right: 260px; bottom: 0; z-index: 600;
+      display: flex; justify-content: center; padding: 30px 24px 22px;
+      background: linear-gradient(to top, var(--color-bg) 35%, rgba(245, 246, 250, 0) 100%);
+      pointer-events: none;
+    }
+    .chat-float-wrapper .chat-sidebar { pointer-events: auto; }
+
     /* Floating chat at the bottom, centred over the canvas */
     .chat-sidebar {
-      order: 3; position: fixed; z-index: 600; flex-direction: column;
-      left: calc((100vw - 260px) / 2); transform: translateX(-50%);
-      bottom: 22px; width: min(620px, calc(100vw - 340px));
+      position: static; z-index: 600; flex-direction: column;
+      width: min(620px, calc(100vw - 340px));
       height: auto; background: transparent; border: none !important; overflow: visible;
     }
     .chat-sidebar.hidden { display: flex !important; width: min(620px, calc(100vw - 340px)) !important; }
@@ -80,7 +90,7 @@
     }
     .chat-input-area textarea:focus { border: none !important; }
     .chat-mic-btn {
-      background: none; border: none; cursor: pointer; color: var(--color-muted);
+      background: none !important; border: none !important; cursor: pointer; color: var(--color-muted);
       font-size: 18px; padding: 4px; display: inline-flex; flex-shrink: 0;
     }
     .chat-mic-btn:hover { color: var(--color-text); }
@@ -91,7 +101,8 @@
     }
 
     @media (max-width: 860px) {
-      .chat-sidebar { left: 50%; width: calc(100vw - 32px); }
+      .chat-float-wrapper { right: 0; }
+      .chat-sidebar { width: 100%; }
     }
   </style>
 </head>
@@ -130,8 +141,10 @@
     <main class="canvas-area" id="canvasArea">
       <div class="grid-stack" id="gridContainer"></div>
     </main>
+  </div>
 
-    <!-- Floating chat bar -->
+  <!-- Floating chat bar (outside .main-layout so it always overlays as a fixed bar, never as a flex/grid column) -->
+  <div class="chat-float-wrapper">
     <aside class="chat-sidebar" id="chatSidebar">
       <!-- Hidden message sink kept for the engine / hazard handlers -->
       <div class="chat-messages" id="chatMessages"></div>
