@@ -39,6 +39,9 @@ const DashboardEngine = (() => {
     }, '#gridContainer');
 
     _grid.on('change', _onLayoutChange);
+    // Recompute the canvas scroll height any time widgets are added, removed,
+    // moved or resized so .canvas-area's overflow-y:auto has something to scroll.
+    _grid.on('added removed change', _updateCanvasHeight);
 
     try {
       const res  = await fetch(`${API_BASE}/api/dashboard/${dashboardId}?userId=${session.userId}&storeId=${session.storeId}`);
@@ -70,6 +73,7 @@ const DashboardEngine = (() => {
     // Wait for async dropdown options so restored selections land in _filterState before widgets query.
     await Promise.all(pendingFilters || []);
     _renderWidgets(dashboardDto.widgets || []);
+    _updateCanvasHeight();
   }
 
   // Loads the session's saved filter values and folds them into each filter's
@@ -505,6 +509,22 @@ const DashboardEngine = (() => {
       });
       _loadWidgetData(w);
     });
+  }
+
+  // GridStack items are positioned absolutely, so the grid container's own
+  // height doesn't automatically grow to fit them. Compute it from the
+  // furthest-extending widget's row + height so .canvas-area (overflow-y:auto)
+  // has real content height to scroll against instead of clipping/collapsing.
+  function _updateCanvasHeight() {
+    const gridEl = document.getElementById('gridContainer');
+    if (!gridEl || !_grid) return;
+    const opts       = _grid.opts || {};
+    const cellHeight = parseInt(opts.cellHeight, 10) || 80;
+    const margin     = parseInt(opts.margin, 10) || 0;
+    const nodes      = (_grid.save(false) || []);
+    const maxRow     = nodes.reduce((max, n) => Math.max(max, (n.y || 0) + (n.h || 1)), 0);
+    const height     = maxRow > 0 ? (maxRow * (cellHeight + margin) + margin) : 0;
+    gridEl.style.minHeight = height + 'px';
   }
 
   function _createWidgetElement(widget) {
